@@ -11,8 +11,8 @@ export function LessonLengthProp(): ReactNode {
       <FieldList>
         <Field>
           <FormattedMessage
-            id="t_Add_words_to_lessons:"
-            defaultMessage="Add words to lessons:"
+            id="lesson.zh.length.label"
+            defaultMessage="Words per lesson:"
           />
         </Field>
         <Field>
@@ -31,8 +31,8 @@ export function LessonLengthProp(): ReactNode {
       <Explainer>
         <Description>
           <FormattedMessage
-            id="settings.lessonLength.description"
-            defaultMessage="Adjust the number of words in the lesson text. Making lessons longer can improve your learning."
+            id="lesson.zh.length.description"
+            defaultMessage="Number of words in each lesson. Increase this to practice more distinct words per round."
           />
         </Description>
       </Explainer>

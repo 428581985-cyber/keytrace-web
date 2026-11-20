@@ -1,3 +1,4 @@
+import { keyboardProps } from "@keybr/keyboard";
 import { type LoadingEventListener } from "@keybr/lang";
 import { type Lesson, MutableDailyGoal } from "@keybr/lesson";
 import {
@@ -88,7 +89,14 @@ export class Progress {
 
   append(result: Result, listener: LessonEventListener = () => {}) {
     this.#results.push(result);
-    this.#keyStatsMap.append(result);
+    // 键位统计只收当前布局的结果。
+    // 双拼里 C 键打的是韵母 ao，和英文打字母 c 是两套完全不同的肌肉记忆，
+    // 混在一起会让「哪个键弱」的判断失真——英文练得多，双拼的弱键就被稀释掉。
+    // 其余统计（总时长、连续天数、每日目标）仍然收全部，它们与布局无关。
+    const layout = this.#settings.get(keyboardProps.layout);
+    if (result.layout.xid === layout.xid) {
+      this.#keyStatsMap.append(result);
+    }
     this.#summaryStats.append(result);
     this.#streakList.append(result);
     this.#dailyGoal.append(result);

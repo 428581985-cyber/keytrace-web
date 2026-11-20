@@ -12,12 +12,19 @@ import {
 import { type ReactNode } from "react";
 import { FormattedMessage } from "react-intl";
 
-export function TextManglingProp(): ReactNode {
+export function TextManglingProp({
+  showCapitals = true,
+}: {
+  /** 中文双拼不需要大写字母，隐藏这一项 */
+  readonly showCapitals?: boolean;
+} = {}): ReactNode {
   const { formatPercents } = useIntlNumbers();
   const { settings, updateSettings } = useSettings();
   return (
     <>
-      <FieldList>
+      {showCapitals && (
+        <>
+          <FieldList>
         <Field>
           <FormattedMessage
             id="t_Add_capital_letters:"
@@ -48,6 +55,8 @@ export function TextManglingProp(): ReactNode {
           />
         </Description>
       </Explainer>
+        </>
+      )}
       <FieldList>
         <Field>
           <FormattedMessage

@@ -32,7 +32,7 @@ export const KeyboardPresenter = memo(function KeyboardPresenter({
   const colors = settings.get(keyboardProps.colors);
   const pointers = settings.get(keyboardProps.pointers);
   return (
-    <VirtualKeyboard keyboard={keyboard} height="16rem">
+    <VirtualKeyboard keyboard={keyboard} height="23rem">
       <KeyLayer
         depressedKeys={depressedKeys}
         toggledKeys={toggledKeys}

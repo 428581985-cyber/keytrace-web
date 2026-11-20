@@ -32,9 +32,14 @@ export class Dictionary implements Iterable<string> {
     }
   }
 
-  find({ codePoints, focusedCodePoint }: Filter): WordList {
+  find(
+    { codePoints, focusedCodePoint }: Filter,
+    ignoreFocus = false,
+  ): WordList {
     let words = this.#words;
-    if (focusedCodePoint != null) {
+    // 双拼模式下不用「必须包含聚焦键」的硬筛：那样每个词都带同一个键，
+    // 该键的权重就成了常数，弱键加权完全失效。改用加权实现软偏向。
+    if (!ignoreFocus && focusedCodePoint != null) {
       words = this.#dict.get(focusedCodePoint) ?? [];
     }
     if (codePoints != null) {

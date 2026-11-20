@@ -108,3 +108,32 @@
     /* Empty. */
   }
 }
+
+/* 中文双拼键帽：直接标这个键打的音（sh / ao …），不再显示字母 */
+/* 一个键只承担一个音（e、a、ie、sh、ao）：竖排只有一行，用最大号 */
+.zhSymbol {
+  fill: var(--KeyboardKey-symbol__color, currentColor);
+  opacity: 0.9;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* 两个音（ue/üe、un/ün、sh/u、iang/uang）：拆成两行竖排，
+ * 每行只放一个音，最宽的 iang/uang 约 2.2em，10px 时约 22 单位，键帽内宽 38 单位 */
+.zhSymbolSmall {
+  fill: var(--KeyboardKey-symbol__color, currentColor);
+  opacity: 0.85;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* 三个音（只有 V = zh/ui/ü）：三行竖排，40 单位高的键帽里放得下 8px。
+ * 竖排不看宽度，所以等宽主题也不会溢出——这是拆行的主要好处 */
+.zhSymbolTiny {
+  fill: var(--KeyboardKey-symbol__color, currentColor);
+  opacity: 0.85;
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0;
+}

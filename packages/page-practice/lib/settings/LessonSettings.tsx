@@ -1,106 +1,32 @@
-import {
-  type BooksLesson,
-  type CodeLesson,
-  type CustomTextLesson,
-  type GuidedLesson,
-  type Lesson,
-  lessonProps,
-  LessonType,
-  type NumbersLesson,
-  type WordListLesson,
-} from "@keybr/lesson";
+import { type GuidedLesson, lessonProps, LessonType } from "@keybr/lesson";
 import { LessonLoader } from "@keybr/lesson-loader";
-import { type Settings, useSettings } from "@keybr/settings";
-import { Tab, TabList } from "@keybr/widget";
-import { type ReactNode } from "react";
-import { useIntl } from "react-intl";
-import { BooksLessonSettings } from "./lesson/BooksLessonSettings.tsx";
-import { CodeLessonSettings } from "./lesson/CodeLessonSettings.tsx";
-import { CustomTextLessonSettings } from "./lesson/CustomTextLessonSettings.tsx";
+import { useSettings } from "@keybr/settings";
+import { type ReactNode, useEffect } from "react";
 import { DailyGoalSettings } from "./lesson/DailyGoalSettings.tsx";
 import { GuidedLessonSettings } from "./lesson/GuidedLessonSettings.tsx";
 import { LessonPreview } from "./lesson/LessonPreview.tsx";
-import { NumbersLessonSettings } from "./lesson/NumbersLessonSettings.tsx";
-import { WordListLessonSettings } from "./lesson/WordListLessonSettings.tsx";
 
+// 这个 fork 只跑中文双拼一种练习。上游的「常用词 / 书籍 / 自定义文本 / 源码 / 数字」
+// 五种类型全是英文内容，双拼练不了，Tab 一并收掉，免得点了之后看到一堆英文。
+// 同时把 lesson type 强制钉在 GUIDED，防止老设置里存着别的类型导致预览取错词表。
 export function LessonSettings(): ReactNode {
-  const { formatMessage } = useIntl();
   const { settings, updateSettings } = useSettings();
-  return (
-    <>
-      <TabList
-        selectedIndex={LessonType.ALL.indexOf(settings.get(lessonProps.type))}
-        onSelect={(index) => {
-          updateSettings(
-            settings.set(lessonProps.type, LessonType.ALL.at(index)),
-          );
-        }}
-      >
-        <Tab
-          label={formatMessage({
-            id: "t_Guided_lessons",
-            defaultMessage: "Guided lessons",
-          })}
-        />
-        <Tab
-          label={formatMessage({
-            id: "t_Common_words",
-            defaultMessage: "Common words",
-          })}
-        />
-        <Tab
-          label={formatMessage({
-            id: "t_Books",
-            defaultMessage: "Books",
-          })}
-        />
-        <Tab
-          label={formatMessage({
-            id: "t_Custom_text",
-            defaultMessage: "Custom text",
-          })}
-        />
-        <Tab
-          label={formatMessage({
-            id: "t_Source_code",
-            defaultMessage: "Source code",
-          })}
-        />
-        <Tab
-          label={formatMessage({
-            id: "t_Numbers",
-            defaultMessage: "Numbers",
-          })}
-        />
-      </TabList>
-      <LessonLoader>
-        {(lesson) => (
-          <>
-            {tabBody(settings, lesson)}
-            <LessonPreview lesson={lesson} />
-            <DailyGoalSettings />
-          </>
-        )}
-      </LessonLoader>
-    </>
-  );
-}
 
-function tabBody(settings: Settings, lesson: Lesson): ReactNode {
-  switch (settings.get(lessonProps.type)) {
-    case LessonType.GUIDED:
-      return <GuidedLessonSettings lesson={lesson as GuidedLesson} />;
-    case LessonType.WORDLIST:
-      return <WordListLessonSettings lesson={lesson as WordListLesson} />;
-    case LessonType.BOOKS:
-      return <BooksLessonSettings lesson={lesson as BooksLesson} />;
-    case LessonType.CUSTOM:
-      return <CustomTextLessonSettings lesson={lesson as CustomTextLesson} />;
-    case LessonType.CODE:
-      return <CodeLessonSettings lesson={lesson as CodeLesson} />;
-    case LessonType.NUMBERS:
-      return <NumbersLessonSettings lesson={lesson as NumbersLesson} />;
-    default:
-      throw new Error();
-  }
+  useEffect(() => {
+    if (settings.get(lessonProps.type) !== LessonType.GUIDED) {
+      updateSettings(settings.set(lessonProps.type, LessonType.GUIDED));
+    }
+  }, [settings, updateSettings]);
+
+  return (
+    <LessonLoader>
+      {(lesson) => (
+        <>
+          <GuidedLessonSettings lesson={lesson as GuidedLesson} />
+          <LessonPreview lesson={lesson} />
+          <DailyGoalSettings />
+        </>
+      )}
+    </LessonLoader>
+  );
 }

@@ -1,0 +1,31 @@
+// 小鹤双拼键帽标注：键位 id -> 该键承担的音（声母 / 韵母）。
+// 数据来自 flypy.cc 的键位图，和我们算双拼码的表是同一张，只是反了个方向。
+// 键盘上不再显示原来的字母，直接显示"这个键打什么音"：U 是 sh、C 是 ao。
+export const ZH_KEY_LABELS: Record<string, readonly string[]> = {
+  KeyQ: ["iu"],
+  KeyW: ["ei"],
+  KeyE: ["e"],
+  KeyR: ["uan", "üan"],
+  KeyT: ["ue", "üe"],
+  KeyY: ["un", "ün"],
+  KeyU: ["sh", "u"],
+  KeyI: ["ch", "i"],
+  KeyO: ["uo", "o"],
+  KeyP: ["ie"],
+  KeyA: ["a"],
+  KeyS: ["ong", "iong"],
+  KeyD: ["ai"],
+  KeyF: ["en"],
+  KeyG: ["eng"],
+  KeyH: ["ang"],
+  KeyJ: ["an"],
+  KeyK: ["ing", "uai"],
+  KeyL: ["iang", "uang"],
+  KeyZ: ["ou"],
+  KeyX: ["ia", "ua"],
+  KeyC: ["ao"],
+  KeyV: ["zh", "ui", "ü"],
+  KeyB: ["in"],
+  KeyN: ["iao"],
+  KeyM: ["ian"],
+};
