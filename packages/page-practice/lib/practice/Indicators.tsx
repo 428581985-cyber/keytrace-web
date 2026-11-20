@@ -8,7 +8,7 @@ import {
   names,
   StreakListRow,
 } from "@keybr/lesson-ui";
-import { Popup, Portal } from "@keybr/widget";
+import { Popup, Portal, type ZoomableProps } from "@keybr/widget";
 import { memo, type ReactNode, useEffect, useState } from "react";
 import * as styles from "./Indicators.module.less";
 import { KeyExtendedDetails } from "./KeyExtendedDetails.tsx";
@@ -16,9 +16,10 @@ import { type LessonState } from "./state/index.ts";
 
 export const Indicators = memo(function Indicators({
   state: { keyStatsMap, summaryStats, lessonKeys, streakList, dailyGoal },
+  moving = false,
 }: {
   readonly state: LessonState;
-}): ReactNode {
+} & ZoomableProps): ReactNode {
   type State = Readonly<
     | { type: "hidden" }
     | { type: "visible-in"; key: LessonKey; elem: Element }
@@ -28,6 +29,16 @@ export const Indicators = memo(function Indicators({
   const [state, setState] = useState<State>({ type: "hidden" });
   useEffect(() => {
     const tasks = new Tasks();
+    if (moving) {
+      if (state.type !== "hidden") {
+        tasks.delayed(0, () => {
+          setState({ type: "hidden" });
+        });
+      }
+      return () => {
+        tasks.cancelAll();
+      };
+    }
     switch (state.type) {
       case "visible-in":
         tasks.delayed(300, () => {
@@ -43,7 +54,7 @@ export const Indicators = memo(function Indicators({
     return () => {
       tasks.cancelAll();
     };
-  }, [state]);
+  }, [state, moving]);
   return (
     <div id={names.indicators} className={styles.indicators}>
       <GaugeRow summaryStats={summaryStats} names={names} />
@@ -51,7 +62,9 @@ export const Indicators = memo(function Indicators({
         lessonKeys={lessonKeys}
         names={names}
         onKeyHoverIn={(key, elem) => {
-          setState({ type: "visible-in", key, elem });
+          if (!moving) {
+            setState({ type: "visible-in", key, elem });
+          }
         }}
         onKeyHoverOut={() => {
           switch (state.type) {
@@ -69,24 +82,25 @@ export const Indicators = memo(function Indicators({
       {dailyGoal.goal > 0 && (
         <DailyGoalRow dailyGoal={dailyGoal} names={names} />
       )}
-      {(state.type === "visible" || state.type === "visible-out") && (
-        <Portal>
-          <Popup
-            anchor={state.elem}
-            onMouseEnter={() => {
-              setState({ ...state, type: "visible" });
-            }}
-            onMouseLeave={() => {
-              setState({ ...state, type: "visible-out" });
-            }}
-          >
-            <KeyExtendedDetails
-              lessonKey={state.key}
-              keyStats={keyStatsMap.get(state.key.letter)}
-            />
-          </Popup>
-        </Portal>
-      )}
+      {!moving &&
+        (state.type === "visible" || state.type === "visible-out") && (
+          <Portal>
+            <Popup
+              anchor={state.elem}
+              onMouseEnter={() => {
+                setState({ ...state, type: "visible" });
+              }}
+              onMouseLeave={() => {
+                setState({ ...state, type: "visible-out" });
+              }}
+            >
+              <KeyExtendedDetails
+                lessonKey={state.key}
+                keyStats={keyStatsMap.get(state.key.letter)}
+              />
+            </Popup>
+          </Portal>
+        )}
     </div>
   );
 });

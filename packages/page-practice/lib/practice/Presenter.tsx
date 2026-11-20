@@ -1,4 +1,4 @@
-import { type KeyId } from "@keybr/keyboard";
+import { keyboardProps, type KeyId } from "@keybr/keyboard";
 import { names } from "@keybr/lesson-ui";
 import { Screen } from "@keybr/pages-shared";
 import { enumProp, Preferences } from "@keybr/settings";
@@ -87,6 +87,10 @@ export class Presenter extends PureComponent<Props, State> {
       handleHelp,
       handleTourClose,
     } = this;
+
+    // 中文双拼：练习文本是两个字母一个词，交给 ZhLines 画成汉字
+    const zh = state.settings.get(keyboardProps.language).id === "zh-sp";
+
     switch (view) {
       case View.Normal:
         return (
@@ -108,6 +112,7 @@ export class Presenter extends PureComponent<Props, State> {
                 <TextArea
                   focusRef={this.focusRef}
                   settings={state.textDisplaySettings}
+                  zh={zh}
                   lines={lines}
                   size="X0"
                   demo={tour}
@@ -141,6 +146,7 @@ export class Presenter extends PureComponent<Props, State> {
                 <TextArea
                   focusRef={this.focusRef}
                   settings={state.textDisplaySettings}
+                  zh={zh}
                   lines={lines}
                   size="X1"
                   demo={tour}
@@ -173,6 +179,7 @@ export class Presenter extends PureComponent<Props, State> {
                 <TextArea
                   focusRef={this.focusRef}
                   settings={state.textDisplaySettings}
+                  zh={zh}
                   lines={lines}
                   size="X2"
                   demo={tour}
@@ -299,7 +306,9 @@ function NormalLayout({
 }) {
   return (
     <Screen>
-      <Indicators state={state} />
+      <Zoomer id="Indicators/Normal">
+        <Indicators state={state} />
+      </Zoomer>
       <div id={names.textInput} className={styles.textInput_normal}>
         {textInput}
       </div>
@@ -333,7 +342,9 @@ function CompactLayout({
 }) {
   return (
     <Screen>
-      <Indicators state={state} />
+      <Zoomer id="Indicators/Compact">
+        <Indicators state={state} />
+      </Zoomer>
       <div id={names.textInput} className={styles.textInput_compact}>
         {textInput}
       </div>

@@ -4,6 +4,7 @@ import { clsx } from "clsx";
 import {
   cloneElement,
   type ReactNode,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -15,18 +16,83 @@ import { useMouseWheel } from "./use-mouse-wheel.ts";
 import * as styles from "./Zoomer.module.less";
 import { type ZoomablePosition, type ZoomerProps } from "./Zoomer.types.ts";
 
+const STORAGE_KEY = "keybr.zoomer.positions";
+
 const globalMoving = { current: null as HTMLElement | null };
 
-const savedPositions = new Map<string, ZoomablePosition>();
+const savedPositions = loadSavedPositions();
+
+function loadSavedPositions(): Map<string, ZoomablePosition> {
+  const map = new Map<string, ZoomablePosition>();
+  if (typeof window === "undefined") {
+    return map;
+  }
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw == null) {
+      return map;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed != null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
+      for (const [id, value] of Object.entries(parsed)) {
+        if (isValidPosition(value)) {
+          map.set(id, { x: value.x, y: value.y, zoom: value.zoom });
+        }
+      }
+    }
+  } catch {
+    // Ignore storage errors (SSR, private mode, corrupted JSON).
+  }
+  return map;
+}
+
+function isValidPosition(value: unknown): value is ZoomablePosition {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const { x, y, zoom } = value as Record<string, unknown>;
+  return (
+    typeof x === "number" &&
+    Number.isFinite(x) &&
+    typeof y === "number" &&
+    Number.isFinite(y) &&
+    typeof zoom === "number" &&
+    Number.isFinite(zoom) &&
+    zoom > 0
+  );
+}
+
+function savePositions(positions: ReadonlyMap<string, ZoomablePosition>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(positions)),
+    );
+  } catch {
+    // Ignore storage errors (SSR, private mode, quota exceeded).
+  }
+}
 
 export function Zoomer({ children, id = null }: ZoomerProps): ReactNode {
   const rootRef = useRef<HTMLDivElement>(null);
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  const setRoot = useCallback((node: HTMLDivElement | null) => {
+    rootRef.current = node;
+    setRootEl(node);
+  }, []);
   const [hover, setHover] = useState(false);
   const [moving, setMoving] = useState(false);
   const [{ x, y, zoom }, setPosition] = useState(
     (id && savedPositions.get(id)) || { x: 0, y: 0, zoom: 1 },
   );
-  useMouseWheel(rootRef.current, (ev) => {
+  useMouseWheel(rootEl, (ev) => {
     setPosition({ x, y, zoom: zoom - Math.sign(ev.deltaY) * 0.05 });
     setHover(true);
     ev.preventDefault();
@@ -71,6 +137,7 @@ export function Zoomer({ children, id = null }: ZoomerProps): ReactNode {
   useEffect(() => {
     if (id) {
       savedPositions.set(id, { x, y, zoom });
+      savePositions(savedPositions);
     }
   }, [id, x, y, zoom]);
   useEffect(() => {
@@ -86,7 +153,7 @@ export function Zoomer({ children, id = null }: ZoomerProps): ReactNode {
   }, [hover]);
   return (
     <div
-      ref={rootRef}
+      ref={setRoot}
       className={clsx(styles.root, (hover || moving) && styles.hover)}
       style={{
         position: "relative",
