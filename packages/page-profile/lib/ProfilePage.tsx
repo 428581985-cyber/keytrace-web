@@ -1,9 +1,11 @@
+import { KeyboardOptions, Layout, useKeyboard } from "@keybr/keyboard";
 import { type NamedUser, Screen, usePageData } from "@keybr/pages-shared";
 import {
   DailyStatsMap,
   type KeyStatsMap,
   makeSummaryStats,
 } from "@keybr/result";
+import { Settings } from "@keybr/settings";
 import { ExplainerBoundary } from "@keybr/widget";
 import { AccuracyStreaksSection } from "./profile/AccuracyStreaksSection.tsx";
 import { CalendarSection } from "./profile/CalendarSection.tsx";
@@ -15,11 +17,25 @@ import { KeyFrequencyHeatmapSection } from "./profile/KeyFrequencyHeatmapSection
 import { KeyFrequencyHistogramSection } from "./profile/KeyFrequencyHistogramSection.tsx";
 import { KeySpeedChartSection } from "./profile/KeySpeedChartSection.tsx";
 import { KeySpeedHistogramSection } from "./profile/KeySpeedHistogramSection.tsx";
+import { KeyTraceSyncBar } from "./profile/KeyTraceSyncBar.tsx";
+import { MasterySection } from "./profile/MasterySection.tsx";
 import { ProgressOverviewSection } from "./profile/ProgressOverviewSection.tsx";
 import { ResultGrouper } from "./profile/ResultGrouper.tsx";
 import { ShareProfileLink } from "./profile/ShareProfileLink.tsx";
 import { SpeedChartSection } from "./profile/SpeedChartSection.tsx";
 import { AllTimeSummary, TodaySummary } from "./profile/Summary.tsx";
+
+if (typeof window !== "undefined") {
+  const layout = Layout.findLayout(window.navigator.language);
+  if (layout != null) {
+    Settings.addDefaults(
+      KeyboardOptions.default()
+        .withLanguage(layout.language)
+        .withLayout(layout)
+        .save(new Settings()),
+    );
+  }
+}
 
 export function ProfilePage() {
   return (
@@ -36,6 +52,8 @@ export function ProfilePage() {
 
 function Content({ keyStatsMap }: { keyStatsMap: KeyStatsMap }) {
   const { publicUser } = usePageData();
+  const keyboard = useKeyboard();
+  const isZh = keyboard.layout.language.id === "zh-sp";
   const { results } = keyStatsMap;
   const stats = makeSummaryStats(results);
   const dailyStatsMap = new DailyStatsMap(results);
@@ -44,15 +62,20 @@ function Content({ keyStatsMap }: { keyStatsMap: KeyStatsMap }) {
     <>
       <DataScript stats={stats} dailyStatsMap={dailyStatsMap} />
 
+      <KeyTraceSyncBar />
+
       <AllTimeSummary stats={stats} />
 
       <TodaySummary stats={dailyStatsMap.today.stats} />
 
       <AccuracyStreaksSection results={results} />
 
-      <HistogramsSection stats={stats} />
+      {!isZh && <HistogramsSection stats={stats} />}
 
       <ProgressOverviewSection keyStatsMap={keyStatsMap} />
+
+      {/* 每个键的掌握深度，独立一块，比逐键点开看速度图直观 */}
+      <MasterySection keyStatsMap={keyStatsMap} />
 
       <SpeedChartSection results={results} />
 

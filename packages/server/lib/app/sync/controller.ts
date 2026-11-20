@@ -10,6 +10,7 @@ import { type Result } from "@keybr/result";
 import { parseMessage } from "@keybr/result-io";
 import { UserDataFactory } from "@keybr/result-userdata";
 import { type AuthState, pProfileOwner } from "../auth/index.ts";
+import { readKeyTraceSyncData } from "./keytrace-events.ts";
 
 @injectable()
 @controller()
@@ -18,6 +19,14 @@ export class Controller {
     readonly highScores: HighScoresFactory,
     readonly userData: UserDataFactory,
   ) {}
+
+  @http.GET("/_/sync/keytrace")
+  async getKeyTraceData(ctx: Context<RouterState & AuthState>) {
+    const rawSince = Number(ctx.request.query.get("since") ?? 0);
+    const sinceTs = Number.isFinite(rawSince) && rawSince > 0 ? rawSince : 0;
+    ctx.response.type = "application/json";
+    ctx.response.body = await readKeyTraceSyncData({ sinceTs });
+  }
 
   @http.GET("/_/sync/data/{id:[a-zA-Z0-9]+}")
   async getPublicData(
