@@ -35,8 +35,8 @@ export function LearningRateDescription({
           <FormattedMessage
             id="learningRate.remainingLessons"
             defaultMessage={
-              "Approximately {remainingLessons} lessons remaining to " +
-              "unlock the next letter ({certainty} certainty)."
+              "Approximately {remainingLessons} sessions remaining to " +
+              "unlock this letter ({certainty} certainty)."
             }
             values={{
               remainingLessons: (
@@ -56,7 +56,7 @@ export function LearningRateDescription({
       <Name>
         <FormattedMessage
           id="learningRate.unknown"
-          defaultMessage="Need more data to compute the remaining lessons to unlock this letter."
+          defaultMessage="Need more data to compute the remaining sessions to unlock this letter."
         />
       </Name>
     </Para>

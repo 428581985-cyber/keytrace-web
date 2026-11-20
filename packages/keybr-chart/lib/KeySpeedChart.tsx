@@ -1,13 +1,14 @@
 import { useIntlNumbers } from "@keybr/intl";
 import { Target } from "@keybr/lesson";
 import { useFormatter } from "@keybr/lesson-ui";
-import { hasData, linearRegression, Range, smooth, Vector } from "@keybr/math";
+import { linearRegression, Range, smooth, Vector } from "@keybr/math";
 import { type KeySample, timeToSpeed } from "@keybr/result";
 import { useSettings } from "@keybr/settings";
 import { Canvas, type Rect, type ShapeList, Shapes } from "@keybr/widget";
 import { type ReactNode } from "react";
 import { useIntl } from "react-intl";
 import { Chart, chartArea, type SizeProps } from "./Chart.tsx";
+import { ensureNonZeroSpan, formatIndexAxisTick } from "./dates.ts";
 import { withStyles } from "./decoration.ts";
 import { paintCurve, paintScatterPlot, projection } from "./graph.ts";
 import { type ChartStyles, useChartStyles } from "./use-chart-styles.ts";
@@ -42,7 +43,7 @@ function usePaint(
   const target = new Target(settings);
   const g = withStyles(styles);
 
-  if (!hasData(samples)) {
+  if (samples.length < 2) {
     return (box: Rect): ShapeList => {
       return [
         g.paintGrid(box, "horizontal", { lines: 5 }),
@@ -54,19 +55,21 @@ function usePaint(
     };
   }
 
+  const timeStamps: number[] = [];
   const vIndex = new Vector();
   const vSpeed = new Vector();
   const sSpeed = smooth(smoothness);
   for (let index = 0; index < samples.length; index++) {
     const sample = samples[index];
+    timeStamps.push(sample.timeStamp);
     vIndex.add(index + 1);
     vSpeed.add(sSpeed(timeToSpeed(sample.timeToType)));
   }
-  const rIndex = Range.from(vIndex);
+  const rIndex = ensureNonZeroSpan(Range.from(vIndex), 1);
   const rSpeed = Range.from(vSpeed);
   rSpeed.min = target.targetSpeed;
   rSpeed.max = target.targetSpeed;
-  rSpeed.round(5);
+  ensureNonZeroSpan(rSpeed.round(5), 5);
 
   const mSpeed = linearRegression(vIndex, vSpeed);
 
@@ -87,7 +90,10 @@ function usePaint(
         },
       }),
       paintTargetSpeedLine(),
-      g.paintTicks(box, rIndex, "bottom", { lines: 5, fmt: formatInteger }),
+      g.paintTicks(box, rIndex, "bottom", {
+        lines: Math.min(5, samples.length),
+        fmt: (value) => formatIndexAxisTick(timeStamps, value, formatInteger),
+      }),
       g.paintTicks(box, rSpeed, "left", { fmt: formatSpeed }),
     ];
 

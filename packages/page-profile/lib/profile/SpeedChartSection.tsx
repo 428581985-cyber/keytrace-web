@@ -1,5 +1,4 @@
 import { Marker, SpeedChart } from "@keybr/chart";
-import { hasData } from "@keybr/math";
 import { type Result } from "@keybr/result";
 import { Explainer, Figure } from "@keybr/widget";
 import { useState } from "react";
@@ -7,7 +6,13 @@ import { FormattedMessage } from "react-intl";
 import { ChartWrapper } from "./ChartWrapper.tsx";
 import { SmoothnessRange } from "./SmoothnessRange.tsx";
 
-export function SpeedChartSection({ results }: { results: readonly Result[] }) {
+export function SpeedChartSection({
+  results,
+  showComplexity = true,
+}: {
+  results: readonly Result[];
+  showComplexity?: boolean;
+}) {
   const [smoothness, setSmoothness] = useState(0.5);
 
   return (
@@ -32,27 +37,39 @@ export function SpeedChartSection({ results }: { results: readonly Result[] }) {
         <SpeedChart
           results={results}
           smoothness={smoothness}
+          showComplexity={showComplexity}
           width="100%"
           height="25rem"
         />
       </ChartWrapper>
 
       <SmoothnessRange
-        disabled={!hasData(results)}
+        disabled={results.length < 2}
         value={smoothness}
         onChange={setSmoothness}
       />
 
       <Figure.Legend>
-        <FormattedMessage
-          id="profile.chart.speed.legend"
-          defaultMessage="Horizontal axis: lesson number. Vertical axis: {label1} – typing speed, {label2} – typing accuracy, {label3} – number of keys in the lessons."
-          values={{
-            label1: <Marker type="speed" />,
-            label2: <Marker type="accuracy" />,
-            label3: <Marker type="complexity" />,
-          }}
-        />
+        {showComplexity ? (
+          <FormattedMessage
+            id="profile.chart.speed.legend"
+            defaultMessage="Horizontal axis: date or typing sequence. Vertical axis: {label1} – typing speed, {label2} – typing accuracy, {label3} – number of keys."
+            values={{
+              label1: <Marker type="speed" />,
+              label2: <Marker type="accuracy" />,
+              label3: <Marker type="complexity" />,
+            }}
+          />
+        ) : (
+          <FormattedMessage
+            id="profile.chart.speed.legendSimple"
+            defaultMessage="Horizontal axis: date or typing sequence. Vertical axis: {label1} – typing speed, {label2} – typing accuracy."
+            values={{
+              label1: <Marker type="speed" />,
+              label2: <Marker type="accuracy" />,
+            }}
+          />
+        )}
       </Figure.Legend>
     </Figure>
   );

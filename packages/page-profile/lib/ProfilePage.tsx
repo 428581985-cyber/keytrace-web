@@ -1,9 +1,13 @@
 import { KeyboardOptions, Layout, useKeyboard } from "@keybr/keyboard";
 import { type NamedUser, Screen, usePageData } from "@keybr/pages-shared";
 import {
+  activeDayCount,
   DailyStatsMap,
   type KeyStatsMap,
+  makeKeyStatsMap,
   makeSummaryStats,
+  selectChartSeries,
+  totalCharacters,
 } from "@keybr/result";
 import { Settings } from "@keybr/settings";
 import { ExplainerBoundary } from "@keybr/widget";
@@ -57,6 +61,14 @@ function Content({ keyStatsMap }: { keyStatsMap: KeyStatsMap }) {
   const { results } = keyStatsMap;
   const stats = makeSummaryStats(results);
   const dailyStatsMap = new DailyStatsMap(results);
+  const chartSeries = selectChartSeries(results);
+  const chartKeyStatsMap =
+    chartSeries.mode === "date"
+      ? makeKeyStatsMap(keyStatsMap.letters, chartSeries.results)
+      : keyStatsMap;
+  const activeDays = activeDayCount(results);
+  const totalChars = totalCharacters(results);
+  const todayChars = totalCharacters(dailyStatsMap.today.results);
 
   return (
     <>
@@ -64,22 +76,32 @@ function Content({ keyStatsMap }: { keyStatsMap: KeyStatsMap }) {
 
       <KeyTraceSyncBar />
 
-      <AllTimeSummary stats={stats} />
+      <AllTimeSummary
+        stats={stats}
+        activeDays={activeDays}
+        characters={totalChars}
+      />
 
-      <TodaySummary stats={dailyStatsMap.today.stats} />
+      <TodaySummary stats={dailyStatsMap.today.stats} characters={todayChars} />
 
-      <AccuracyStreaksSection results={results} />
+      <AccuracyStreaksSection
+        results={chartSeries.results}
+        unit={chartSeries.mode === "date" ? "days" : "sessions"}
+      />
 
       {!isZh && <HistogramsSection stats={stats} />}
 
-      <ProgressOverviewSection keyStatsMap={keyStatsMap} />
+      <ProgressOverviewSection keyStatsMap={chartKeyStatsMap} />
 
       {/* 每个键的掌握深度，独立一块，比逐键点开看速度图直观 */}
       <MasterySection keyStatsMap={keyStatsMap} />
 
-      <SpeedChartSection results={results} />
+      <SpeedChartSection
+        results={chartSeries.results}
+        showComplexity={!isZh}
+      />
 
-      <KeySpeedChartSection keyStatsMap={keyStatsMap} />
+      <KeySpeedChartSection keyStatsMap={chartKeyStatsMap} />
 
       <KeySpeedHistogramSection keyStatsMap={keyStatsMap} />
 

@@ -1,7 +1,6 @@
 import { KeySpeedChart, Marker } from "@keybr/chart";
 import { LessonKey, Target } from "@keybr/lesson";
 import { KeyDetails, KeySelector } from "@keybr/lesson-ui";
-import { hasData } from "@keybr/math";
 import { type KeyStatsMap } from "@keybr/result";
 import { useSettings } from "@keybr/settings";
 import { Explainer, Figure, Para } from "@keybr/widget";
@@ -71,7 +70,7 @@ export function KeySpeedChartSection({
       </ChartWrapper>
 
       <SmoothnessRange
-        disabled={!hasData(samples)}
+        disabled={samples.length < 2}
         value={smoothness}
         onChange={setSmoothness}
       />
@@ -79,7 +78,7 @@ export function KeySpeedChartSection({
       <Figure.Legend>
         <FormattedMessage
           id="profile.chart.keySpeed.legend"
-          defaultMessage="Horizontal axis: lesson number. Vertical axis: {label1} – typing speed for the currently selected key, {label2} – target typing speed."
+          defaultMessage="Horizontal axis: date or typing sequence. Vertical axis: {label1} – typing speed for the currently selected key, {label2} – target typing speed."
           values={{
             label1: <Marker type="speed" />,
             label2: <Marker type="threshold" />,

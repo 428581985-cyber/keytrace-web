@@ -12,7 +12,7 @@ export function LessonLengthProp(): ReactNode {
         <Field>
           <FormattedMessage
             id="lesson.zh.length.label"
-            defaultMessage="Words per lesson:"
+            defaultMessage="Words per round:"
           />
         </Field>
         <Field>
@@ -32,7 +32,7 @@ export function LessonLengthProp(): ReactNode {
         <Description>
           <FormattedMessage
             id="lesson.zh.length.description"
-            defaultMessage="Number of words in each lesson. Increase this to practice more distinct words per round."
+            defaultMessage="Number of words in each round. Increase this to practice more distinct words per round."
           />
         </Description>
       </Explainer>

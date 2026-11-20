@@ -23,7 +23,7 @@ export function NumbersLessonSettings({
       <FieldSet
         legend={formatMessage({
           id: "t_Lesson_options",
-          defaultMessage: "Lesson options",
+          defaultMessage: "Practice options",
         })}
       >
         <BenfordProp />

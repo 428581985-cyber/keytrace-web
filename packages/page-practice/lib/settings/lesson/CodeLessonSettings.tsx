@@ -35,7 +35,7 @@ export function CodeLessonSettings({
       <FieldSet
         legend={formatMessage({
           id: "t_Lesson_options",
-          defaultMessage: "Lesson options",
+          defaultMessage: "Practice options",
         })}
       >
         <FieldList>

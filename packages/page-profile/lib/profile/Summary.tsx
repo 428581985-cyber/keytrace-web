@@ -6,9 +6,13 @@ import { FormattedMessage, useIntl } from "react-intl";
 import * as styles from "./Summary.module.less";
 
 export function AllTimeSummary({
-  stats: { count, time, speed, accuracy },
+  stats: { time, speed, accuracy },
+  activeDays = 0,
+  characters = 0,
 }: {
   stats: SummaryStats;
+  activeDays?: number;
+  characters?: number;
 }) {
   const { formatMessage } = useIntl();
   const { formatNumber, formatPercents } = useIntlNumbers();
@@ -34,10 +38,18 @@ export function AllTimeSummary({
 
         <Statistic
           name={formatMessage({
-            id: "t_num_Lessons",
-            defaultMessage: "Lessons",
+            id: "t_Active_days",
+            defaultMessage: "Active days",
           })}
-          value={formatNumber(count)}
+          value={formatNumber(activeDays)}
+        />
+
+        <Statistic
+          name={formatMessage({
+            id: "t_num_Characters",
+            defaultMessage: "Characters",
+          })}
+          value={formatNumber(characters)}
         />
 
         <Statistic
@@ -77,9 +89,11 @@ export function AllTimeSummary({
 }
 
 export function TodaySummary({
-  stats: { count, time, speed, accuracy },
+  stats: { time, speed, accuracy },
+  characters = 0,
 }: {
   stats: SummaryStats;
+  characters?: number;
 }) {
   const { formatMessage } = useIntl();
   const { formatNumber, formatPercents } = useIntlNumbers();
@@ -105,10 +119,10 @@ export function TodaySummary({
 
         <Statistic
           name={formatMessage({
-            id: "t_num_Lessons",
-            defaultMessage: "Lessons",
+            id: "t_num_Characters",
+            defaultMessage: "Characters",
           })}
-          value={formatNumber(count)}
+          value={formatNumber(characters)}
         />
 
         <Statistic

@@ -1,5 +1,6 @@
 export * from "./accuracy.ts";
 export * from "./context.ts";
+export * from "./daily-aggregate.ts";
 export * from "./dailystats.ts";
 export * from "./errors.ts";
 export * from "./fake.tsx";

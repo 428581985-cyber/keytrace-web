@@ -1,8 +1,13 @@
+import { useKeyboard } from "@keybr/keyboard";
 import { type NamedUser, Screen, UserName } from "@keybr/pages-shared";
 import {
+  activeDayCount,
   DailyStatsMap,
   type KeyStatsMap,
+  makeKeyStatsMap,
   makeSummaryStats,
+  selectChartSeries,
+  totalCharacters,
 } from "@keybr/result";
 import { ExplainerBoundary, Header } from "@keybr/widget";
 import { AccuracyStreaksSection } from "./profile/AccuracyStreaksSection.tsx";
@@ -36,27 +41,47 @@ export function PublicProfilePage({ user }: { user: NamedUser }) {
 }
 
 function Content({ keyStatsMap }: { keyStatsMap: KeyStatsMap }) {
+  const keyboard = useKeyboard();
+  const isZh = keyboard.layout.language.id === "zh-sp";
   const { results } = keyStatsMap;
   const stats = makeSummaryStats(results);
   const dailyStatsMap = new DailyStatsMap(results);
+  const chartSeries = selectChartSeries(results);
+  const chartKeyStatsMap =
+    chartSeries.mode === "date"
+      ? makeKeyStatsMap(keyStatsMap.letters, chartSeries.results)
+      : keyStatsMap;
+  const activeDays = activeDayCount(results);
+  const totalChars = totalCharacters(results);
+  const todayChars = totalCharacters(dailyStatsMap.today.results);
 
   return (
     <>
       <DataScript stats={stats} dailyStatsMap={dailyStatsMap} />
 
-      <AllTimeSummary stats={stats} />
+      <AllTimeSummary
+        stats={stats}
+        activeDays={activeDays}
+        characters={totalChars}
+      />
 
-      <TodaySummary stats={dailyStatsMap.today.stats} />
+      <TodaySummary stats={dailyStatsMap.today.stats} characters={todayChars} />
 
-      <AccuracyStreaksSection results={results} />
+      <AccuracyStreaksSection
+        results={chartSeries.results}
+        unit={chartSeries.mode === "date" ? "days" : "sessions"}
+      />
 
-      <HistogramsSection stats={stats} />
+      {!isZh && <HistogramsSection stats={stats} />}
 
-      <ProgressOverviewSection keyStatsMap={keyStatsMap} />
+      <ProgressOverviewSection keyStatsMap={chartKeyStatsMap} />
 
-      <SpeedChartSection results={results} />
+      <SpeedChartSection
+        results={chartSeries.results}
+        showComplexity={!isZh}
+      />
 
-      <KeySpeedChartSection keyStatsMap={keyStatsMap} />
+      <KeySpeedChartSection keyStatsMap={chartKeyStatsMap} />
 
       <KeySpeedHistogramSection keyStatsMap={keyStatsMap} />
 

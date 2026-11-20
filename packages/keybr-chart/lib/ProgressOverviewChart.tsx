@@ -1,7 +1,7 @@
 import { useIntlNumbers } from "@keybr/intl";
 import { Target } from "@keybr/lesson";
 import { useKeyStyles } from "@keybr/lesson-ui";
-import { hasData, Range, resample, Vector } from "@keybr/math";
+import { Range, resample, Vector } from "@keybr/math";
 import { type KeyStats, type KeyStatsMap } from "@keybr/result";
 import { useSettings } from "@keybr/settings";
 import {
@@ -14,6 +14,12 @@ import {
 import { type ReactNode } from "react";
 import { useIntl } from "react-intl";
 import { Chart, chartArea, type SizeProps } from "./Chart.tsx";
+import {
+  formatIndexAxisTick,
+  formatShortDate,
+  spansMultipleDays,
+  spansMultipleYears,
+} from "./dates.ts";
 import { withStyles } from "./decoration.ts";
 import { hBoxes } from "./geometry.ts";
 import { type ChartStyles, useChartStyles } from "./use-chart-styles.ts";
@@ -48,18 +54,29 @@ function usePaint(styles: ChartStyles, keyStatsMap: KeyStatsMap) {
     vIndex.add(index + 1);
   }
   const rIndex = Range.from(vIndex);
+  const timeStamps = results.map((r) => r.timeStamp);
+  const multiDay = spansMultipleDays(timeStamps);
+  const multiYear = spansMultipleYears(timeStamps);
 
   return (box: Rect): ShapeList => {
     const boxes = hBoxes(box, letters, { margin: 4 });
     return [
       paintGrid1(),
-      hasData(results)
+      results.length >= 2
         ? [
             g.paintGrid(box, "vertical", { lines: 5 }),
-            g.paintTicks(box, rIndex, "bottom", {
-              lines: 5,
-              fmt: formatInteger,
-            }),
+            multiDay && results.length <= 7
+              ? g.paintKeyTicks(
+                  box,
+                  timeStamps.map((ts) => formatShortDate(ts, multiYear)),
+                  "bottom",
+                  { margin: 0, style: styles.valueLabel },
+                )
+              : g.paintTicks(box, rIndex, "bottom", {
+                  lines: Math.min(5, results.length),
+                  fmt: (value) =>
+                    formatIndexAxisTick(timeStamps, value, formatInteger),
+                }),
             paintGraph,
           ]
         : g.paintNoData(box, formatMessage),

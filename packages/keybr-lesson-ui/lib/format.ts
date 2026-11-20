@@ -67,7 +67,7 @@ export const useFormatter = (): Formatter => {
           formatMessage(
             {
               id: "t_Value_per_lesson",
-              defaultMessage: "{value}/lesson",
+              defaultMessage: "{value}/session",
             },
             {
               value: formatSpeed(lr),

@@ -1,5 +1,8 @@
 import { useIntlNumbers } from "@keybr/intl";
-import { type DailyStats as DailyStatsType } from "@keybr/result";
+import {
+  type DailyStats as DailyStatsType,
+  totalCharacters,
+} from "@keybr/result";
 import { formatDuration, NameValue, Para } from "@keybr/widget";
 import { useIntl } from "react-intl";
 import * as styles from "./DailyStats.module.less";
@@ -42,10 +45,10 @@ export function DailyStats({
       <div>
         <NameValue
           name={formatMessage({
-            id: "t_num_Lessons",
-            defaultMessage: "Lessons",
+            id: "t_num_Characters",
+            defaultMessage: "Characters",
           })}
-          value={formatNumber(results.length)}
+          value={formatNumber(totalCharacters(results))}
         />
       </div>
       <div>

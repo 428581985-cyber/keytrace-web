@@ -43,7 +43,7 @@ export const Controls = memo(function Controls({
           icon={<Icon shape={mdiUndo} />}
           title={formatMessage({
             id: "practice.widget.resetLesson.description",
-            defaultMessage: "Reset the current lesson (Ctrl + Left Arrow).",
+            defaultMessage: "Reset current practice (Ctrl + Left Arrow).",
           })}
           onClick={onResetLesson}
         />
@@ -51,7 +51,7 @@ export const Controls = memo(function Controls({
           icon={<Icon shape={mdiRedo} />}
           title={formatMessage({
             id: "practice.widget.skipLesson.description",
-            defaultMessage: "Skip the current lesson (Ctrl + Right Arrow).",
+            defaultMessage: "Skip to new words (Ctrl + Right Arrow).",
           })}
           onClick={onSkipLesson}
         />
@@ -74,7 +74,7 @@ export const Controls = memo(function Controls({
           title={formatMessage({
             id: "practice.widget.settings.description",
             defaultMessage:
-              "Change lesson settings, configure language, keyboard layout, etc.",
+              "Change practice settings, configure language, keyboard layout, etc.",
           })}
           onClick={() => {
             setView("settings");
@@ -86,7 +86,7 @@ export const Controls = memo(function Controls({
           title={formatMessage({
             id: "practice.widget.settings.description",
             defaultMessage:
-              "Change lesson settings, configure language, keyboard layout, etc.",
+              "Change practice settings, configure language, keyboard layout, etc.",
           })}
           onClick={() => {
             setView("settings");

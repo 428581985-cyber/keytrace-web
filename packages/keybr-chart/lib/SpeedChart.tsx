@@ -1,11 +1,12 @@
 import { useIntlNumbers } from "@keybr/intl";
 import { useFormatter } from "@keybr/lesson-ui";
-import { hasData, linearRegression, Range, smooth, Vector } from "@keybr/math";
+import { linearRegression, Range, smooth, Vector } from "@keybr/math";
 import { type Result } from "@keybr/result";
 import { Canvas, type Rect, type ShapeList } from "@keybr/widget";
 import { type ReactNode } from "react";
 import { useIntl } from "react-intl";
 import { Chart, chartArea, type SizeProps } from "./Chart.tsx";
+import { ensureNonZeroSpan, formatIndexAxisTick } from "./dates.ts";
 import { withStyles } from "./decoration.ts";
 import { paintCurve, paintScatterPlot, projection } from "./graph.ts";
 import { type ChartStyles, useChartStyles } from "./use-chart-styles.ts";
@@ -13,14 +14,16 @@ import { type ChartStyles, useChartStyles } from "./use-chart-styles.ts";
 export function SpeedChart({
   results,
   smoothness,
+  showComplexity = true,
   width,
   height,
 }: {
   readonly results: readonly Result[];
   readonly smoothness: number;
+  readonly showComplexity?: boolean;
 } & SizeProps): ReactNode {
   const styles = useChartStyles();
-  const paint = usePaint(styles, results, smoothness);
+  const paint = usePaint(styles, results, smoothness, showComplexity);
   return (
     <Chart width={width} height={height}>
       <Canvas paint={chartArea(styles, paint)} />
@@ -32,13 +35,14 @@ function usePaint(
   styles: ChartStyles,
   results: readonly Result[],
   smoothness: number,
+  showComplexity: boolean,
 ) {
   const { formatMessage } = useIntl();
   const { formatInteger, formatPercents } = useIntlNumbers();
   const { formatSpeed } = useFormatter();
   const g = withStyles(styles);
 
-  if (!hasData(results)) {
+  if (results.length < 2) {
     return (box: Rect): ShapeList => {
       return [
         g.paintGrid(box, "horizontal", { lines: 5 }),
@@ -50,6 +54,7 @@ function usePaint(
     };
   }
 
+  const timeStamps: number[] = [];
   const vIndex = new Vector();
   const vComplexity = new Vector();
   const sComplexity = smooth(smoothness);
@@ -59,15 +64,19 @@ function usePaint(
   const sSpeed = smooth(smoothness);
   for (let index = 0; index < results.length; index++) {
     const result = results[index];
+    timeStamps.push(result.timeStamp);
     vIndex.add(index + 1);
     vComplexity.add(sComplexity(result.histogram.complexity));
     vAccuracy.add(sAccuracy(result.accuracy));
     vSpeed.add(sSpeed(result.speed));
   }
-  const rIndex = Range.from(vIndex);
-  const rComplexity = Range.from(vComplexity).round(1);
-  const rAccuracy = Range.from(vAccuracy).round(0.01);
-  const rSpeed = Range.from(vSpeed).round(5);
+  const rIndex = ensureNonZeroSpan(Range.from(vIndex), 1);
+  const rComplexity = ensureNonZeroSpan(Range.from(vComplexity).round(1), 1);
+  const rAccuracy = ensureNonZeroSpan(
+    Range.from(vAccuracy).round(0.01),
+    0.01,
+  );
+  const rSpeed = ensureNonZeroSpan(Range.from(vSpeed).round(5), 5);
   rComplexity.min = 3;
 
   const mSpeed = linearRegression(vIndex, vSpeed);
@@ -81,9 +90,10 @@ function usePaint(
       g.paintGrid(box, "vertical", { lines: 5 }),
       g.paintAxis(box, "bottom"),
       g.paintAxis(box, "left"),
-      paintScatterPlot(projComplexity, vIndex, vComplexity, {
-        style: styles.complexity,
-      }),
+      showComplexity &&
+        paintScatterPlot(projComplexity, vIndex, vComplexity, {
+          style: styles.complexity,
+        }),
       paintScatterPlot(projAccuracy, vIndex, vAccuracy, {
         style: styles.accuracy,
       }),
@@ -96,7 +106,10 @@ function usePaint(
           lineWidth: 2,
         },
       }),
-      g.paintTicks(box, rIndex, "bottom", { lines: 5, fmt: formatInteger }),
+      g.paintTicks(box, rIndex, "bottom", {
+        lines: Math.min(5, results.length),
+        fmt: (value) => formatIndexAxisTick(timeStamps, value, formatInteger),
+      }),
       g.paintTicks(box, rSpeed, "left", { fmt: formatSpeed }),
       g.paintTicks(box, rAccuracy, "right", { fmt: formatPercents }),
     ];

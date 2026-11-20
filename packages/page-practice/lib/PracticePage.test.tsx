@@ -28,7 +28,7 @@ test("render", async () => {
   );
 
   fireEvent.click(
-    await r.findByTitle("Change lesson settings", { exact: false }),
+    await r.findByTitle("Change practice settings", { exact: false }),
   );
   fireEvent.click(await r.findByText("Done"));
 

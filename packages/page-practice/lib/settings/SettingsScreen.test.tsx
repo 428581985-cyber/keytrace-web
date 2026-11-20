@@ -23,15 +23,15 @@ test("render", async () => {
     </FakeIntlProvider>,
   );
 
-  isNotNull(await r.findByText("Lessons"));
+  isNotNull(await r.findByText("Practice"));
   isNotNull(await r.findByText("Typing"));
   isNotNull(await r.findByText("Keyboard"));
   isNotNull(await r.findByText("Miscellaneous"));
 
-  fireEvent.click(r.getByText("Lessons"));
+  fireEvent.click(r.getByText("Practice"));
 
-  isNotNull(r.queryByText("Lesson options"));
-  isNotNull(r.queryByText("Lesson preview"));
+  isNotNull(r.queryByText("Practice options"));
+  isNotNull(r.queryByText("Practice preview"));
 
   fireEvent.click(r.getByText("Typing"));
 

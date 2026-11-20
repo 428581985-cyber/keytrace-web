@@ -22,7 +22,7 @@ export const StreakList = ({
       children.push(
         <FormattedMessage
           id="streakList.streakLength"
-          defaultMessage="{length, plural, =1 {One lesson} other {# lessons}} with {accuracy} accuracy."
+          defaultMessage="{length, plural, =1 {1 session} other {# sessions}} with {accuracy} accuracy."
           values={{
             length: results.length,
             accuracy: <Value value={formatPercents(level)} />,

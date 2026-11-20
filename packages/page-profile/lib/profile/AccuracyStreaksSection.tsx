@@ -11,8 +11,10 @@ import { FormattedMessage, useIntl } from "react-intl";
 
 export function AccuracyStreaksSection({
   results,
+  unit = "sessions",
 }: {
   results: readonly Result[];
+  unit?: "days" | "sessions";
 }) {
   const streaks = MutableStreakList.findLongest(results);
 
@@ -28,14 +30,14 @@ export function AccuracyStreaksSection({
       {streaks.length > 0 ? (
         <dl>
           {streaks.map((streak, index) => (
-            <StreakDetails key={index} streak={streak} />
+            <StreakDetails key={index} streak={streak} unit={unit} />
           ))}
         </dl>
       ) : (
         <Para align="center">
           <FormattedMessage
             id="profile.accuracy.noData"
-            defaultMessage="You don’t have any accuracy streaks. Consider completing a lesson with a highest accuracy possible, regardless of typing speed."
+            defaultMessage="You don’t have any accuracy streaks yet. Try keeping your typing accuracy high."
           />
         </Para>
       )}
@@ -44,7 +46,7 @@ export function AccuracyStreaksSection({
         <Figure.Description>
           <FormattedMessage
             id="profile.accuracy.legend"
-            defaultMessage="Above are listed the longest continuous sequences of lessons with accuracy above a given threshold, along with statistics about every such sequence. The longer the sequence of lessons, the better."
+            defaultMessage="Above are listed the longest continuous sequences with accuracy above a given threshold, along with statistics about every such sequence. The longer the sequence, the better."
           />
         </Figure.Description>
       </Explainer>
@@ -52,7 +54,13 @@ export function AccuracyStreaksSection({
   );
 }
 
-function StreakDetails({ streak }: { streak: Streak }) {
+function StreakDetails({
+  streak,
+  unit,
+}: {
+  streak: Streak;
+  unit: "days" | "sessions";
+}) {
   const { formatMessage, formatDate } = useIntl();
   const { formatNumber, formatPercents } = useIntlNumbers();
   const { formatSpeed } = useFormatter();
@@ -73,10 +81,17 @@ function StreakDetails({ streak }: { streak: Streak }) {
       </dt>
       <dd>
         <NameValue
-          name={formatMessage({
-            id: "t_num_Lessons",
-            defaultMessage: "Lessons",
-          })}
+          name={
+            unit === "days"
+              ? formatMessage({
+                  id: "t_Consecutive_days",
+                  defaultMessage: "Days",
+                })
+              : formatMessage({
+                  id: "t_Sessions",
+                  defaultMessage: "Sessions",
+                })
+          }
           value={formatNumber(results.length)}
         />
         <NameValue

@@ -54,7 +54,7 @@ function Content({ onSubmit }: { readonly onSubmit: () => void }) {
         <ExplainSettings />
 
         <Header level={1}>
-          <FormattedMessage id="t_Lessons" defaultMessage="Lessons" />
+          <FormattedMessage id="t_Lessons" defaultMessage="Practice" />
         </Header>
         <LessonSettings />
 

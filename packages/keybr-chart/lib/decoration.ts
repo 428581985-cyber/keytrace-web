@@ -296,7 +296,7 @@ export function withStyles(styles: ChartStyles) {
         value: formatMessage({
           id: "profile.emptyChart.description",
           defaultMessage:
-            "Complete a few more lessons to get more data points.",
+            "Type more or sync daily logs to get more data points.",
         }),
         x: box.cx,
         y: box.cy,

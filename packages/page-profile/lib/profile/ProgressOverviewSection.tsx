@@ -38,7 +38,7 @@ export function ProgressOverviewSection({
       <Figure.Legend>
         <FormattedMessage
           id="profile.chart.progressOverview.legend"
-          defaultMessage="Horizontal axis: lesson number. Vertical axis: typing speed for each individual key, {label1} – slow, {label2} – fast."
+          defaultMessage="Horizontal axis: date or typing sequence. Vertical axis: typing speed for each individual key, {label1} – slow, {label2} – fast."
           values={{
             label1: <Marker type="slow" />,
             label2: <Marker type="fast" />,
