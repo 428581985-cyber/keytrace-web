@@ -685,3 +685,36 @@ describe("unlock keys", () => {
     });
   });
 });
+
+describe("zh-sp punctuation separator", () => {
+  it("uses either punctuation or space between words, never both", () => {
+    const keyboard = loadKeyboard(Layout.ZH_SP);
+    const model = new FakePhoneticModel(["dage", "ykgo", "uiwu", "glxi"]);
+    Object.defineProperty(model, "language", { value: keyboard.layout.language });
+
+    const words = ["dage", "ykgo", "uiwu", "glxi", "haha", "wowo"];
+
+    const s0 = new Settings().set(lessonProps.punctuators, 0);
+    const l0 = new GuidedLesson(s0, keyboard, model, words);
+    const k0 = l0.update(makeKeyStatsMap(l0.letters, []));
+    const text0 = l0.generate(k0, model.rng);
+    equal(/[,.]/.test(text0), false);
+    equal(/ +/.test(text0), true);
+
+    const sHalf = new Settings().set(lessonProps.punctuators, 0.5);
+    const lHalf = new GuidedLesson(sHalf, keyboard, model, words);
+    const kHalf = lHalf.update(makeKeyStatsMap(lHalf.letters, []));
+    const textHalf = lHalf.generate(kHalf, model.rng);
+    equal(/[,.]\s|\s[,.]/.test(textHalf), false);
+    equal(/[,.]/.test(textHalf), true);
+    equal(/ /.test(textHalf), true);
+
+    const sFull = new Settings().set(lessonProps.punctuators, 1);
+    const lFull = new GuidedLesson(sFull, keyboard, model, words);
+    const kFull = lFull.update(makeKeyStatsMap(lFull.letters, []));
+    const textFull = lFull.generate(kFull, model.rng);
+    equal(/ /.test(textFull), false);
+    equal(/[,.]/.test(textFull), true);
+    equal(/[,.]\s|\s[,.]/.test(textFull), false);
+  });
+});

@@ -1,3 +1,4 @@
+import { keyboardProps } from "@keybr/keyboard";
 import { type Lesson } from "@keybr/lesson";
 import { CurrentKeyRow, KeySetRow } from "@keybr/lesson-ui";
 import { LCG } from "@keybr/rand";
@@ -22,6 +23,7 @@ export function LessonPreview({
   const { formatMessage } = useIntl();
   const { settings } = useSettings();
   const { results } = useResults();
+  const zh = settings.get(keyboardProps.language).id === "zh-sp";
   const { lessonKeys, textInput } = useMemo(() => {
     const lessonKeys = lesson.update(
       makeKeyStatsMap(lesson.letters, lesson.filter(results)),
@@ -36,7 +38,7 @@ export function LessonPreview({
     <FieldSet
       legend={formatMessage({
         id: "t_Lesson_preview:",
-        defaultMessage: "Lesson preview",
+        defaultMessage: "Practice preview",
       })}
     >
       <div className={styles.root}>
@@ -46,6 +48,7 @@ export function LessonPreview({
           <StaticText
             settings={toTextDisplaySettings(settings)}
             lines={textInput.lines}
+            zh={zh}
           />
         </div>
       </div>

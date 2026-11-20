@@ -33,7 +33,7 @@ function FuzzyOptionRow({
   label,
   options,
 }: {
-  readonly label: ReactNode;
+  readonly label?: ReactNode;
   readonly options: readonly FuzzyOption[];
 }): ReactNode {
   const { settings, updateSettings } = useSettings();
@@ -61,21 +61,13 @@ export function FuzzyPinyinProp(): ReactNode {
       <FuzzyOptionRow
         label={
           <FormattedMessage
-            id="lesson.zh.fuzzy.finalsLabel"
-            defaultMessage="Fuzzy finals:"
+            id="lesson.zh.fuzzy.label"
+            defaultMessage="Fuzzy pinyin:"
           />
         }
         options={FINALS_OPTIONS}
       />
-      <FuzzyOptionRow
-        label={
-          <FormattedMessage
-            id="lesson.zh.fuzzy.initialsLabel"
-            defaultMessage="Fuzzy initials:"
-          />
-        }
-        options={INITIALS_OPTIONS}
-      />
+      <FuzzyOptionRow options={INITIALS_OPTIONS} />
       <Explainer>
         <Description>
           <FormattedMessage

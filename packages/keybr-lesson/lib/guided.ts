@@ -226,24 +226,16 @@ export class GuidedLesson extends Lesson {
     const wordGenerator = this.#makeWordGenerator(filter, rng);
     const isZh = this.model.language.id === "zh-sp";
     if (isZh) {
-      // 中文的标点只有逗号句号，而且它们的码位不在 a-z 字母表里，
-      // 走不了上游的 Letter.restrict(Letter.punctuators)（会被过滤成空集）。
-      // 这里按浓度给词尾追加 ASCII 的 , 和 .，渲染层再把它们画成 ，和 。
-      const base = uniqueWords(wordGenerator);
-      const ratio = this.settings.get(lessonProps.punctuators);
-      const withPunctuation = (): string | null => {
-        const word = base();
-        if (word == null || word === "") {
-          return word;
-        }
-        if (ratio > 0 && rng() < ratio) {
-          return word + (rng() < 0.75 ? "," : ".");
-        }
-        return word;
-      };
-      return generateFragment(this.settings, withPunctuation, {
-        repeatWords: this.settings.get(lessonProps.repeatWords),
-      });
+      // 中文双拼标点只有逗号和句号，词与词之间要么用标点分隔，要么用空格分隔，不叠加出现。
+      return generateZhFragment(
+        this.settings,
+        uniqueWords(wordGenerator),
+        rng,
+        {
+          repeatWords: this.settings.get(lessonProps.repeatWords),
+          punctuatorRatio: this.settings.get(lessonProps.punctuators),
+        },
+      );
     }
     const words = mangledWords(
       uniqueWords(wordGenerator),
@@ -316,4 +308,45 @@ export class GuidedLesson extends Lesson {
     }
     return pseudoWords;
   }
+}
+
+function generateZhFragment(
+  settings: Settings,
+  nextWord: () => string | null,
+  rng: RNGStream,
+  {
+    repeatWords = 1,
+    punctuatorRatio = 0,
+  }: {
+    readonly repeatWords?: number;
+    readonly punctuatorRatio?: number;
+  } = {},
+): string {
+  const targetLength = 100 + Math.round(settings.get(lessonProps.length) * 100);
+  const words: string[] = [];
+  let wordsLength = 0;
+  while (wordsLength < targetLength) {
+    const word = nextWord() || "?";
+    for (let i = 1; i <= repeatWords; i++) {
+      words.push(word);
+      wordsLength += word.length;
+      if (wordsLength >= targetLength) {
+        break;
+      }
+    }
+  }
+  let out = "";
+  for (let i = 0; i < words.length; i++) {
+    out += words[i];
+    if (i < words.length - 1) {
+      if (punctuatorRatio > 0 && rng() < punctuatorRatio) {
+        out += rng() < 0.75 ? "," : ".";
+      } else {
+        out += " ";
+      }
+    } else if (punctuatorRatio > 0 && rng() < punctuatorRatio) {
+      out += ".";
+    }
+  }
+  return out;
 }

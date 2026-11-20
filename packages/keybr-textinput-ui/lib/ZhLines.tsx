@@ -170,6 +170,15 @@ function stateColor(attr: number): string | null {
   return null;
 }
 
+function isPunctuation(codePoint: number): boolean {
+  return (
+    codePoint === 0x2c ||
+    codePoint === 0x2e ||
+    codePoint === 0x3f ||
+    codePoint === 0x21
+  );
+}
+
 function toGroups(chars: readonly Char[]): Group[] {
   const groups: Group[] = [];
   let buffer: Char[] = [];
@@ -208,6 +217,25 @@ function toGroups(chars: readonly Char[]): Group[] {
         cursor: has(char.attrs, Attr.Cursor),
         attrs: char.attrs,
       });
+      continue;
+    }
+    if (isPunctuation(char.codePoint)) {
+      flush();
+      const punctUnit: Unit = {
+        code: String.fromCodePoint(char.codePoint),
+        chars: [char],
+        cursor: has(char.attrs, Attr.Cursor),
+      };
+      const prev = groups[groups.length - 1];
+      if (prev != null && prev.kind === "word") {
+        // Attach punctuation to the preceding word so line wraps keep them together.
+        groups[groups.length - 1] = {
+          kind: "word",
+          units: [...prev.units, punctUnit],
+        };
+      } else {
+        groups.push({ kind: "word", units: [punctUnit] });
+      }
       continue;
     }
     buffer.push(char);
@@ -321,9 +349,13 @@ function hideLineStartDots(board: HTMLElement): void {
 export function ZhLines({
   lines,
   focus,
+  cursor = true,
+  showToggle = true,
 }: {
   readonly lines: LineList;
   readonly focus: boolean;
+  readonly cursor?: boolean;
+  readonly showToggle?: boolean;
 }): ReactNode {
   const [showCode, setShowCode] = useState<boolean>(() => {
     try {
@@ -353,12 +385,14 @@ export function ZhLines({
   // 这种变化不是"光标走了一步"，不该有滑动动画。
   useEffect(() => {
     const board = boardRef.current;
-    const cursor = cursorRef.current;
-    if (board == null || cursor == null) {
+    if (board == null) {
       return;
     }
     const replant = () => {
-      placeCursor(board, cursor, false);
+      const cursorEl = cursorRef.current;
+      if (cursorEl != null) {
+        placeCursor(board, cursorEl, false);
+      }
       hideLineStartDots(board);
     };
     window.addEventListener("resize", replant);
@@ -410,24 +444,28 @@ export function ZhLines({
   // 每次渲染后把光标挪到当前字底下。首次渲染不做过渡，避免从左上角飞过来。
   useIsomorphicLayoutEffect(() => {
     const board = boardRef.current;
-    const cursor = cursorRef.current;
-    if (board == null || cursor == null) {
+    if (board == null) {
       return;
     }
-    placeCursor(board, cursor, mountedRef.current);
+    const cursorEl = cursorRef.current;
+    if (cursor && cursorEl != null) {
+      placeCursor(board, cursorEl, mountedRef.current);
+      mountedRef.current = true;
+    }
     hideLineStartDots(board);
-    mountedRef.current = true;
   });
 
   return (
     <div style={styles.root}>
-      <label style={styles.toggleRow}>
-        <input type="checkbox" checked={showCode} onChange={toggle} />
-        <FormattedMessage
-          id="practice.zh.showCode"
-          defaultMessage="Show Shuangpin code"
-        />
-      </label>
+      {showToggle ? (
+        <label style={styles.toggleRow}>
+          <input type="checkbox" checked={showCode} onChange={toggle} />
+          <FormattedMessage
+            id="practice.zh.showCode"
+            defaultMessage="Show Shuangpin code"
+          />
+        </label>
+      ) : null}
 
       <div
         ref={boardRef}
@@ -456,7 +494,7 @@ export function ZhLines({
                     <span
                       key={groupIndex}
                       data-space="1"
-                      data-cursor={group.cursor ? "1" : undefined}
+                      data-cursor={cursor && group.cursor ? "1" : undefined}
                       style={{
                         ...styles.space,
                         color: stateColor(group.attrs) ?? COLOR.todo,
@@ -476,6 +514,7 @@ export function ZhLines({
                         unit={unit}
                         char={chars[i]}
                         showCode={showCode}
+                        showCursor={cursor}
                       />
                     ))}
                   </span>
@@ -485,26 +524,28 @@ export function ZhLines({
           );
         })}
 
-        <span
-          ref={cursorRef}
-          aria-hidden={true}
-          style={{
-            ...styles.cursorLayer,
-            opacity: 0,
-          }}
-        >
+        {cursor ? (
           <span
+            ref={cursorRef}
+            aria-hidden={true}
             style={{
-              ...styles.cursorHalf,
-              background: cursorColor?.left ?? COLOR.current,
+              ...styles.cursorLayer,
+              opacity: 0,
             }}
-          />
-          {cursorColor?.right != null ? (
+          >
             <span
-              style={{ ...styles.cursorHalf, background: cursorColor.right }}
+              style={{
+                ...styles.cursorHalf,
+                background: cursorColor?.left ?? COLOR.current,
+              }}
             />
-          ) : null}
-        </span>
+            {cursorColor?.right != null ? (
+              <span
+                style={{ ...styles.cursorHalf, background: cursorColor.right }}
+              />
+            ) : null}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -514,11 +555,13 @@ function UnitView({
   unit,
   char,
   showCode,
+  showCursor,
 }: {
   readonly unit: Unit;
   /** 整词查表得到的汉字；空串表示查不到，退回按音节取字 */
   readonly char: string;
   readonly showCode: boolean;
+  readonly showCursor: boolean;
 }): ReactNode {
   const two = unit.chars.length === 2;
   const first = unit.chars[0]?.attrs ?? 0;
@@ -550,7 +593,7 @@ function UnitView({
   return (
     <span
       style={styles.unit}
-      data-cursor={unit.cursor ? "1" : undefined}
+      data-cursor={showCursor && unit.cursor ? "1" : undefined}
     >
       {showCode ? (
         <span style={styles.code}>
