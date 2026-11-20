@@ -121,7 +121,7 @@ export default [
         rule_js(),
         rule_less(false),
         {
-          test: /\/assets\//,
+          test: /[\\/]assets[\\/]/,
           use: "null-loader",
         },
         {
@@ -178,7 +178,7 @@ export default [
         rule_js(),
         rule_less(true),
         {
-          test: /\/assets\//,
+          test: /[\\/]assets[\\/]|\.(svg|mp3|png|jpe?g|gif|webp|woff2?|ttf|eot)$/,
           type: "asset/resource",
         },
       ],

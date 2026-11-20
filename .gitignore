@@ -15,6 +15,7 @@ root/lib/
 .codex/
 
 # Other
+/data/
 node_modules/
 build/
 out/
