@@ -27,21 +27,17 @@ test("negotiate the preferred language", async () => {
 
   // Assert.
 
-  equal(await call(null), "en");
-  equal(await call(new AcceptLanguage("*")), "en");
-  equal(await call(new AcceptLanguage("xx")), "en");
+  equal(await call(null), "zh-hans");
+  equal(await call(new AcceptLanguage("*")), "zh-hans");
+  equal(await call(new AcceptLanguage("xx")), "zh-hans");
 
   equal(await call(new AcceptLanguage("en")), "en");
   equal(await call(new AcceptLanguage("en-US")), "en");
-  equal(await call(new AcceptLanguage("en-CA")), "en");
-
-  equal(await call(new AcceptLanguage("pt")), "pt-br");
-  equal(await call(new AcceptLanguage("pt-BR")), "pt-br");
-  equal(await call(new AcceptLanguage("pt-PT")), "pt-pt");
+  equal(await call(new AcceptLanguage("en-CA")), "zh-hans");
 
   equal(await call(new AcceptLanguage("zh")), "zh-hans");
   equal(await call(new AcceptLanguage("zh-CN")), "zh-hans");
-  equal(await call(new AcceptLanguage("zh-TW")), "zh-tw");
+  equal(await call(new AcceptLanguage("zh-TW")), "zh-hans");
 
-  equal(await call(new AcceptLanguage().add("en", 0.8).add("pl", 0.9)), "pl");
+  equal(await call(new AcceptLanguage().add("en", 0.8).add("zh-CN", 0.9)), "zh-hans");
 });

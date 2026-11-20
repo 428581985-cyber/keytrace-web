@@ -94,7 +94,7 @@ async function compileMessages() {
     );
     const messagesFile = messagesPath(locale);
     const messages = JSON.parse(
-      await compile([mergedTranslationsFile], {
+      await compile([mergedTranslationsFile.replaceAll("\\", "/")], {
         ast: true,
         format,
       }),
@@ -125,10 +125,10 @@ async function writeReport() {
   const languageName = new Intl.DisplayNames("en", { type: "language" });
   const countWords = (count, [id, message]) =>
     count +
-    message
+    (message
       .replaceAll(/\{[a-zA-Z]}+/g, "")
       .replaceAll(/<\/?[a-z]+>/g, "")
-      .match(/\p{L}+/gu).length;
+      .match(/\p{L}+/gu)?.length ?? 0);
   const lines = [];
   for (const [locale, { translated, untranslated }] of Object.entries(report)) {
     lines.push(`# ${languageName.of(locale)}`);

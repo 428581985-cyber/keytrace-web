@@ -1,27 +1,17 @@
-import {
-  type AnyUser,
-  Avatar,
-  type PageInfo,
-  Pages,
-  usePageData,
-} from "@keybr/pages-shared";
+import { type PageInfo, Pages } from "@keybr/pages-shared";
 import { Icon } from "@keybr/widget";
+import { mdiTranslate } from "@mdi/js";
 import { clsx } from "clsx";
 import { type ReactNode } from "react";
 import { useIntl } from "react-intl";
 import { NavLink } from "react-router";
 import * as styles from "./NavMenu.module.less";
-import { SubMenu } from "./SubMenu.tsx";
 import { ThemeSwitcher } from "./themes/ThemeSwitcher.tsx";
 
+// 本地双语版：保留练习页、个人统计、帮助、主题切换，以及中/英双语切换入口。
 export function NavMenu({ currentPath }: { readonly currentPath: string }) {
-  const { publicUser } = usePageData();
   return (
     <div className={styles.root}>
-      <MenuItem>
-        <AccountLink user={publicUser} />
-      </MenuItem>
-
       <MenuItem>
         <ThemeSwitcher />
       </MenuItem>
@@ -39,23 +29,7 @@ export function NavMenu({ currentPath }: { readonly currentPath: string }) {
       </MenuItem>
 
       <MenuItem>
-        <MenuItemLink page={Pages.highScores} />
-      </MenuItem>
-
-      <MenuItem>
-        <MenuItemLink page={Pages.multiplayer} />
-      </MenuItem>
-
-      <MenuItem>
-        <MenuItemLink page={Pages.typingTest} />
-      </MenuItem>
-
-      <MenuItem>
-        <MenuItemLink page={Pages.layouts} />
-      </MenuItem>
-
-      <MenuItem>
-        <SubMenu currentPath={currentPath} />
+        <LanguageToggle currentPath={currentPath} />
       </MenuItem>
     </div>
   );
@@ -65,25 +39,15 @@ function MenuItem({ children }: { readonly children: ReactNode }) {
   return <div className={styles.item}>{children}</div>;
 }
 
-function AccountLink({ user }: { readonly user: AnyUser }) {
-  const { formatMessage } = useIntl();
+function LanguageToggle({ currentPath }: { readonly currentPath: string }) {
+  const { locale } = useIntl();
+  const targetLocale = locale === "en" ? "zh-hans" : "en";
+  const label = targetLocale === "en" ? "English" : "简体中文";
   return (
-    <NavLink
-      className={({ isActive }) =>
-        clsx(styles.accountLink, isActive && styles.isActive)
-      }
-      to={Pages.account.path}
-    >
-      <Avatar user={user.id != null ? user : null} size="large" />
-      <span className={styles.userName}>
-        {user.id != null
-          ? user.name
-          : formatMessage({
-              id: "t_Sing_In",
-              defaultMessage: "Sign-In",
-            })}
-      </span>
-    </NavLink>
+    <a className={styles.link} href={Pages.intlPath(currentPath, targetLocale)}>
+      <Icon className={styles.icon} shape={mdiTranslate} />
+      <span className={styles.label}>{label}</span>
+    </a>
   );
 }
 
