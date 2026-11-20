@@ -24,8 +24,12 @@ export class Controller {
   async getKeyTraceData(ctx: Context<RouterState & AuthState>) {
     const rawSince = Number(ctx.request.query.get("since") ?? 0);
     const sinceTs = Number.isFinite(rawSince) && rawSince > 0 ? rawSince : 0;
+    const migrate = ctx.request.query.get("migrate") === "1";
     ctx.response.type = "application/json";
-    ctx.response.body = await readKeyTraceSyncData({ sinceTs });
+    ctx.response.body = await readKeyTraceSyncData({
+      sinceTs,
+      includeCommitKeys: migrate,
+    });
   }
 
   @http.GET("/_/sync/data/{id:[a-zA-Z0-9]+}")

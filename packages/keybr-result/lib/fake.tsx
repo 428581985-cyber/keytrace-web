@@ -131,6 +131,9 @@ export function FakeResultContext({
         appendResults: (newResults) => {
           setResults([...results, ...newResults]);
         },
+        replaceResults: (newResults) => {
+          setResults([...newResults]);
+        },
         clearResults: () => {
           setResults([]);
         },

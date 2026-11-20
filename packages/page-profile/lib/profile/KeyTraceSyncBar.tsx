@@ -14,7 +14,7 @@ type SyncStatus =
 
 export function KeyTraceSyncBar(): ReactNode {
   const { formatMessage } = useIntl();
-  const { results, appendResults } = useResults();
+  const { results, appendResults, replaceResults } = useResults();
   const [status, setStatus] = useState<SyncStatus>({ type: "idle" });
 
   const handleSync = () => {
@@ -22,7 +22,7 @@ export function KeyTraceSyncBar(): ReactNode {
       return;
     }
     setStatus({ type: "syncing" });
-    syncKeyTraceResults(results, appendResults)
+    syncKeyTraceResults(results, appendResults, replaceResults)
       .then(({ added }) => {
         if (added > 0) {
           setStatus({ type: "synced", added });

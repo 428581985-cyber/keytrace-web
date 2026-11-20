@@ -75,7 +75,12 @@ function commit(
 test("missing events directory returns empty result gracefully", async () => {
   const missingDir = join(tmpdir(), `keytrace-missing-${Date.now()}`);
   const data = await readKeyTraceSyncData({ eventsDir: missingDir });
-  deepEqual(data, { records: [], latestTs: 0, daysScanned: 0 });
+  deepEqual(data, {
+    syncVersion: 2,
+    records: [],
+    latestTs: 0,
+    daysScanned: 0,
+  });
 });
 
 test("reads .jsonl and .jsonl.gz into valid zh-sp and en-us Result JSON", async () => {
@@ -182,8 +187,11 @@ test("reads .jsonl and .jsonl.gz into valid zh-sp and en-us Result JSON", async 
     const zhRecord = data.records[0];
     equal(zhRecord.l, "zh-sp");
     equal(zhRecord.ts, 1700000010000);
-    equal(zhRecord.e, 1); // 1 miss from Backspace after 'x'
-    equal(zhRecord.h[120]?.m, 1); // 'x' (codePoint 120) has 1 miss
+    equal(zhRecord.n, 12); // 'x' popped by Backspace; 12 surviving keys
+    equal(zhRecord.e, 1); // 1 miss attributed to corrected 'a'
+    equal(zhRecord.h[120], undefined); // wrong key 'x' discarded
+    equal(zhRecord.h[97]?.m, 1); // 'a' (codePoint 97) absorbs the correction miss
+    equal(zhRecord.h[97]?.t, 420); // 'a' gets elapsed 820 - 400 (from 'h')
     equal(zhRecord.h[50], undefined); // digit '2' excluded for zh-sp
     const zhResult = resultFromJson(zhRecord);
     isNotNull(zhResult);
@@ -210,16 +218,16 @@ test("sorts events by (sessionStartTs, sid, mono, ts) so restarts do not interle
       // Session 2 first in file, even with same mono=100!
       kd(80, 100, 2000, { sid: "b", sessionStartTs: 2000 }), // p
       kd(65, 100, 1000, { sid: "a", sessionStartTs: 1000 }), // a
-      kd(81, 200, 2100, { sid: "b", sessionStartTs: 2000 }), // q
-      kd(66, 200, 1100, { sid: "a", sessionStartTs: 1000 }), // b
-      kd(82, 300, 2200, { sid: "b", sessionStartTs: 2000 }), // r
-      kd(67, 300, 1200, { sid: "a", sessionStartTs: 1000 }), // c
-      kd(83, 400, 2300, { sid: "b", sessionStartTs: 2000 }), // s
-      kd(68, 400, 1300, { sid: "a", sessionStartTs: 1000 }), // d
-      kd(84, 500, 2400, { sid: "b", sessionStartTs: 2000 }), // t
-      kd(69, 500, 1400, { sid: "a", sessionStartTs: 1000 }), // e
-      commit("pqrst", 5, 550, 2500, { sid: "b", sessionStartTs: 2000 }),
-      commit("abcde", 5, 550, 1500, { sid: "a", sessionStartTs: 1000 }),
+      kd(81, 250, 2150, { sid: "b", sessionStartTs: 2000 }), // q
+      kd(66, 250, 1150, { sid: "a", sessionStartTs: 1000 }), // b
+      kd(82, 400, 2300, { sid: "b", sessionStartTs: 2000 }), // r
+      kd(67, 400, 1300, { sid: "a", sessionStartTs: 1000 }), // c
+      kd(83, 550, 2450, { sid: "b", sessionStartTs: 2000 }), // s
+      kd(68, 550, 1450, { sid: "a", sessionStartTs: 1000 }), // d
+      kd(84, 700, 2600, { sid: "b", sessionStartTs: 2000 }), // t
+      kd(69, 700, 1600, { sid: "a", sessionStartTs: 1000 }), // e
+      commit("pqrst", 5, 750, 2700, { sid: "b", sessionStartTs: 2000 }),
+      commit("abcde", 5, 750, 1700, { sid: "a", sessionStartTs: 1000 }),
     ];
 
     await writeFile(join(dir, "2026-11-19.jsonl"), jsonl(lines), "utf8");
@@ -228,10 +236,11 @@ test("sorts events by (sessionStartTs, sid, mono, ts) so restarts do not interle
     equal(data.records.length, 1);
     const rec = data.records[0];
     equal(rec.n, 10);
-    equal(rec.ts, 2500);
-    // Each session's keys had clean 100ms IKIs (no interleaved 0ms or negative monoDiff).
-    equal(rec.h[98]?.t, 100); // 'b'
-    equal(rec.h[113]?.t, 100); // 'q'
+    equal(rec.t, 1200);
+    equal(rec.ts, 2700);
+    // Each session's keys had clean 150ms IKIs (no interleaved 0ms or negative monoDiff).
+    equal(rec.h[98]?.t, 150); // 'b'
+    equal(rec.h[113]?.t, 150); // 'q'
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -300,16 +309,16 @@ test("GET /_/sync/keytrace endpoint responds without auth and supports since que
   try {
     const lines = [
       kd(65, 100, 900),
-      kd(66, 200, 910),
-      kd(67, 300, 920),
-      kd(68, 400, 930),
-      kd(69, 500, 940),
-      kd(70, 600, 950),
-      kd(71, 700, 960),
-      kd(72, 800, 970),
-      kd(73, 900, 980),
-      kd(74, 1000, 990),
-      commit("abcdefghij", 10, 1050, 5000),
+      kd(66, 220, 910),
+      kd(67, 340, 920),
+      kd(68, 460, 930),
+      kd(69, 580, 940),
+      kd(70, 700, 950),
+      kd(71, 820, 960),
+      kd(72, 940, 970),
+      kd(73, 1060, 980),
+      kd(74, 1180, 990),
+      commit("abcdefghij", 10, 1250, 5000),
     ];
     await writeFile(join(dir, "2026-11-19.jsonl"), jsonl(lines), "utf8");
 
@@ -324,10 +333,12 @@ test("GET /_/sync/keytrace endpoint responds without auth and supports since que
     const res1 = await req.GET("/_/sync/keytrace").send();
     equal(res1.status, 200);
     const body1 = await res1.body.json<{
+      syncVersion: number;
       records: unknown[];
       latestTs: number;
       daysScanned: number;
     }>();
+    equal(body1.syncVersion, 2);
     equal(body1.records.length, 1);
     equal(body1.latestTs, 5000);
     equal(body1.daysScanned, 1);
@@ -342,6 +353,257 @@ test("GET /_/sync/keytrace endpoint responds without auth and supports since que
     equal(body2.records.length, 0);
     equal(body2.latestTs, 0);
     equal(body2.daysScanned, 1);
+  } finally {
+    if (prevEnv === undefined) {
+      delete process.env.KEYTRACE_EVENTS_DIR;
+    } else {
+      process.env.KEYTRACE_EVENTS_DIR = prevEnv;
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("drops > 3000ms pauses instead of adding 200ms fallback", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-pause-"));
+  try {
+    // 5 keys (200ms apart = 800ms) -> 5000ms pause -> 5 keys (200ms apart = 800ms)
+    // Total activeMs must equal 800 + 800 = 1600ms (no 5000ms, no 200ms fallback).
+    const lines = [
+      kd(65, 100, 1000), // a (anchor)
+      kd(66, 300, 1200), // b (+200)
+      kd(67, 500, 1400), // c (+200)
+      kd(68, 700, 1600), // d (+200)
+      kd(69, 900, 1800), // e (+200)
+      // 5000ms pause
+      kd(70, 5900, 6800), // f (new burst anchor, no IKI)
+      kd(71, 6100, 7000), // g (+200)
+      kd(72, 6300, 7200), // h (+200)
+      kd(73, 6500, 7400), // i (+200)
+      kd(74, 6700, 7600), // j (+200)
+      commit("abcdefghij", 10, 6750, 8000),
+    ];
+    await writeFile(join(dir, "2026-11-19.jsonl"), jsonl(lines), "utf8");
+
+    const data = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(data.records.length, 1);
+    const rec = data.records[0];
+    equal(rec.n, 10);
+    equal(rec.t, 1600);
+    deepEqual(rec.h[97], { h: 1, m: 0, t: 0 }); // burst 1 anchor
+    deepEqual(rec.h[102], { h: 1, m: 0, t: 0 }); // burst 2 anchor after pause
+    equal(rec.h[98]?.t, 200);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("attributes continuous multi-step correction (> 3000ms total, each step <= 3000ms) to final key with 6000ms cap", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-corr-"));
+  try {
+    // Part 1: h(0) -> v(1800) -> BS(3600) -> c(5200): total 5200ms > 3000ms, each step <= 1800ms.
+    // Part 2: 3-backspace correction exceeding 6000ms total, each step <= 2000ms -> capped at 6000ms.
+    const lines = [
+      // Filler word + Part 1 (total 10+ keys)
+      kd(72, 1000, 1000), // h
+      kd(86, 2800, 2800), // v (typo)
+      kd(8, 4600, 4600), // BS
+      kd(67, 6200, 6200), // c -> corrected from h(1000): 6200 - 1000 = 5200ms
+      kd(32, 6400, 6400), // Space
+      // Part 2: n(7000) -> x(9000) -> y(11000) -> z(13000) -> BS(13500) -> BS(14000) -> BS(14500) -> o(15000)
+      // Total from n(7000) to o(15000) = 8000ms -> capped at 6000ms!
+      kd(78, 7000, 7000), // n
+      kd(88, 9000, 9000), // x (wrong)
+      kd(89, 11000, 11000), // y (wrong)
+      kd(90, 13000, 13000), // z (wrong)
+      kd(8, 13500, 13500), // BS 1
+      kd(8, 14000, 14000), // BS 2
+      kd(8, 14500, 14500), // BS 3 -> anchor becomes n(7000)
+      kd(79, 15000, 15000), // o -> 15000 - 7000 = 8000ms -> capped to 6000ms
+      kd(32, 15200, 15200), // Space
+      // Extra keys to exceed minLength=10
+      kd(65, 15400, 15400), // a
+      kd(66, 15600, 15600), // b
+      kd(68, 15800, 15800), // d
+      kd(69, 16000, 16000), // e
+      kd(70, 16200, 16200), // f
+      kd(71, 16400, 16400), // g
+      commit("好呢哦了看都方个", 20, 16500, 20000),
+    ];
+    await writeFile(join(dir, "2026-11-19.jsonl"), jsonl(lines), "utf8");
+
+    const data = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(data.records.length, 1);
+    const rec = data.records[0];
+    equal(rec.n, 10); // h, c, n, o, a, b, d, e, f, g (wrong v,x,y,z excluded)
+    equal(rec.e, 2); // c and o
+    equal(rec.h[118], undefined); // 'v' popped
+    equal(rec.h[120], undefined); // 'x' popped
+    equal(rec.h[121], undefined); // 'y' popped
+    equal(rec.h[122], undefined); // 'z' popped
+    deepEqual(rec.h[99], { h: 1, m: 1, t: 5200 }); // 'c'
+    deepEqual(rec.h[111], { h: 1, m: 1, t: 6000 }); // 'o' capped at 6000
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("treats > 3 consecutive backspaces as rewording without blaming replacement key", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-reword-"));
+  try {
+    const lines = [
+      kd(65, 100, 100), // a
+      kd(66, 300, 300), // b
+      kd(67, 500, 500), // c
+      kd(68, 700, 700), // d
+      kd(69, 900, 900), // e
+      kd(8, 1100, 1100), // BS 1
+      kd(8, 1250, 1250), // BS 2
+      kd(8, 1400, 1400), // BS 3
+      kd(8, 1550, 1550), // BS 4 -> >3 rewording!
+      kd(75, 1750, 1750), // k (replacement after rewording, NOT blamed)
+      kd(76, 1950, 1950), // l
+      kd(77, 2150, 2150), // m
+      kd(78, 2350, 2350), // n
+      kd(79, 2550, 2550), // o
+      kd(80, 2750, 2750), // p
+      kd(81, 2950, 2950), // q
+      kd(82, 3150, 3150), // r
+      kd(83, 3350, 3350), // s
+      commit("akmnopqrs", 18, 3400, 5000),
+    ];
+    await writeFile(join(dir, "2026-11-19.jsonl"), jsonl(lines), "utf8");
+
+    const data = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(data.records.length, 1);
+    const rec = data.records[0];
+    equal(rec.e, 0); // rewording not attributed as typo on 'k'
+    equal(rec.h[107]?.m, 0); // 'k' not penalized
+    equal(rec.h[107]?.t, 0); // 'k' starts fresh without post-BS IKI noise
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("counts empty-stack post-space backspace as error without distorting next letter timeToType", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-emptybs-"));
+  try {
+    const lines = [
+      kd(65, 100, 100), // a
+      kd(66, 250, 250), // b
+      kd(67, 400, 400), // c
+      kd(32, 550, 550), // Space (flushes a,b,c -> stack now empty)
+      kd(8, 900, 900), // BS on empty stack (selection error)
+      kd(68, 1200, 1200), // d -> should NOT absorb BS gap as its IKI
+      kd(69, 1350, 1350), // e
+      kd(70, 1500, 1500), // f
+      kd(71, 1650, 1650), // g
+      kd(72, 1800, 1800), // h
+      kd(73, 1950, 1950), // i
+      kd(74, 2100, 2100), // j
+      commit("好人定额风格和", 12, 2200, 5000),
+    ];
+    await writeFile(join(dir, "2026-11-19.jsonl"), jsonl(lines), "utf8");
+
+    const data = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(data.records.length, 1);
+    const rec = data.records[0];
+    equal(rec.n, 10);
+    equal(rec.e, 1); // empty-stack backspace recorded in overall errors
+    equal(rec.h[100]?.m, 0); // 'd' not blamed
+    equal(rec.h[100]?.t, 0); // 'd' has no post-selection IKI attached
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("filters leaked IME pinyin commits from en-us while keeping real English contractions", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-pinyin-"));
+  try {
+    const leaked = ["ti'mu'bu'yan'j", "wo'xi'h", "'tu'r", "，bi'ru"];
+    const lines: Record<string, unknown>[] = [];
+    let mono = 100;
+    let ts = 1000;
+    for (const word of leaked) {
+      for (let i = 0; i < 14; i++) {
+        lines.push(kd(65 + (i % 10), mono, ts));
+        mono += 150;
+        ts += 150;
+      }
+      lines.push(commit(word, 14, mono + 50, ts + 50));
+      mono += 500;
+      ts += 500;
+    }
+    // Keep real English commit with standard contractions
+    for (let i = 0; i < 10; i++) {
+      lines.push(kd(65 + i, mono, ts));
+      mono += 150;
+      ts += 150;
+    }
+    lines.push(commit("don't it's", 10, mono + 50, ts + 50));
+
+    await writeFile(join(dir, "2026-11-19.jsonl"), jsonl(lines), "utf8");
+
+    const data = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(data.records.length, 1);
+    equal(data.records[0].l, "en-us");
+    equal(data.records[0].n, 10); // only "don't it's" survived
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("migrate=1 endpoint returns commitKeys covering legacy commits", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-migrate-"));
+  const prevEnv = process.env.KEYTRACE_EVENTS_DIR;
+  process.env.KEYTRACE_EVENTS_DIR = dir;
+  try {
+    const lines = [
+      // Leaked pinyin commit from v1 era (filtered in v2 records, still present in commitKeys!)
+      kd(84, 100, 1000),
+      kd(73, 250, 1150),
+      kd(77, 400, 1300),
+      kd(85, 550, 1450),
+      kd(66, 700, 1600),
+      kd(85, 850, 1750),
+      kd(89, 1000, 1900),
+      kd(65, 1150, 2050),
+      kd(78, 1300, 2200),
+      kd(74, 1450, 2350),
+      commit("ti'mu'bu'y", 10, 1500, 10000),
+      // Real English commit
+      kd(65, 1700, 11000),
+      kd(66, 1850, 11150),
+      kd(67, 2000, 11300),
+      kd(68, 2150, 11450),
+      kd(69, 2300, 11600),
+      kd(70, 2450, 11750),
+      kd(71, 2600, 11900),
+      kd(72, 2750, 12050),
+      kd(73, 2900, 12200),
+      kd(74, 3050, 12350),
+      commit("abcdefghij", 10, 3100, 20000),
+    ];
+    await writeFile(join(dir, "2026-11-19.jsonl"), jsonl(lines), "utf8");
+
+    const container = new Container();
+    container.bind(HighScoresFactory).toValue(null!);
+    container.bind(UserDataFactory).toValue(null!);
+    const app = new Application(container).use(
+      new Router().registerAll(allToRoutes(Controller)).middleware(),
+    );
+    const req = request.use(start(createTestServer(app.callback())));
+
+    const res = await req.GET("/_/sync/keytrace?since=0&migrate=1").send();
+    equal(res.status, 200);
+    const body = await res.body.json<{
+      syncVersion: number;
+      records: unknown[];
+      commitKeys: string[];
+    }>();
+    equal(body.syncVersion, 2);
+    equal(body.records.length, 1);
+    isTrue(body.commitKeys.includes("en-us:10"));
+    isTrue(body.commitKeys.includes("en-us:20"));
   } finally {
     if (prevEnv === undefined) {
       delete process.env.KEYTRACE_EVENTS_DIR;

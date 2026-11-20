@@ -9,12 +9,17 @@ import { Histogram, type Sample } from "@keybr/textinput";
 
 const DAY_FILE_RE = /^(\d{4}-\d{2}-\d{2})\.jsonl(\.gz)?$/;
 const PUA_RE = /[\uE000-\uF8FF]/g;
+const ZERO_WIDTH_RE = /[\u200B-\u200D\uFEFF]/g;
 const CJK_RE = /[\u3400-\u9fff]/;
 const ALNUM_RE = /[a-zA-Z0-9]/;
+const INTERNAL_APOS_TOKEN_RE = /[a-z]+(?:'[a-z]+)+/gi;
+const ENGLISH_CONTRACTION_SUFFIX_RE = /^(?:s|t|m|d|re|ve|ll)$/i;
 
+const SYNC_VERSION = 2;
 const KD_BUFFER_LIMIT = 60;
-const MAX_IKI_MS = 3000;
-const FALLBACK_KEY_MS = 200;
+const MAX_STEP_GAP_MS = 3000;
+const MAX_CORRECTION_MS = 6000;
+const MAX_TYPO_BS_RUN = 3;
 const MIN_TIME_TO_TYPE = 40;
 const MAX_TIME_TO_TYPE = 12000;
 
@@ -34,9 +39,11 @@ const MODIFIER_VK_SET = new Set([
 ]);
 
 export type KeyTraceSyncData = {
+  readonly syncVersion: number;
   readonly records: ResultJson[];
   readonly latestTs: number;
   readonly daysScanned: number;
+  readonly commitKeys?: readonly string[];
 };
 
 type RawEvent = {
@@ -83,6 +90,7 @@ type DayFileEntry = {
 export async function readKeyTraceSyncData(options?: {
   readonly eventsDir?: string;
   readonly sinceTs?: number;
+  readonly includeCommitKeys?: boolean;
 }): Promise<KeyTraceSyncData> {
   const eventsDir =
     options?.eventsDir ??
@@ -93,13 +101,21 @@ export async function readKeyTraceSyncData(options?: {
     options.sinceTs > 0
       ? options.sinceTs
       : 0;
+  const includeCommitKeys = options?.includeCommitKeys === true;
 
   const dayGroups = await listDayFiles(eventsDir);
   if (dayGroups.length === 0) {
-    return { records: [], latestTs: 0, daysScanned: 0 };
+    return {
+      syncVersion: SYNC_VERSION,
+      records: [],
+      latestTs: 0,
+      daysScanned: 0,
+      ...(includeCommitKeys ? { commitKeys: [] } : {}),
+    };
   }
 
   const buckets = new Map<string, DayBucket>();
+  const commitKeys = includeCommitKeys ? new Set<string>() : null;
   let currentSessionKey: string | null = null;
   let kdBuffer: KdEvent[] = [];
 
@@ -163,17 +179,23 @@ export async function readKeyTraceSyncData(options?: {
       const slice =
         take > 0 ? kdBuffer.splice(kdBuffer.length - take, take) : [];
 
-      if (event.ts <= sinceTs || slice.length === 0) {
-        continue;
-      }
-
-      if (typeof event.text !== "string") {
+      if (slice.length === 0 || typeof event.text !== "string") {
         continue;
       }
 
       const cleanText = event.text.replace(PUA_RE, "");
       const printableCount = countPrintable(cleanText);
       if (printableCount === 0 || printableCount > keys) {
+        continue;
+      }
+
+      const legacyLayout = detectLegacyLayoutId(cleanText);
+      if (commitKeys != null && legacyLayout != null) {
+        commitKeys.add(`${legacyLayout}:${Math.round(event.ts / 1000)}`);
+        commitKeys.add(`${legacyLayout}:${Math.floor(event.ts / 1000)}`);
+      }
+
+      if (event.ts <= sinceTs) {
         continue;
       }
 
@@ -204,8 +226,8 @@ export async function readKeyTraceSyncData(options?: {
       TextType.GENERATED,
       bucket.lastTs,
       bucket.length,
-      Math.max(1000, Math.round(bucket.activeMs)),
-      bucket.errors,
+      Math.round(bucket.activeMs),
+      Math.min(bucket.errors, bucket.length),
       new Histogram(samples),
     );
     if (result.validate()) {
@@ -219,9 +241,11 @@ export async function readKeyTraceSyncData(options?: {
   records.sort((a, b) => a.ts - b.ts);
 
   return {
+    syncVersion: SYNC_VERSION,
     records,
     latestTs,
     daysScanned: dayGroups.length,
+    ...(commitKeys != null ? { commitKeys: [...commitKeys].sort() } : {}),
   };
 }
 
@@ -371,11 +395,49 @@ function countPrintable(text: string): number {
   return count;
 }
 
-function detectLayoutId(cleanText: string): "zh-sp" | "en-us" | null {
+type WordEntry = {
+  readonly cp: number;
+  readonly mono: number;
+  readonly iki: number | null;
+  readonly isCorrected: boolean;
+};
+
+function isLeakedPinyin(cleanText: string): boolean {
+  if (CJK_RE.test(cleanText)) {
+    return false;
+  }
+  const normalized = cleanText.replace(ZERO_WIDTH_RE, "");
+  const tokens = normalized.match(INTERNAL_APOS_TOKEN_RE);
+  if (tokens == null) {
+    return false;
+  }
+  for (const token of tokens) {
+    const parts = token.split("'");
+    if (parts.length > 2) {
+      return true;
+    }
+    if (parts.length === 2 && !ENGLISH_CONTRACTION_SUFFIX_RE.test(parts[1])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function detectLegacyLayoutId(cleanText: string): "zh-sp" | "en-us" | null {
   if (CJK_RE.test(cleanText)) {
     return "zh-sp";
   }
   if (ALNUM_RE.test(cleanText)) {
+    return "en-us";
+  }
+  return null;
+}
+
+function detectLayoutId(cleanText: string): "zh-sp" | "en-us" | null {
+  if (CJK_RE.test(cleanText)) {
+    return "zh-sp";
+  }
+  if (ALNUM_RE.test(cleanText) && !isLeakedPinyin(cleanText)) {
     return "en-us";
   }
   return null;
@@ -418,44 +480,129 @@ function accumulateCommit(
     bucket.lastTs = ts;
   }
 
-  let prevEvent: KdEvent | null = null;
+  let stack: WordEntry[] = [];
+  let lastMono: number | null = null;
+  let wordAnchorMono: number | null = null;
+  let bsRun = 0;
+  let corrActive = false;
+  let corrAnchorMono: number | null = null;
+  let afterResetBs = false;
+
+  const flushStack = (): void => {
+    for (const entry of stack) {
+      const stat = getOrCreateKeyStat(bucket, entry.cp);
+      stat.hitCount += 1;
+      bucket.length += 1;
+      if (entry.isCorrected) {
+        stat.missCount += 1;
+        bucket.errors += 1;
+      }
+      if (entry.iki != null) {
+        stat.ikiSamples.push(entry.iki);
+      }
+    }
+    stack = [];
+  };
+
   for (const kd of slice) {
+    const stepGap = lastMono != null ? kd.mono - lastMono : null;
+    if (stepGap != null && (stepGap <= 0 || stepGap > MAX_STEP_GAP_MS)) {
+      if (kd.vk === 8) {
+        if (stack.length > 0) {
+          stack.pop();
+        }
+        flushStack();
+        bsRun = 1;
+        corrActive = false;
+        corrAnchorMono = null;
+        wordAnchorMono = null;
+        afterResetBs = true;
+        lastMono = kd.mono;
+        continue;
+      }
+
+      flushStack();
+      bsRun = 0;
+      corrActive = false;
+      corrAnchorMono = null;
+      wordAnchorMono = null;
+      afterResetBs = false;
+      lastMono = kd.mono;
+
+      const cp = toEligibleCodePoint(kd.vk, layoutId);
+      if (cp != null) {
+        stack.push({ cp, mono: kd.mono, iki: null, isCorrected: false });
+      }
+      continue;
+    }
+
+    if (stepGap != null) {
+      bucket.activeMs += stepGap;
+    }
+
     if (kd.vk === 8) {
-      if (prevEvent != null) {
-        const prevCp = toEligibleCodePoint(prevEvent.vk, layoutId);
-        if (prevCp != null) {
-          const prevStat = getOrCreateKeyStat(bucket, prevCp);
-          prevStat.missCount += 1;
+      bsRun += 1;
+      if (bsRun > MAX_TYPO_BS_RUN) {
+        if (stack.length > 0) {
+          stack.pop();
+        }
+        corrActive = false;
+        corrAnchorMono = null;
+        afterResetBs = true;
+      } else if (stack.length > 0) {
+        const popped = stack.pop()!;
+        corrAnchorMono =
+          stack.length > 0
+            ? stack[stack.length - 1].mono
+            : (wordAnchorMono ?? popped.mono);
+        corrActive = true;
+        afterResetBs = false;
+      } else {
+        if (bsRun === 1 && lastMono != null) {
           bucket.errors += 1;
         }
+        corrActive = false;
+        corrAnchorMono = null;
+        afterResetBs = true;
       }
-      prevEvent = kd;
+      lastMono = kd.mono;
       continue;
     }
 
     const cp = toEligibleCodePoint(kd.vk, layoutId);
     if (cp == null) {
-      prevEvent = kd;
+      flushStack();
+      wordAnchorMono = kd.mono;
+      bsRun = 0;
+      corrActive = false;
+      corrAnchorMono = null;
+      afterResetBs = false;
+      lastMono = kd.mono;
       continue;
     }
 
-    const stat = getOrCreateKeyStat(bucket, cp);
-    stat.hitCount += 1;
-    bucket.length += 1;
-
-    const prevCp =
-      prevEvent != null ? toEligibleCodePoint(prevEvent.vk, layoutId) : null;
-    const monoDiff =
-      prevEvent != null && prevCp != null ? kd.mono - prevEvent.mono : 0;
-    if (prevCp != null && monoDiff > 0 && monoDiff <= MAX_IKI_MS) {
-      stat.ikiSamples.push(monoDiff);
-      bucket.activeMs += monoDiff;
+    if (corrActive) {
+      const rawCorr = corrAnchorMono != null ? kd.mono - corrAnchorMono : null;
+      const iki =
+        rawCorr != null && rawCorr > 0
+          ? Math.min(rawCorr, MAX_CORRECTION_MS)
+          : null;
+      stack.push({ cp, mono: kd.mono, iki, isCorrected: true });
+      corrActive = false;
+      corrAnchorMono = null;
+      bsRun = 0;
+      afterResetBs = false;
     } else {
-      bucket.activeMs += FALLBACK_KEY_MS;
+      const iki =
+        !afterResetBs && stepGap != null && stepGap > 0 ? stepGap : null;
+      stack.push({ cp, mono: kd.mono, iki, isCorrected: false });
+      bsRun = 0;
+      afterResetBs = false;
     }
-
-    prevEvent = kd;
+    lastMono = kd.mono;
   }
+
+  flushStack();
 }
 
 function getOrCreateKeyStat(

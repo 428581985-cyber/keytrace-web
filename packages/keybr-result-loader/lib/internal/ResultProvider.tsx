@@ -28,6 +28,17 @@ export function ResultProvider({
     },
     [storage],
   );
+  const replaceResults = useCallback(
+    (newResults: readonly Result[]) => {
+      const next = [...newResults];
+      setResults(next);
+      storage
+        .clear()
+        .then(() => (next.length > 0 ? storage.append(next) : undefined))
+        .catch(catchError);
+    },
+    [storage],
+  );
   const clearResults = useCallback(() => {
     setResults([]);
     storage.clear().catch(catchError);
@@ -40,18 +51,21 @@ export function ResultProvider({
       return;
     }
     syncedRef.current = true;
-    syncKeyTraceResults(initialResultsRef.current, appendResults).catch(
-      () => {},
-    );
-  }, [appendResults]);
+    syncKeyTraceResults(
+      initialResultsRef.current,
+      appendResults,
+      replaceResults,
+    ).catch(() => {});
+  }, [appendResults, replaceResults]);
 
   const value = useMemo(
     () => ({
       results,
       appendResults,
+      replaceResults,
       clearResults,
     }),
-    [results, appendResults, clearResults],
+    [results, appendResults, replaceResults, clearResults],
   );
 
   return (
