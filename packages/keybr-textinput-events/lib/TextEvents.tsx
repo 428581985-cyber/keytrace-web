@@ -7,6 +7,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
 } from "react";
 import { type Callbacks, InputHandler } from "./inputhandler.ts";
 
@@ -17,38 +18,48 @@ export const TextEvents = memo(function TextEvents({
   onKeyUp,
   onInput,
   focusRef,
+  bypassIme,
 }: Callbacks & {
   readonly focusRef?: RefObject<Focusable | null>;
+  readonly bypassIme?: boolean;
 }): ReactNode {
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const divRef = useRef<HTMLDivElement>(null);
   const handler = useInputHandler();
   useImperativeHandle(focusRef, () => handler);
+  handler.setBypassIme(Boolean(bypassIme));
   useEffect(() => {
-    handler.setInput(inputRef.current);
+    handler.setInput(bypassIme ? divRef.current : inputRef.current);
     return () => {
       handler.setInput(null);
     };
-  }, [handler]);
+  }, [handler, bypassIme]);
   handler.setCallbacks({ onFocus, onBlur, onKeyDown, onKeyUp, onInput });
   return (
     <div style={divStyle}>
-      <textarea
-        ref={inputRef}
-        autoCapitalize="off"
-        autoCorrect="off"
-        spellCheck="false"
-        style={inputStyle}
-      />
+      {bypassIme ? (
+        <div
+          ref={divRef}
+          tabIndex={0}
+          role="textbox"
+          aria-readonly="true"
+          style={inputStyle}
+        />
+      ) : (
+        <textarea
+          ref={inputRef}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck="false"
+          style={inputStyle}
+        />
+      )}
     </div>
   );
 });
 
 function useInputHandler() {
-  const handlerRef = useRef<InputHandler | null>(null);
-  let handler = handlerRef.current;
-  if (handler == null) {
-    handlerRef.current = handler = new InputHandler();
-  }
+  const [handler] = useState(() => new InputHandler());
   return handler;
 }
 

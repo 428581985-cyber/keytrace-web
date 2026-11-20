@@ -25,6 +25,7 @@ import {
 import { FormattedMessage } from "react-intl";
 import * as styles from "./TextArea.module.less";
 import { TextLines, type TextLineSize } from "./TextLines.tsx";
+import { ZhLines } from "./ZhLines.tsx";
 
 export function TextArea({
   settings,
@@ -33,6 +34,7 @@ export function TextArea({
   size,
   lineTemplate,
   demo,
+  zh,
   moving,
   focusRef,
   onFocus,
@@ -47,6 +49,8 @@ export function TextArea({
   readonly size?: TextLineSize;
   readonly lineTemplate?: ComponentType<any>;
   readonly demo?: boolean;
+  /** 中文双拼模式：按词渲染成汉字，可选显示双拼码 */
+  readonly zh?: boolean;
   readonly moving?: boolean;
   readonly focusRef?: RefObject<Focusable | null>;
   readonly onFocus?: () => void;
@@ -99,21 +103,26 @@ export function TextArea({
     <div ref={ref} className={styles.root} onClick={handleClick}>
       <TextEvents
         focusRef={innerRef}
+        bypassIme={zh}
         onFocus={handleFocus}
         onBlur={handleBlur}
         onKeyDown={onKeyDown}
         onKeyUp={onKeyUp}
         onInput={onInput}
       />
-      <TextLines
-        settings={settings}
-        lines={lines}
-        wrap={wrap}
-        size={size}
-        lineTemplate={lineTemplate}
-        cursor={!demo && focus}
-        focus={demo || focus}
-      />
+      {zh ? (
+        <ZhLines lines={lines} focus={demo || focus} />
+      ) : (
+        <TextLines
+          settings={settings}
+          lines={lines}
+          wrap={wrap}
+          size={size}
+          lineTemplate={lineTemplate}
+          cursor={!demo && focus}
+          focus={demo || focus}
+        />
+      )}
       {!demo && focus && ModifierState.capsLock && (
         <div className={styles.messageArea}>
           <div className={styles.messageText}>

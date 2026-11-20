@@ -3,6 +3,7 @@ import { Description, Explainer, FieldSet } from "@keybr/widget";
 import { type ReactNode } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { AlphabetSizeProp } from "./AlphabetSizeProp.tsx";
+import { FuzzyPinyinProp } from "./FuzzyPinyinProp.tsx";
 import { KeyboardOrderProp } from "./KeyboardOrderProp.tsx";
 import { LessonLengthProp } from "./LessonLengthProp.tsx";
 import { NaturalWordsProp } from "./NaturalWordsProp.tsx";
@@ -10,6 +11,7 @@ import { RecoverKeysProp } from "./RecoverKeysProp.tsx";
 import { RepeatWordsProp } from "./RepeatWordsProp.tsx";
 import { TargetSpeedProp } from "./TargetSpeedProp.tsx";
 import { TextManglingProp } from "./TextManglingProp.tsx";
+import { ZhProp } from "./ZhProp.tsx";
 
 export function GuidedLessonSettings({
   lesson,
@@ -17,6 +19,9 @@ export function GuidedLessonSettings({
   readonly lesson: GuidedLesson;
 }): ReactNode {
   const { formatMessage } = useIntl();
+  // 中文双拼是「26 个键一开始就全开」，上游那套「先解锁几个键、按成绩逐渐放」
+  // 在这里既不生效也没意义，相关开关全部隐藏，免得看着像一个能调的选项。
+  const isZh = lesson.model.language.id === "zh-sp";
   return (
     <>
       <Explainer>
@@ -34,12 +39,14 @@ export function GuidedLessonSettings({
         })}
       >
         <TargetSpeedProp />
-        <RecoverKeysProp />
-        <KeyboardOrderProp />
-        <NaturalWordsProp />
+        {!isZh && <RecoverKeysProp />}
+        {!isZh && <KeyboardOrderProp />}
+        {!isZh && <NaturalWordsProp />}
         <RepeatWordsProp />
-        <AlphabetSizeProp />
-        <TextManglingProp />
+        {!isZh && <AlphabetSizeProp />}
+        <TextManglingProp showCapitals={!isZh} />
+        {isZh && <ZhProp />}
+        {isZh && <FuzzyPinyinProp />}
         <LessonLengthProp />
       </FieldSet>
     </>

@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { deepEqual, isTrue } from "rich-assert";
+import { deepEqual, isFalse, isTrue } from "rich-assert";
 import { InputHandler } from "./inputhandler.ts";
 import { fakeEvent, type FakeEventInit, tracingListener } from "./testing.ts";
 
@@ -204,6 +204,117 @@ test("incomplete events", () => {
   deepEqual(target.trace, [
     "100,appendChar,a,100", //
   ]);
+});
+
+test("bypassIme maps QWERTY physical keys and ignores shortcuts", () => {
+  const target = tracingListener();
+  const handler = new InputHandler();
+  handler.setBypassIme(true);
+  handler.setCallbacks(target);
+
+  const div = document.createElement("div");
+  div.tabIndex = 0;
+  handler.setInput(div);
+
+  const keyA = fakeEvent({
+    timeStamp: 100,
+    type: "keydown",
+    code: "KeyA",
+    key: "Process",
+  });
+  const shiftDown = fakeEvent({
+    timeStamp: 150,
+    type: "keydown",
+    code: "ShiftLeft",
+    key: "Shift",
+    modifiers: ["Shift"],
+  });
+  const shiftKeyA = fakeEvent({
+    timeStamp: 250,
+    type: "keydown",
+    code: "KeyA",
+    key: "A",
+    modifiers: ["Shift"],
+  });
+  const shiftUp = fakeEvent({
+    timeStamp: 300,
+    type: "keyup",
+    code: "ShiftLeft",
+    key: "Shift",
+  });
+  const space = fakeEvent({
+    timeStamp: 400,
+    type: "keydown",
+    code: "Space",
+    key: " ",
+  });
+  const comma = fakeEvent({
+    timeStamp: 500,
+    type: "keydown",
+    code: "Comma",
+    key: ",",
+  });
+  const backspace = fakeEvent({
+    timeStamp: 600,
+    type: "keydown",
+    code: "Backspace",
+    key: "Backspace",
+  });
+  const ctrlBackspace = fakeEvent({
+    timeStamp: 700,
+    type: "keydown",
+    code: "Backspace",
+    key: "Backspace",
+    modifiers: ["Control"],
+  });
+  const enter = fakeEvent({
+    timeStamp: 800,
+    type: "keydown",
+    code: "Enter",
+    key: "Enter",
+  });
+  const ctrlR = fakeEvent({
+    timeStamp: 900,
+    type: "keydown",
+    code: "KeyR",
+    key: "r",
+    modifiers: ["Control"],
+  });
+
+  for (const ev of [keyA, shiftDown, shiftKeyA, shiftUp, space, comma, backspace, ctrlBackspace, enter, ctrlR]) {
+    handler.handleKeyboard(ev);
+  }
+
+  isTrue(keyA.defaultPrevented);
+  isTrue(shiftKeyA.defaultPrevented);
+  isTrue(space.defaultPrevented);
+  isTrue(comma.defaultPrevented);
+  isTrue(backspace.defaultPrevented);
+  isTrue(ctrlBackspace.defaultPrevented);
+  isTrue(enter.defaultPrevented);
+  isFalse(ctrlR.defaultPrevented);
+
+  deepEqual(target.trace, [
+    "100,keydown,KeyA,Process",
+    "100,appendChar,a,100",
+    "150,keydown,ShiftLeft,Shift",
+    "250,keydown,KeyA,A",
+    "250,appendChar,A,75",
+    "300,keyup,ShiftLeft,Shift",
+    "400,keydown,Space, ",
+    "400,appendChar, ,150",
+    "500,keydown,Comma,,",
+    "500,appendChar,,,100",
+    "600,keydown,Backspace,Backspace",
+    "600,clearChar,\u0000,100",
+    "700,keydown,Backspace,Backspace",
+    "700,clearWord,\u0000,100",
+    "800,keydown,Enter,Enter",
+    "800,appendLineBreak,\u0000,100",
+    "900,keydown,KeyR,r",
+  ]);
+
+  handler.setInput(null);
 });
 
 function replay(handler: InputHandler, ...events: FakeEventInit[]) {

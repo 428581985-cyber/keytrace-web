@@ -8,6 +8,20 @@ import {
 import { Font } from "./font.ts";
 
 /**
+ * Fuzzy pinyin settings for Chinese Shuangpin mode.
+ */
+export type FuzzyPinyinSettings = {
+  readonly enEng: boolean;
+  readonly anAng: boolean;
+  readonly inIng: boolean;
+  readonly ianIang: boolean;
+  readonly zhZ: boolean;
+  readonly chC: boolean;
+  readonly shS: boolean;
+  readonly lN: boolean;
+};
+
+/**
  * Text input settings.
  */
 export type TextInputSettings = {
@@ -28,6 +42,14 @@ export type TextInputSettings = {
    * to the first character of a next word.
    */
   readonly spaceSkipsWords: boolean;
+  /**
+   * Fuzzy pinyin options for Chinese Shuangpin mode.
+   */
+  readonly fuzzy?: FuzzyPinyinSettings;
+  /**
+   * Whether Chinese Shuangpin mode is active.
+   */
+  readonly zhShuangpin?: boolean;
 };
 
 export const textInputSettings = {
@@ -40,6 +62,16 @@ export const textInputProps = {
   stopOnError: booleanProp("textInput.stopOnError", true),
   forgiveErrors: booleanProp("textInput.forgiveErrors", true),
   spaceSkipsWords: booleanProp("textInput.spaceSkipsWords", false),
+  fuzzy: {
+    enEng: booleanProp("textInput.fuzzy.enEng", false),
+    anAng: booleanProp("textInput.fuzzy.anAng", false),
+    inIng: booleanProp("textInput.fuzzy.inIng", false),
+    ianIang: booleanProp("textInput.fuzzy.ianIang", false),
+    zhZ: booleanProp("textInput.fuzzy.zhZ", false),
+    chC: booleanProp("textInput.fuzzy.chC", false),
+    shS: booleanProp("textInput.fuzzy.shS", false),
+    lN: booleanProp("textInput.fuzzy.lN", false),
+  } as const,
 } as const;
 
 export function toTextInputSettings(settings: Settings): TextInputSettings {
@@ -47,6 +79,17 @@ export function toTextInputSettings(settings: Settings): TextInputSettings {
     stopOnError: settings.get(textInputProps.stopOnError),
     forgiveErrors: settings.get(textInputProps.forgiveErrors),
     spaceSkipsWords: settings.get(textInputProps.spaceSkipsWords),
+    zhShuangpin: KeyboardOptions.from(settings).language.id === "zh-sp",
+    fuzzy: {
+      enEng: settings.get(textInputProps.fuzzy.enEng),
+      anAng: settings.get(textInputProps.fuzzy.anAng),
+      inIng: settings.get(textInputProps.fuzzy.inIng),
+      ianIang: settings.get(textInputProps.fuzzy.ianIang),
+      zhZ: settings.get(textInputProps.fuzzy.zhZ),
+      chC: settings.get(textInputProps.fuzzy.chC),
+      shS: settings.get(textInputProps.fuzzy.shS),
+      lN: settings.get(textInputProps.fuzzy.lN),
+    },
   };
 }
 

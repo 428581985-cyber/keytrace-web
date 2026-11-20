@@ -613,6 +613,82 @@ test("emoji", () => {
   isTrue(textInput.completed);
 });
 
+test("zh shuangpin fuzzy pinyin end-to-end", () => {
+  const fuzzy = {
+    enEng: true,
+    anAng: true,
+    inIng: true,
+    ianIang: true,
+    zhZ: true,
+    chC: true,
+    shS: true,
+    lN: true,
+  };
+
+  // Expected text: "ve nj en hk" (这 难 恩 坏)
+  // User types fuzzy alternatives: "ze lhrf"? Let's test "ze lh eg hk":
+  // - 'v' typed as 'z' (zhZ) -> accepted, step records 'v'
+  // - 'n' typed as 'l' (lN), 'j' typed as 'h' (anAng) -> accepted, steps record 'n', 'j'
+  // - 'n' after 'e' typed as 'g' (zero-initial enEng) -> accepted, step records 'n'
+  // - 'k' after 'h' (huai) must NOT accept 'b' (no false positive on uai)
+  const textInput = new TextInput("ve nj en hk", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhShuangpin: true,
+    fuzzy,
+  });
+
+  const keys = ["z", "e", " ", "l", "h", " ", "e", "g", " ", "h"];
+  let ts = 0;
+  for (const ch of keys) {
+    equal(
+      textInput.appendChar((ts += 100), ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+
+  // 'hk' (huai) must reject 'b' even with inIng enabled.
+  equal(
+    textInput.appendChar((ts += 100), "b".codePointAt(0)!, 100),
+    Feedback.Failed,
+  );
+  // Recover with 'k'.
+  equal(
+    textInput.appendChar((ts += 100), "k".codePointAt(0)!, 100),
+    Feedback.Recovered,
+  );
+  isTrue(textInput.completed);
+  equal(
+    showSteps(textInput),
+    "v,100,100|e,200,100| ,300,100|n,400,100|j,500,100| ,600,100|e,700,100|n,800,100| ,900,100|h,1000,100|!k,1200,100",
+  );
+  equal(makeStats(textInput.steps).errors, 1);
+
+  // Disabled zhShuangpin ignores fuzzy settings.
+  const enInput = new TextInput("ve", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhShuangpin: false,
+    fuzzy,
+  });
+  equal(enInput.appendChar(100, "z".codePointAt(0)!, 100), Feedback.Failed);
+
+  // Disabled fuzzy toggle rejects fuzzy alternative even in zhShuangpin mode.
+  const strictZhInput = new TextInput("ve", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhShuangpin: true,
+    fuzzy: { ...fuzzy, zhZ: false },
+  });
+  equal(
+    strictZhInput.appendChar(100, "z".codePointAt(0)!, 100),
+    Feedback.Failed,
+  );
+});
+
 function showSteps({ steps }: TextInput) {
   return steps
     .map(({ codePoint, timeStamp, timeToType, typo }) => {

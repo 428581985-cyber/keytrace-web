@@ -8,7 +8,11 @@ import {
   splitStyledText,
   type StyledText,
 } from "./chars.ts";
-import { type TextInputSettings } from "./settings.ts";
+import { matchesFuzzyShuangpin } from "./fuzzy-shuangpin.ts";
+import {
+  type FuzzyPinyinSettings,
+  type TextInputSettings,
+} from "./settings.ts";
 
 export enum Feedback {
   Succeeded,
@@ -33,6 +37,8 @@ export class TextInput {
   readonly stopOnError: boolean;
   readonly forgiveErrors: boolean;
   readonly spaceSkipsWords: boolean;
+  readonly zhShuangpin: boolean;
+  readonly fuzzy?: FuzzyPinyinSettings;
   readonly onStep: StepListener;
   readonly #text: string;
   readonly #chars: readonly Char[];
@@ -43,13 +49,21 @@ export class TextInput {
 
   constructor(
     text: StyledText,
-    { stopOnError, forgiveErrors, spaceSkipsWords }: TextInputSettings,
+    {
+      stopOnError,
+      forgiveErrors,
+      spaceSkipsWords,
+      zhShuangpin = false,
+      fuzzy,
+    }: TextInputSettings,
     onStep: StepListener = () => {},
   ) {
     this.text = text;
     this.stopOnError = stopOnError;
     this.forgiveErrors = forgiveErrors;
     this.spaceSkipsWords = spaceSkipsWords;
+    this.zhShuangpin = zhShuangpin;
+    this.fuzzy = fuzzy;
     this.onStep = onStep;
     this.#text = flattenStyledText(text);
     this.#chars = splitStyledText(text);
@@ -103,10 +117,7 @@ export class TextInput {
   }: {
     readonly timeStamp: number;
     readonly inputType:
-      | "appendChar"
-      | "appendLineBreak"
-      | "clearChar"
-      | "clearWord";
+      "appendChar" | "appendLineBreak" | "clearChar" | "clearWord";
     readonly codePoint: CodePoint;
     readonly timeToType: number;
   }): Feedback {
@@ -162,16 +173,27 @@ export class TextInput {
       }
     }
 
+    const fuzzyMatch =
+      this.zhShuangpin &&
+      matchesFuzzyShuangpin(
+        this.#chars,
+        this.pos,
+        expected,
+        codePoint,
+        this.fuzzy,
+      );
+
     if (
       (expected === codePoint ||
-        filterText.normalize(expected) === codePoint) &&
+        filterText.normalize(expected) === codePoint ||
+        fuzzyMatch) &&
       (this.forgiveErrors || this.#garbage.length === 0)
     ) {
       const typo = this.#typo;
       this.#addStep(
         {
           timeStamp,
-          codePoint,
+          codePoint: fuzzyMatch ? expected : codePoint,
           timeToType,
           typo,
         },

@@ -1,5 +1,6 @@
 export * from "./chars.ts";
 export * from "./font.ts";
+export * from "./fuzzy-shuangpin.ts";
 export * from "./histogram.ts";
 export * from "./settings.ts";
 export * from "./stats.ts";
