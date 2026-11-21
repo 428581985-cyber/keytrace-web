@@ -24,13 +24,14 @@ const ERROR_BOOST = 3;
 /** 当前聚焦的那个键再乘一点，让练习更集中 */
 const FOCUS_BOOST = 1.5;
 const ZH_LOCKED_FOCUS_KEY = "keybr.zh.lockedFocusKey";
+const ZH_DRILL_OVERRIDE_KEY = "keybr.zh.drillFocusKey";
 
-function readLockedFocusStorage(): number | null {
+function readStorageCodePoint(key: string): number | null {
   try {
     if (typeof localStorage === "undefined") {
       return null;
     }
-    const raw = localStorage.getItem(ZH_LOCKED_FOCUS_KEY);
+    const raw = localStorage.getItem(key);
     if (raw == null || raw.length === 0) {
       return null;
     }
@@ -38,6 +39,22 @@ function readLockedFocusStorage(): number | null {
   } catch {
     return null;
   }
+}
+
+function readLockedFocusStorage(): number | null {
+  return readStorageCodePoint(ZH_LOCKED_FOCUS_KEY);
+}
+
+function consumeDrillOverrideStorage(): number | null {
+  const cp = readStorageCodePoint(ZH_DRILL_OVERRIDE_KEY);
+  if (cp != null) {
+    try {
+      localStorage.removeItem(ZH_DRILL_OVERRIDE_KEY);
+    } catch {
+      // Ignore storage errors.
+    }
+  }
+  return cp;
 }
 
 function writeLockedFocusStorage(codePoint: number | null): void {
@@ -206,10 +223,22 @@ export class GuidedLesson extends Lesson {
       .sort((a, b) => confidenceOf(a) - confidenceOf(b));
     const persistFocus = options?.persistFocus ?? true;
     if (isZhShuangpin) {
+      const overrideCp = persistFocus
+        ? consumeDrillOverrideStorage()
+        : readStorageCodePoint(ZH_DRILL_OVERRIDE_KEY);
+      const overrideKey =
+        overrideCp != null
+          ? includedKeys.find((key) => key.letter.codePoint === overrideCp)
+          : undefined;
       const hasAnySamples = includedKeys.some(
         (key) => key.samples.length > 0 || key.timeToType != null,
       );
-      if (!hasAnySamples) {
+      if (overrideKey != null) {
+        lessonKeys.focus(overrideKey.letter);
+        if (persistFocus) {
+          this.#writeZhLockedFocus(overrideKey.letter.codePoint);
+        }
+      } else if (!hasAnySamples) {
         if (persistFocus) {
           this.#writeZhLockedFocus(null);
         }

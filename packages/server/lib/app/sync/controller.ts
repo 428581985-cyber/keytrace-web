@@ -10,7 +10,10 @@ import { type Result } from "@keybr/result";
 import { parseMessage } from "@keybr/result-io";
 import { UserDataFactory } from "@keybr/result-userdata";
 import { type AuthState, pProfileOwner } from "../auth/index.ts";
-import { readKeyTraceSyncData } from "./keytrace-events.ts";
+import {
+  readKeyTraceDashboard,
+  readKeyTraceSyncData,
+} from "./keytrace-events.ts";
 
 @injectable()
 @controller()
@@ -30,6 +33,17 @@ export class Controller {
       sinceTs,
       includeCommitKeys: migrate,
     });
+  }
+
+  @http.GET("/_/keytrace/summary")
+  async getKeyTraceSummary(ctx: Context<RouterState & AuthState>) {
+    const rawDays = Number(ctx.request.query.get("days") ?? 14);
+    const days =
+      Number.isFinite(rawDays) && rawDays > 0
+        ? Math.min(90, Math.floor(rawDays))
+        : 14;
+    ctx.response.type = "application/json";
+    ctx.response.body = await readKeyTraceDashboard({ days });
   }
 
   @http.GET("/_/sync/data/{id:[a-zA-Z0-9]+}")

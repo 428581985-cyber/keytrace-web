@@ -8,8 +8,10 @@ import {
   names,
   StreakListRow,
 } from "@keybr/lesson-ui";
+import { Pages } from "@keybr/pages-shared";
 import { Popup, Portal, type ZoomableProps } from "@keybr/widget";
 import { memo, type ReactNode, useEffect, useState } from "react";
+import { useIntl } from "react-intl";
 import * as styles from "./Indicators.module.less";
 import { KeyExtendedDetails } from "./KeyExtendedDetails.tsx";
 import { type LessonState } from "./state/index.ts";
@@ -82,6 +84,7 @@ export const Indicators = memo(function Indicators({
       {dailyGoal.goal > 0 && (
         <DailyGoalRow dailyGoal={dailyGoal} names={names} />
       )}
+      <KeyTracePracticePill />
       {!moving &&
         (state.type === "visible" || state.type === "visible-out") && (
           <Portal>
@@ -104,3 +107,108 @@ export const Indicators = memo(function Indicators({
     </div>
   );
 });
+
+function KeyTracePracticePill(): ReactNode {
+  const { locale } = useIntl();
+  const isZh = locale.startsWith("zh");
+  const [info, setInfo] = useState<{
+    readonly active: boolean;
+    readonly todayKeys: number;
+    readonly lastEventTs: number | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/_/keytrace/summary?days=1", {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          return;
+        }
+        const json = (await res.json()) as {
+          readonly status?: {
+            readonly active?: boolean;
+            readonly lastEventTs?: number | null;
+          };
+          readonly today?: { readonly totalKeys?: number };
+        };
+        if (alive) {
+          setInfo({
+            active: Boolean(json.status?.active),
+            todayKeys: json.today?.totalKeys ?? 0,
+            lastEventTs: json.status?.lastEventTs ?? null,
+          });
+        }
+      } catch {
+        // Ignore in offline/test environments.
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => {
+      if (!document.hidden) {
+        void load();
+      }
+    }, 30000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  if (info == null) {
+    return null;
+  }
+
+  const href = Pages.intlPath(Pages.keytrace.path, locale);
+  const timeStr =
+    info.lastEventTs != null
+      ? `${String(new Date(info.lastEventTs).getHours()).padStart(2, "0")}:${String(
+          new Date(info.lastEventTs).getMinutes(),
+        ).padStart(2, "0")}`
+      : null;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0.45rem",
+        marginBlockStart: "0.25rem",
+        fontSize: "0.78rem",
+        color: "var(--Name-color)",
+      }}
+    >
+      <span
+        style={{
+          display: "inline-block",
+          inlineSize: "6px",
+          blockSize: "6px",
+          borderRadius: "999px",
+          backgroundColor: info.active
+            ? "var(--LessonKey--hit__color, #7fae8f)"
+            : "var(--Name-color, #888)",
+        }}
+      />
+      <span>
+        {isZh
+          ? info.active
+            ? `日常监控录制中 · 今日已录 ${info.todayKeys.toLocaleString()} 键${timeStr ? ` (${timeStr})` : ""}`
+            : `日常监控 · 今日 ${info.todayKeys.toLocaleString()} 键`
+          : info.active
+            ? `KeyTrace active · ${info.todayKeys.toLocaleString()} keys today${timeStr ? ` (${timeStr})` : ""}`
+            : `KeyTrace · ${info.todayKeys.toLocaleString()} keys today`}
+      </span>
+      <a
+        href={href}
+        style={{
+          color: "var(--Value-color)",
+          textDecoration: "underline",
+        }}
+      >
+        {isZh ? "查看监控面板 →" : "Monitor →"}
+      </a>
+    </div>
+  );
+}

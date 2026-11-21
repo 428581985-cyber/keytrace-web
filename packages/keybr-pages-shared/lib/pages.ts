@@ -5,6 +5,7 @@ import {
   mdiHelpCircleOutline,
   mdiKeyboard,
   mdiKeyboardOutline,
+  mdiPulse,
   mdiSpeedometer,
   mdiTrophyOutline,
 } from "@mdi/js";
@@ -109,6 +110,27 @@ export namespace Pages {
           "The detailed statistics regarding your learning progress.",
       }),
       icon: mdiChartAreaspline,
+    },
+    meta: [{ name: "robots", content: "noindex" }],
+  } satisfies PageInfo;
+
+  export const keytrace = {
+    path: "/keytrace",
+    title: defineMessage({
+      id: "t_KeyTrace",
+      defaultMessage: "KeyTrace Monitor",
+    }),
+    link: {
+      label: defineMessage({
+        id: "t_KeyTrace",
+        defaultMessage: "KeyTrace Monitor",
+      }),
+      title: defineMessage({
+        id: "page.keytrace.description",
+        defaultMessage:
+          "Daily typing monitor and real-world typo & keystroke insights.",
+      }),
+      icon: mdiPulse,
     },
     meta: [{ name: "robots", content: "noindex" }],
   } satisfies PageInfo;

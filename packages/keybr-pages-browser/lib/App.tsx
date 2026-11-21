@@ -22,6 +22,7 @@ export function main() {
 }
 
 const HelpPage = lazy(() => import("./pages/help.tsx"));
+const KeytracePage = lazy(() => import("./pages/keytrace.tsx"));
 const PracticePage = lazy(() => import("./pages/practice.tsx"));
 const ProfilePage = lazy(() => import("./pages/profile.tsx"));
 
@@ -87,6 +88,17 @@ function PageRoutes() {
               <Title page={Pages.profile} />
               <Suspense fallback={<LoadingProgress />}>
                 <ProfilePage />
+              </Suspense>
+            </Template>
+          }
+        />
+        <Route
+          path={Pages.keytrace.path}
+          element={
+            <Template path={Pages.keytrace.path}>
+              <Title page={Pages.keytrace} />
+              <Suspense fallback={<LoadingProgress />}>
+                <KeytracePage />
               </Suspense>
             </Template>
           }

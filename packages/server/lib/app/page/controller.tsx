@@ -92,6 +92,19 @@ export class Controller {
     return this.renderPage(ctx, Pages.profile, intl);
   }
 
+  @http.GET(`${Pages.keytrace.path}`)
+  async ["keytrace"](ctx: Context<RouterState & AuthState>) {
+    return this.renderPage(ctx, Pages.keytrace);
+  }
+
+  @http.GET(`/{locale:${localePattern}}${Pages.keytrace.path}`)
+  async ["keytrace-i18n"](
+    ctx: Context<RouterState & AuthState>,
+    @pathParam("locale", pIntl) intl: IntlShape,
+  ) {
+    return this.renderPage(ctx, Pages.keytrace, intl);
+  }
+
   @http.GET(`${Pages.help.path}`)
   async ["help"](ctx: Context<RouterState & AuthState>) {
     return this.renderPage(ctx, Pages.help);

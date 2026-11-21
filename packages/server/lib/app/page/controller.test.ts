@@ -14,6 +14,7 @@ for (const path of [
   "/account",
   "/help",
   "/high-scores",
+  "/keytrace",
   "/layouts",
   "/multiplayer",
   "/profile",

@@ -1,0 +1,248 @@
+.statusBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-block-end: 1.5rem;
+  padding-inline: 1rem;
+  padding-block: 0.75rem;
+  border: var(--separator-border);
+}
+
+.statusInfo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
+.statusBadge {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  font-weight: 600;
+}
+
+.dot {
+  inline-size: 0.55rem;
+  block-size: 0.55rem;
+  border-radius: 999px;
+  background-color: var(--Name-color);
+}
+
+.dotActive {
+  background-color: var(--LessonKey--hit__color, #7fae8f);
+}
+
+.metaText {
+  color: var(--Name-color);
+  font-family: var(--value-font-family);
+  font-size: 0.85rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.statisticList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.statisticListItem {
+  flex: 1 1 9rem;
+  padding-inline: 1rem;
+  padding-block: 0.85rem;
+  border: var(--separator-border);
+}
+
+.itemName {
+  display: block;
+  color: var(--Name-color);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.itemValue {
+  display: block;
+  color: var(--Value-color);
+  font-family: var(--value-font-family);
+  font-size: 1.75rem;
+  text-align: center;
+}
+
+.itemSub {
+  display: block;
+  margin-block-start: 0.25rem;
+  color: var(--Name-color);
+  font-family: var(--value-font-family);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.chartSvg {
+  display: block;
+  inline-size: 100%;
+  block-size: 13rem;
+}
+
+.legendRow {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  margin-block-start: 0.5rem;
+  color: var(--Name-color);
+  font-size: 0.85rem;
+}
+
+.legendItem {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.swatch {
+  inline-size: 0.75rem;
+  block-size: 0.75rem;
+}
+
+.tabRow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-block-end: 0.75rem;
+}
+
+.keyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.75rem;
+}
+
+.keyCard {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: 0.85rem;
+  padding-block: 0.65rem;
+  border: var(--separator-border);
+}
+
+.keyTile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2.1rem;
+  block-size: 2.1rem;
+  border: var(--separator-border);
+  color: var(--Value-color);
+  font-family: var(--value-font-family);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.keyTileSlow {
+  border-block-end: 3px solid var(--LessonKey--miss__color, #d4503a);
+}
+
+.keyTileWarn {
+  border-block-end: 3px solid var(--LessonKey--hit__color, #7fae8f);
+}
+
+.keyMeta {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  color: var(--Name-color);
+  font-family: var(--value-font-family);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.tableWrap {
+  border: var(--separator-border);
+  overflow-inline: auto;
+}
+
+.table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.table th,
+.table td {
+  padding-inline: 0.85rem;
+  padding-block: 0.55rem;
+  border-block-end: var(--separator-border);
+  text-align: start;
+}
+
+.table tr:last-child td {
+  border-block-end: none;
+}
+
+.table th {
+  color: var(--Name-color);
+  font-weight: 600;
+}
+
+.mono {
+  font-family: var(--value-font-family);
+}
+
+.twoCols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: 1.5rem;
+}
+
+.feedList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-block-size: 26rem;
+  overflow-block: auto;
+}
+
+.feedItem {
+  padding-inline: 0.75rem;
+  padding-block: 0.55rem;
+  border: var(--separator-border);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.feedHeader {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  margin-block-end: 0.25rem;
+  color: var(--Name-color);
+  font-family: var(--value-font-family);
+  font-size: 0.78rem;
+}
+
+.wrongKey {
+  color: var(--LessonKey--miss__color, #d4503a);
+  font-family: var(--value-font-family);
+  font-weight: 700;
+}
+
+.rightKey {
+  color: var(--LessonKey--hit__color, #7fae8f);
+  font-family: var(--value-font-family);
+  font-weight: 700;
+}
+
+.emptyNote {
+  padding-block: 1rem;
+  color: var(--Name-color);
+  text-align: center;
+}

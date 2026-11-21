@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -46,11 +46,96 @@ export type KeyTraceSyncData = {
   readonly commitKeys?: readonly string[];
 };
 
+export type KeyTraceSummaryBucket = {
+  readonly totalKeys: number;
+  readonly zhKeys: number;
+  readonly enKeys: number;
+  readonly hits: number;
+  readonly errors: number;
+  readonly corrections: number;
+  readonly accuracy: number;
+  readonly avgWpm: number;
+  readonly activeMs: number;
+  readonly commits: number;
+};
+
+export type KeyTraceDailyEntry = {
+  readonly day: string;
+  readonly zhKeys: number;
+  readonly enKeys: number;
+  readonly totalKeys: number;
+  readonly errors: number;
+  readonly accuracy: number;
+  readonly avgWpm: number;
+  readonly activeMs: number;
+};
+
+export type KeyTraceAppEntry = {
+  readonly exe: string;
+  readonly totalKeys: number;
+  readonly zhKeys: number;
+  readonly enKeys: number;
+  readonly errors: number;
+  readonly accuracy: number;
+  readonly avgWpm: number;
+  readonly lastTs: number;
+};
+
+export type KeyTraceWeakKey = {
+  readonly letter: string;
+  readonly codePoint: number;
+  readonly hits: number;
+  readonly misses: number;
+  readonly errorRate: number;
+  readonly medianIkiMs: number;
+  readonly wpm: number;
+  readonly samples: number;
+};
+
+export type KeyTraceCorrectionItem = {
+  readonly ts: number;
+  readonly exe: string;
+  readonly layoutId: "zh-sp" | "en-us";
+  readonly wrongChar: string;
+  readonly rightChar: string;
+  readonly contextText: string;
+};
+
+export type KeyTraceCommitItem = {
+  readonly ts: number;
+  readonly exe: string;
+  readonly layoutId: "zh-sp" | "en-us";
+  readonly text: string;
+  readonly keys: number;
+};
+
+export type KeyTraceDashboardData = {
+  readonly status: {
+    readonly active: boolean;
+    readonly lastEventTs: number | null;
+    readonly todayDate: string;
+    readonly todayBytes: number;
+    readonly daysAvailable: number;
+    readonly imeName: string | null;
+  };
+  readonly today: KeyTraceSummaryBucket;
+  readonly overall: KeyTraceSummaryBucket;
+  readonly daily: readonly KeyTraceDailyEntry[];
+  readonly apps: readonly KeyTraceAppEntry[];
+  readonly weakKeys: {
+    readonly "zh-sp": readonly KeyTraceWeakKey[];
+    readonly "en-us": readonly KeyTraceWeakKey[];
+  };
+  readonly recentCorrections: readonly KeyTraceCorrectionItem[];
+  readonly recentCommits: readonly KeyTraceCommitItem[];
+};
+
 type RawEvent = {
   readonly v: 1;
   readonly ts: number;
   readonly mono: number;
   readonly ev: string;
+  readonly exe?: string;
   readonly sid?: string | number;
   readonly sessionStartTs?: number;
   readonly sc?: number;
@@ -462,6 +547,7 @@ function accumulateCommit(
   layoutId: "zh-sp" | "en-us",
   ts: number,
   slice: readonly KdEvent[],
+  onCorrection?: (wrongCp: number | null, rightCp: number) => void,
 ): void {
   const bucketKey = `${day}:${layoutId}`;
   let bucket = buckets.get(bucketKey);
@@ -486,6 +572,7 @@ function accumulateCommit(
   let bsRun = 0;
   let corrActive = false;
   let corrAnchorMono: number | null = null;
+  let lastPoppedCp: number | null = null;
   let afterResetBs = false;
 
   const flushStack = (): void => {
@@ -515,6 +602,7 @@ function accumulateCommit(
         bsRun = 1;
         corrActive = false;
         corrAnchorMono = null;
+        lastPoppedCp = null;
         wordAnchorMono = null;
         afterResetBs = true;
         lastMono = kd.mono;
@@ -525,6 +613,7 @@ function accumulateCommit(
       bsRun = 0;
       corrActive = false;
       corrAnchorMono = null;
+      lastPoppedCp = null;
       wordAnchorMono = null;
       afterResetBs = false;
       lastMono = kd.mono;
@@ -548,6 +637,7 @@ function accumulateCommit(
         }
         corrActive = false;
         corrAnchorMono = null;
+        lastPoppedCp = null;
         afterResetBs = true;
       } else if (stack.length > 0) {
         const popped = stack.pop()!;
@@ -555,6 +645,7 @@ function accumulateCommit(
           stack.length > 0
             ? stack[stack.length - 1].mono
             : (wordAnchorMono ?? popped.mono);
+        lastPoppedCp = popped.cp;
         corrActive = true;
         afterResetBs = false;
       } else {
@@ -563,6 +654,7 @@ function accumulateCommit(
         }
         corrActive = false;
         corrAnchorMono = null;
+        lastPoppedCp = null;
         afterResetBs = true;
       }
       lastMono = kd.mono;
@@ -576,6 +668,7 @@ function accumulateCommit(
       bsRun = 0;
       corrActive = false;
       corrAnchorMono = null;
+      lastPoppedCp = null;
       afterResetBs = false;
       lastMono = kd.mono;
       continue;
@@ -587,9 +680,11 @@ function accumulateCommit(
         rawCorr != null && rawCorr > 0
           ? Math.min(rawCorr, MAX_CORRECTION_MS)
           : null;
+      onCorrection?.(lastPoppedCp, cp);
       stack.push({ cp, mono: kd.mono, iki, isCorrected: true });
       corrActive = false;
       corrAnchorMono = null;
+      lastPoppedCp = null;
       bsRun = 0;
       afterResetBs = false;
     } else {
@@ -631,4 +726,482 @@ function computeMedianIki(samples: readonly number[]): number {
     MAX_TIME_TO_TYPE,
     Math.max(MIN_TIME_TO_TYPE, Math.round(raw)),
   );
+}
+
+const IGNORED_DISPLAY_EXES = new Set(["lockapp.exe"]);
+
+function formatLocalDay(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function sanitizeDisplayText(raw: string): string | null {
+  const cleaned = raw
+    .replace(PUA_RE, "")
+    .replace(ZERO_WIDTH_RE, "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (
+    cleaned.length === 0 ||
+    cleaned.includes("\ufffd") ||
+    /^(?:https?|chrome-error|file|edge):\/\//i.test(cleaned)
+  ) {
+    return null;
+  }
+  const masked = cleaned.replace(/\d{6,}/g, "***");
+  return masked.length > 48 ? `${masked.slice(0, 48)}…` : masked;
+}
+
+function emptySummaryBucket(): KeyTraceSummaryBucket {
+  return {
+    totalKeys: 0,
+    zhKeys: 0,
+    enKeys: 0,
+    hits: 0,
+    errors: 0,
+    corrections: 0,
+    accuracy: 1,
+    avgWpm: 0,
+    activeMs: 0,
+    commits: 0,
+  };
+}
+
+function calcWpm(keys: number, activeMs: number): number {
+  if (keys <= 0 || activeMs <= 0) {
+    return 0;
+  }
+  return Math.round((keys / 5 / (activeMs / 60000)) * 10) / 10;
+}
+
+type MutableSummary = {
+  totalKeys: number;
+  zhKeys: number;
+  enKeys: number;
+  errors: number;
+  corrections: number;
+  activeMs: number;
+  commits: number;
+};
+
+function freezeSummary(s: MutableSummary): KeyTraceSummaryBucket {
+  const hits = Math.max(0, s.totalKeys - s.errors);
+  return {
+    totalKeys: s.totalKeys,
+    zhKeys: s.zhKeys,
+    enKeys: s.enKeys,
+    hits,
+    errors: s.errors,
+    corrections: s.corrections,
+    accuracy: s.totalKeys > 0 ? hits / s.totalKeys : 1,
+    avgWpm: calcWpm(s.totalKeys, s.activeMs),
+    activeMs: s.activeMs,
+    commits: s.commits,
+  };
+}
+
+function mergeBucketsToSummary(
+  list: readonly DayBucket[],
+  commits: number,
+  corrections: number,
+): KeyTraceSummaryBucket {
+  const acc: MutableSummary = {
+    totalKeys: 0,
+    zhKeys: 0,
+    enKeys: 0,
+    errors: 0,
+    corrections,
+    activeMs: 0,
+    commits,
+  };
+  for (const b of list) {
+    acc.totalKeys += b.length;
+    if (b.layoutId === "zh-sp") {
+      acc.zhKeys += b.length;
+    } else {
+      acc.enKeys += b.length;
+    }
+    acc.errors += b.errors;
+    acc.activeMs += b.activeMs;
+  }
+  return freezeSummary(acc);
+}
+
+function buildWeakKeys(
+  buckets: Iterable<DayBucket>,
+  layoutId: "zh-sp" | "en-us",
+): KeyTraceWeakKey[] {
+  const merged = new Map<number, KeyAccumulator>();
+  for (const b of buckets) {
+    if (b.layoutId !== layoutId) {
+      continue;
+    }
+    for (const [cp, stat] of b.keys) {
+      let target = merged.get(cp);
+      if (target == null) {
+        target = { hitCount: 0, missCount: 0, ikiSamples: [] };
+        merged.set(cp, target);
+      }
+      target.hitCount += stat.hitCount;
+      target.missCount += stat.missCount;
+      for (const s of stat.ikiSamples) {
+        target.ikiSamples.push(s);
+      }
+    }
+  }
+  const out: KeyTraceWeakKey[] = [];
+  for (const [cp, stat] of merged) {
+    if (stat.hitCount <= 0) {
+      continue;
+    }
+    const medianIkiMs = computeMedianIki(stat.ikiSamples);
+    const wpm = medianIkiMs > 0 ? Math.round((12000 / medianIkiMs) * 10) / 10 : 0;
+    out.push({
+      letter: String.fromCodePoint(cp).toUpperCase(),
+      codePoint: cp,
+      hits: stat.hitCount,
+      misses: stat.missCount,
+      errorRate: stat.missCount / stat.hitCount,
+      medianIkiMs,
+      wpm,
+      samples: stat.ikiSamples.length,
+    });
+  }
+  out.sort((a, b) => {
+    if (b.errorRate !== a.errorRate) {
+      return b.errorRate - a.errorRate;
+    }
+    return b.medianIkiMs - a.medianIkiMs;
+  });
+  return out;
+}
+
+export async function readKeyTraceDashboard(options?: {
+  readonly eventsDir?: string;
+  readonly days?: number;
+}): Promise<KeyTraceDashboardData> {
+  const eventsDir =
+    options?.eventsDir ??
+    (process.env.KEYTRACE_EVENTS_DIR || join(homedir(), ".keytrace", "events"));
+  const daysLimit =
+    typeof options?.days === "number" && options.days > 0
+      ? Math.floor(options.days)
+      : 14;
+  const todayDate = formatLocalDay();
+
+  const dayGroups = await listDayFiles(eventsDir);
+  if (dayGroups.length === 0) {
+    return {
+      status: {
+        active: false,
+        lastEventTs: null,
+        todayDate,
+        todayBytes: 0,
+        daysAvailable: 0,
+        imeName: null,
+      },
+      today: emptySummaryBucket(),
+      overall: emptySummaryBucket(),
+      daily: [],
+      apps: [],
+      weakKeys: { "zh-sp": [], "en-us": [] },
+      recentCorrections: [],
+      recentCommits: [],
+    };
+  }
+
+  let todayBytes = 0;
+  const todayGroup = dayGroups.find((g) => g.date === todayDate);
+  if (todayGroup != null) {
+    for (const f of todayGroup.files) {
+      try {
+        const info = await stat(f.path);
+        todayBytes += info.size;
+      } catch {
+        // Ignore stat error.
+      }
+    }
+  }
+
+  const buckets = new Map<string, DayBucket>();
+  const commitsByDay = new Map<string, number>();
+  const correctionsByDay = new Map<string, number>();
+  const appMap = new Map<
+    string,
+    {
+      exe: string;
+      totalKeys: number;
+      zhKeys: number;
+      enKeys: number;
+      errors: number;
+      activeMs: number;
+      lastTs: number;
+    }
+  >();
+  const recentCorrections: KeyTraceCorrectionItem[] = [];
+  const recentCommits: KeyTraceCommitItem[] = [];
+
+  let currentSessionKey: string | null = null;
+  let kdBuffer: KdEvent[] = [];
+  let lastEventTs: number | null = null;
+  let imeName: string | null = null;
+
+  for (const { date, files } of dayGroups) {
+    const dayEvents: RawEvent[] = [];
+    for (const file of files) {
+      const parsed = await readEventsFile(file);
+      for (const ev of parsed) {
+        dayEvents.push(ev);
+      }
+    }
+    if (dayEvents.length === 0) {
+      continue;
+    }
+    dayEvents.sort(compareEvents);
+
+    for (const event of dayEvents) {
+      if (
+        typeof event.ts === "number" &&
+        Number.isFinite(event.ts) &&
+        (lastEventTs == null || event.ts > lastEventTs)
+      ) {
+        lastEventTs = event.ts;
+      }
+
+      if (event.ev === "meta" && typeof event.text === "string") {
+        const m = event.text.match(/^ime=(.+)$/);
+        if (m) {
+          imeName = m[1];
+        }
+        continue;
+      }
+
+      const sessionKey = getSessionKey(event);
+      if (sessionKey != null && sessionKey !== currentSessionKey) {
+        currentSessionKey = sessionKey;
+        kdBuffer = [];
+      }
+
+      if (event.ev === "kd") {
+        const sc = event.sc;
+        const vk = event.vk;
+        const mods =
+          typeof event.mods === "number" && Number.isFinite(event.mods)
+            ? event.mods
+            : 0;
+        if (
+          typeof sc === "number" &&
+          sc > 0 &&
+          typeof vk === "number" &&
+          Number.isFinite(vk) &&
+          (mods & 0b1110) === 0 &&
+          !MODIFIER_VK_SET.has(vk)
+        ) {
+          kdBuffer.push({ vk, mono: event.mono });
+          if (kdBuffer.length > KD_BUFFER_LIMIT) {
+            kdBuffer.shift();
+          }
+        }
+        continue;
+      }
+
+      if (event.ev !== "commit") {
+        continue;
+      }
+
+      const keys =
+        typeof event.keys === "number" && Number.isFinite(event.keys)
+          ? Math.floor(event.keys)
+          : 0;
+      if (keys <= 0) {
+        continue;
+      }
+
+      const take = Math.min(keys, kdBuffer.length);
+      const slice =
+        take > 0 ? kdBuffer.splice(kdBuffer.length - take, take) : [];
+      if (slice.length === 0 || typeof event.text !== "string") {
+        continue;
+      }
+
+      const cleanText = event.text.replace(PUA_RE, "");
+      const printableCount = countPrintable(cleanText);
+      if (printableCount === 0 || printableCount > keys) {
+        continue;
+      }
+
+      const layoutId = detectLayoutId(cleanText);
+      if (layoutId == null) {
+        continue;
+      }
+
+      const exeRaw =
+        typeof event.exe === "string" && event.exe.trim() !== ""
+          ? event.exe.trim()
+          : "unknown";
+      if (IGNORED_DISPLAY_EXES.has(exeRaw.toLowerCase())) {
+        continue;
+      }
+
+      const prevBucketLen =
+        (buckets.get(`${date}:${layoutId}`)?.length ?? 0);
+      const prevBucketErr =
+        (buckets.get(`${date}:${layoutId}`)?.errors ?? 0);
+      const prevBucketActive =
+        (buckets.get(`${date}:${layoutId}`)?.activeMs ?? 0);
+
+      const displayText = sanitizeDisplayText(cleanText);
+      let dayCorr = 0;
+
+      accumulateCommit(
+        buckets,
+        date,
+        layoutId,
+        event.ts,
+        slice,
+        (wrongCp, rightCp) => {
+          dayCorr += 1;
+          if (wrongCp != null && displayText != null) {
+            recentCorrections.push({
+              ts: event.ts,
+              exe: exeRaw,
+              layoutId,
+              wrongChar: String.fromCodePoint(wrongCp),
+              rightChar: String.fromCodePoint(rightCp),
+              contextText: displayText,
+            });
+            if (recentCorrections.length > 60) {
+              recentCorrections.shift();
+            }
+          }
+        },
+      );
+
+      commitsByDay.set(date, (commitsByDay.get(date) ?? 0) + 1);
+      if (dayCorr > 0) {
+        correctionsByDay.set(date, (correctionsByDay.get(date) ?? 0) + dayCorr);
+      }
+
+      const afterBucket = buckets.get(`${date}:${layoutId}`);
+      const deltaKeys = (afterBucket?.length ?? 0) - prevBucketLen;
+      const deltaErr = (afterBucket?.errors ?? 0) - prevBucketErr;
+      const deltaActive = (afterBucket?.activeMs ?? 0) - prevBucketActive;
+
+      if (deltaKeys > 0) {
+        let app = appMap.get(exeRaw);
+        if (app == null) {
+          app = {
+            exe: exeRaw,
+            totalKeys: 0,
+            zhKeys: 0,
+            enKeys: 0,
+            errors: 0,
+            activeMs: 0,
+            lastTs: event.ts,
+          };
+          appMap.set(exeRaw, app);
+        }
+        app.totalKeys += deltaKeys;
+        if (layoutId === "zh-sp") {
+          app.zhKeys += deltaKeys;
+        } else {
+          app.enKeys += deltaKeys;
+        }
+        app.errors += deltaErr;
+        app.activeMs += deltaActive;
+        if (event.ts > app.lastTs) {
+          app.lastTs = event.ts;
+        }
+      }
+
+      if (displayText != null && deltaKeys > 0) {
+        recentCommits.push({
+          ts: event.ts,
+          exe: exeRaw,
+          layoutId,
+          text: displayText,
+          keys: deltaKeys,
+        });
+        if (recentCommits.length > 40) {
+          recentCommits.shift();
+        }
+      }
+    }
+  }
+
+  const allBuckets = [...buckets.values()];
+  const todayBuckets = allBuckets.filter((b) => b.day === todayDate);
+  const totalCommits = [...commitsByDay.values()].reduce((a, b) => a + b, 0);
+  const totalCorrections = [...correctionsByDay.values()].reduce(
+    (a, b) => a + b,
+    0,
+  );
+
+  const dayKeys = [...new Set(allBuckets.map((b) => b.day))].sort();
+  const daily: KeyTraceDailyEntry[] = dayKeys
+    .slice(-daysLimit)
+    .map((day) => {
+      const sum = mergeBucketsToSummary(
+        allBuckets.filter((b) => b.day === day),
+        commitsByDay.get(day) ?? 0,
+        correctionsByDay.get(day) ?? 0,
+      );
+      return {
+        day,
+        zhKeys: sum.zhKeys,
+        enKeys: sum.enKeys,
+        totalKeys: sum.totalKeys,
+        errors: sum.errors,
+        accuracy: sum.accuracy,
+        avgWpm: sum.avgWpm,
+        activeMs: sum.activeMs,
+      };
+    });
+
+  const apps: KeyTraceAppEntry[] = [...appMap.values()]
+    .sort((a, b) => b.totalKeys - a.totalKeys)
+    .slice(0, 8)
+    .map((a) => ({
+      exe: a.exe,
+      totalKeys: a.totalKeys,
+      zhKeys: a.zhKeys,
+      enKeys: a.enKeys,
+      errors: a.errors,
+      accuracy:
+        a.totalKeys > 0 ? Math.max(0, a.totalKeys - a.errors) / a.totalKeys : 1,
+      avgWpm: calcWpm(a.totalKeys, a.activeMs),
+      lastTs: a.lastTs,
+    }));
+
+  const now = Date.now();
+  const active =
+    todayBytes > 0 && lastEventTs != null && now - lastEventTs <= 15 * 60 * 1000;
+
+  return {
+    status: {
+      active,
+      lastEventTs,
+      todayDate,
+      todayBytes,
+      daysAvailable: dayGroups.length,
+      imeName,
+    },
+    today: mergeBucketsToSummary(
+      todayBuckets,
+      commitsByDay.get(todayDate) ?? 0,
+      correctionsByDay.get(todayDate) ?? 0,
+    ),
+    overall: mergeBucketsToSummary(allBuckets, totalCommits, totalCorrections),
+    daily,
+    apps,
+    weakKeys: {
+      "zh-sp": buildWeakKeys(allBuckets, "zh-sp"),
+      "en-us": buildWeakKeys(allBuckets, "en-us"),
+    },
+    recentCorrections: recentCorrections.slice(-20).reverse(),
+    recentCommits: recentCommits.slice(-15).reverse(),
+  };
 }

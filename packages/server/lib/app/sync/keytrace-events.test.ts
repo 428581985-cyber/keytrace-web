@@ -613,3 +613,70 @@ test("migrate=1 endpoint returns commitKeys covering legacy commits", async () =
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("GET /_/keytrace/summary returns human-readable dashboard stats, apps, weakKeys, and corrections", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-dash-"));
+  const prevEnv = process.env.KEYTRACE_EVENTS_DIR;
+  process.env.KEYTRACE_EVENTS_DIR = dir;
+  try {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const baseTs = Date.now() - 2000;
+    const lines = [
+      { v: 1, ts: baseTs - 1000, mono: 10, ev: "meta", exe: "keytrace", text: "ime=shuangpin/xiaohe" },
+      // Type 'h' (72) -> 'v' (86) -> BS (8) -> 'c' (67) -> commit "好" in msedge.exe
+      { v: 1, ts: baseTs + 100, mono: 100, ev: "kd", sc: 35, vk: 72, mods: 0, exe: "msedge.exe", sid: "s1" },
+      { v: 1, ts: baseTs + 250, mono: 250, ev: "kd", sc: 47, vk: 86, mods: 0, exe: "msedge.exe", sid: "s1" },
+      { v: 1, ts: baseTs + 400, mono: 400, ev: "kd", sc: 14, vk: 8, mods: 0, exe: "msedge.exe", sid: "s1" },
+      { v: 1, ts: baseTs + 550, mono: 550, ev: "kd", sc: 46, vk: 67, mods: 0, exe: "msedge.exe", sid: "s1" },
+      { v: 1, ts: baseTs + 600, mono: 600, ev: "commit", exe: "msedge.exe", sid: "s1", text: "好", keys: 4 },
+      // LockApp noise must be excluded
+      { v: 1, ts: baseTs + 700, mono: 700, ev: "kd", sc: 2, vk: 49, mods: 0, exe: "LockApp.exe", sid: "s1" },
+      { v: 1, ts: baseTs + 750, mono: 750, ev: "commit", exe: "LockApp.exe", sid: "s1", text: "1", keys: 1 },
+    ];
+    await writeFile(join(dir, `${today}.jsonl`), jsonl(lines), "utf8");
+
+    const container = new Container();
+    container.bind(HighScoresFactory).toValue(null!);
+    container.bind(UserDataFactory).toValue(null!);
+    const app = new Application(container).use(
+      new Router().registerAll(allToRoutes(Controller)).middleware(),
+    );
+    const req = request.use(start(createTestServer(app.callback())));
+    const res = await req.GET("/_/keytrace/summary?days=7").send();
+    equal(res.status, 200);
+    const body = await res.body.json<{
+      status: { active: boolean; imeName: string | null; todayBytes: number };
+      today: { totalKeys: number; zhKeys: number; corrections: number; commits: number };
+      apps: { exe: string; totalKeys: number }[];
+      weakKeys: { "zh-sp": { letter: string; misses: number }[] };
+      recentCorrections: { wrongChar: string; rightChar: string; exe: string; contextText: string }[];
+      recentCommits: { text: string; exe: string }[];
+    }>();
+
+    equal(body.status.active, true);
+    equal(body.status.imeName, "shuangpin/xiaohe");
+    isTrue(body.status.todayBytes > 0);
+    equal(body.today.totalKeys, 2);
+    equal(body.today.zhKeys, 2);
+    equal(body.today.corrections, 1);
+    equal(body.today.commits, 1);
+    equal(body.apps.length, 1);
+    equal(body.apps[0].exe, "msedge.exe");
+    equal(body.recentCorrections.length, 1);
+    equal(body.recentCorrections[0].wrongChar, "v");
+    equal(body.recentCorrections[0].rightChar, "c");
+    equal(body.recentCorrections[0].contextText, "好");
+    equal(body.recentCommits.length, 1);
+    equal(body.recentCommits[0].text, "好");
+    const cMetric = body.weakKeys["zh-sp"].find((k) => k.letter === "C");
+    equal(cMetric?.misses, 1);
+  } finally {
+    if (prevEnv === undefined) {
+      delete process.env.KEYTRACE_EVENTS_DIR;
+    } else {
+      process.env.KEYTRACE_EVENTS_DIR = prevEnv;
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
+});
