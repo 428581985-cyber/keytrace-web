@@ -1,8 +1,8 @@
-import { Layout, loadKeyboard } from "@keybr/keyboard";
+import { Language, Layout, loadKeyboard } from "@keybr/keyboard";
 import { KeyLayer, VirtualKeyboard, ZonesLayer } from "@keybr/keyboard-ui";
 import { KeyLegendList } from "@keybr/lesson-ui";
 import { useSettings } from "@keybr/settings";
-import { singleLine, toTextDisplaySettings } from "@keybr/textinput";
+import { Font, singleLine, toTextDisplaySettings } from "@keybr/textinput";
 import { StaticText } from "@keybr/textinput-ui";
 import { Article, Figure } from "@keybr/widget";
 import { FormattedMessage } from "react-intl";
@@ -14,7 +14,12 @@ import * as styles from "./HelpApp.module.less";
 export function HelpPage() {
   const keyboard = loadKeyboard(Layout.EN_US);
   const { settings } = useSettings();
-  const textDisplaySettings = toTextDisplaySettings(settings);
+  const userTextDisplaySettings = toTextDisplaySettings(settings);
+  const textDisplaySettings = {
+    ...userTextDisplaySettings,
+    font: Font.find(Font.select(Language.EN), userTextDisplaySettings.font),
+    language: Language.EN,
+  };
 
   return (
     <Article>
