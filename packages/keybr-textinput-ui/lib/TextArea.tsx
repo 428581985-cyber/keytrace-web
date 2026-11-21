@@ -111,7 +111,7 @@ export function TextArea({
         onInput={onInput}
       />
       {zh ? (
-        <ZhLines lines={lines} focus={demo || focus} />
+        <ZhLines settings={settings} lines={lines} focus={demo || focus} />
       ) : (
         <TextLines
           settings={settings}

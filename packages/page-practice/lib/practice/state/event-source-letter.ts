@@ -15,7 +15,9 @@ export class LetterEvents implements LessonEventSource {
     this.#lesson = lesson;
     this.#keyStatsMap = keyStatsMap;
     this.#included = new Set();
-    const lessonKeys = this.#lesson.update(this.#keyStatsMap);
+    const lessonKeys = this.#lesson.update(this.#keyStatsMap, {
+      persistFocus: false,
+    });
     for (const lessonKey of lessonKeys.findIncludedKeys()) {
       if (!this.#included.has(lessonKey.letter)) {
         this.#included.add(lessonKey.letter);
@@ -24,7 +26,9 @@ export class LetterEvents implements LessonEventSource {
   }
 
   append(result: Result, listener: LessonEventListener): void {
-    const lessonKeys = this.#lesson.update(this.#keyStatsMap);
+    const lessonKeys = this.#lesson.update(this.#keyStatsMap, {
+      persistFocus: false,
+    });
     for (const lessonKey of lessonKeys.findIncludedKeys()) {
       if (!this.#included.has(lessonKey.letter)) {
         this.#included.add(lessonKey.letter);

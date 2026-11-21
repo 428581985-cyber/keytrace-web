@@ -415,8 +415,11 @@ export class Language implements EnumItem {
   }
 }
 
-export function getExampleText({ script }: Language): string {
-  switch (script) {
+export function getExampleText(language: Language): string {
+  if (language.id === "zh-sp") {
+    return "mwtm jmii tiug uuru sudu.";
+  }
+  switch (language.script) {
     case "arabic":
       return "تناول المزيد من التفاح والبرتقال.";
     case "armenian":

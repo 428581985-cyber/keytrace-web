@@ -37,7 +37,10 @@ export abstract class Lesson {
 
   abstract get letters(): readonly Letter[];
 
-  abstract update(keyStatsMap: KeyStatsMap): LessonKeys;
+  abstract update(
+    keyStatsMap: KeyStatsMap,
+    options?: { readonly persistFocus?: boolean },
+  ): LessonKeys;
 
   abstract generate(lessonKeys: LessonKeys, rng: RNGStream): StyledText;
 }

@@ -23,6 +23,40 @@ const SLOW_BOOST = 4;
 const ERROR_BOOST = 3;
 /** 当前聚焦的那个键再乘一点，让练习更集中 */
 const FOCUS_BOOST = 1.5;
+const ZH_LOCKED_FOCUS_KEY = "keybr.zh.lockedFocusKey";
+
+function readLockedFocusStorage(): number | null {
+  try {
+    if (typeof localStorage === "undefined") {
+      return null;
+    }
+    const raw = localStorage.getItem(ZH_LOCKED_FOCUS_KEY);
+    if (raw == null || raw.length === 0) {
+      return null;
+    }
+    return raw.codePointAt(0) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLockedFocusStorage(codePoint: number | null): void {
+  try {
+    if (typeof localStorage === "undefined") {
+      return;
+    }
+    if (codePoint == null) {
+      localStorage.removeItem(ZH_LOCKED_FOCUS_KEY);
+    } else {
+      localStorage.setItem(
+        ZH_LOCKED_FOCUS_KEY,
+        String.fromCodePoint(codePoint),
+      );
+    }
+  } catch {
+    // Ignore storage errors (e.g. restricted or full storage).
+  }
+}
 
 /** 按权重抽样；权重和非法时退回均匀抽样 */
 function sampleWeighted<T>(
@@ -54,6 +88,19 @@ export class GuidedLesson extends Lesson {
   // update() 根据打字统计算出来，generate() 抽词时用。
   // 空表 = 没有数据 = 均匀抽样（与原先行为一致）。
   #keyWeights = new Map<number, number>();
+  #zhLockedFocusCodePoint: number | null = null;
+
+  #readZhLockedFocus(): number | null {
+    if (typeof localStorage !== "undefined") {
+      return readLockedFocusStorage();
+    }
+    return this.#zhLockedFocusCodePoint;
+  }
+
+  #writeZhLockedFocus(codePoint: number | null): void {
+    this.#zhLockedFocusCodePoint = codePoint;
+    writeLockedFocusStorage(codePoint);
+  }
 
   constructor(
     settings: Settings,
@@ -83,7 +130,10 @@ export class GuidedLesson extends Lesson {
     return this.model.letters;
   }
 
-  override update(keyStatsMap: KeyStatsMap) {
+  override update(
+    keyStatsMap: KeyStatsMap,
+    options?: { readonly persistFocus?: boolean },
+  ) {
     // 中文双拼不能按上游那套"先解锁几个字母"来：英文是 26 个字母慢慢扩，
     // 双拼的每个音节都是"声母键 + 韵母键"，只解锁 6 个键时能拼出的合法音节
     // 只剩 a / da / fa 这几种，屏幕上就全是同一个字。这里直接全解锁。
@@ -145,13 +195,45 @@ export class GuidedLesson extends Lesson {
 
     // Find the least confident of all included keys and focus on it.
     const confidenceOf = (key: LessonKey): number => {
+      if (isZhShuangpin) {
+        return key.confidence ?? 0;
+      }
       return recoverKeys ? (key.confidence ?? 0) : (key.bestConfidence ?? 0);
     };
-    const weakestKeys = lessonKeys
-      .findIncludedKeys()
+    const includedKeys = lessonKeys.findIncludedKeys();
+    const weakestKeys = includedKeys
       .filter((key) => confidenceOf(key) < 1)
       .sort((a, b) => confidenceOf(a) - confidenceOf(b));
-    if (weakestKeys.length > 0) {
+    const persistFocus = options?.persistFocus ?? true;
+    if (isZhShuangpin) {
+      const hasAnySamples = includedKeys.some(
+        (key) => key.samples.length > 0 || key.timeToType != null,
+      );
+      if (!hasAnySamples) {
+        if (persistFocus) {
+          this.#writeZhLockedFocus(null);
+        }
+        if (weakestKeys.length > 0) {
+          lessonKeys.focus(weakestKeys[0].letter);
+        }
+      } else {
+        const lockedCodePoint = this.#readZhLockedFocus();
+        const lockedKey =
+          lockedCodePoint != null
+            ? includedKeys.find((key) => key.letter.codePoint === lockedCodePoint)
+            : undefined;
+        if (lockedKey != null && confidenceOf(lockedKey) < 1) {
+          lessonKeys.focus(lockedKey.letter);
+        } else if (weakestKeys.length > 0) {
+          lessonKeys.focus(weakestKeys[0].letter);
+          if (persistFocus) {
+            this.#writeZhLockedFocus(weakestKeys[0].letter.codePoint);
+          }
+        } else if (persistFocus) {
+          this.#writeZhLockedFocus(null);
+        }
+      }
+    } else if (weakestKeys.length > 0) {
       lessonKeys.focus(weakestKeys[0].letter);
     }
 
@@ -267,11 +349,14 @@ export class GuidedLesson extends Lesson {
   #makeWordGenerator(filter: Filter, rng: RNGStream) {
     const isZh = this.model.language.id === "zh-sp";
     if (isZh) {
-      // 中文不走音素模型：它造的是伪音节，没有意义。
-      // 直接在真实词表里抽，按设置的比例决定这一轮抽成语还是普通词。
-      // 第二个参数 true：不做「必须含聚焦键」的硬筛，改由权重软偏向弱键。
-      const commons = this.dictionary.find(filter, true);
-      const idioms = this.idioms.find(filter, true);
+      // 中文不走音素模型：直接从真实词表里抽包含当前聚焦键（声母或韵母）的词；
+      // 仅在普通词和成语都找不到包含聚焦键的词时才退回全词表，避免空池。
+      let commons = this.dictionary.find(filter, false);
+      let idioms = this.idioms.find(filter, false);
+      if (commons.length === 0 && idioms.length === 0) {
+        commons = this.dictionary.find(filter, true);
+        idioms = this.idioms.find(filter, true);
+      }
       const ratio = this.settings.get(lessonProps.idioms);
       // 权重进来时算一次，之后每次抽词只做采样，不重复遍历词表
       const commonsWeights = this.#weightsFor(commons);

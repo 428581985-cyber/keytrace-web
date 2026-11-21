@@ -12,7 +12,8 @@ export type Script =
   | "hiragana"
   | "katakana"
   | "latin"
-  | "thai";
+  | "thai"
+  | "han";
 
 export class FontFace {
   readonly family: string;
@@ -29,13 +30,14 @@ export class FontFace {
     style: FontStyle,
     fallbacks: readonly Fallback[],
     scripts: readonly Script[],
+    displayName?: string,
   ) {
     this.family = family;
     this.weight = weight;
     this.style = style;
     this.fallbacks = fallbacks;
     this.scripts = scripts;
-    this.name = fontName(family, weight, style);
+    this.name = displayName ?? fontName(family, weight, style);
     this.cssProperties = {
       fontFamily: [family, ...fallbacks].join(","),
       fontWeight: weight,
@@ -124,6 +126,63 @@ export const CURSIVE_I = new FontFace("cursive", "400", "italic", ["whitespace"]
 export const CURSIVE_B = new FontFace("cursive", "700", "normal", ["whitespace"], aacghlt);
 export const CURSIVE_BI = new FontFace("cursive", "700", "italic", ["whitespace"], aacghlt);
 
+export const ZH_SONGTI = new FontFace(
+  "SimSun",
+  "400",
+  "normal",
+  ['"Songti SC"', '"Noto Serif CJK SC"', "serif"],
+  ["han"],
+  "宋体",
+);
+export const ZH_SONGTI_B = new FontFace(
+  "SimSun",
+  "700",
+  "normal",
+  ['"Songti SC"', '"Noto Serif CJK SC"', "serif"],
+  ["han"],
+  "宋体 (粗体)",
+);
+export const ZH_YAHEI = new FontFace(
+  "Microsoft YaHei",
+  "400",
+  "normal",
+  ['"PingFang SC"', '"Noto Sans CJK SC"', "sans-serif"],
+  ["han"],
+  "微软雅黑",
+);
+export const ZH_YAHEI_B = new FontFace(
+  "Microsoft YaHei",
+  "700",
+  "normal",
+  ['"PingFang SC"', '"Noto Sans CJK SC"', "sans-serif"],
+  ["han"],
+  "微软雅黑 (粗体)",
+);
+export const ZH_KAITI = new FontFace(
+  "KaiTi",
+  "400",
+  "normal",
+  ['"Kaiti SC"', "STKaiti", "serif"],
+  ["han"],
+  "楷体",
+);
+export const ZH_FANGSONG = new FontFace(
+  "FangSong",
+  "400",
+  "normal",
+  ['"FangSong SC"', "STFangsong", "serif"],
+  ["han"],
+  "仿宋",
+);
+export const ZH_YOUYUAN = new FontFace(
+  "YouYuan",
+  "400",
+  "normal",
+  ['"PingFang SC"', '"Microsoft YaHei"', "sans-serif"],
+  ["han"],
+  "幼圆",
+);
+
 export const FONTS_FACES: readonly FontFace[] = [
   ARAD,
   ARAD_B,
@@ -197,6 +256,13 @@ export const FONTS_FACES: readonly FontFace[] = [
   OPEN_DYSLEXIC_I,
   OPEN_DYSLEXIC_B,
   OPEN_DYSLEXIC_BI,
+  ZH_SONGTI,
+  ZH_SONGTI_B,
+  ZH_YAHEI,
+  ZH_YAHEI_B,
+  ZH_KAITI,
+  ZH_FANGSONG,
+  ZH_YOUYUAN,
 ];
 
 function fontName(family: string, weight: FontWeight, style: FontStyle): string {

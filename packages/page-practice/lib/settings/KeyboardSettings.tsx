@@ -1,11 +1,8 @@
-import { useCollator } from "@keybr/intl";
 import {
-  Emulation,
   Geometry,
   KeyboardOptions,
   keyboardProps,
   Language,
-  Layout,
   useFormattedNames,
   useKeyboard,
   ZoneMod,
@@ -14,7 +11,6 @@ import { KeyLayer, PointersLayer, VirtualKeyboard } from "@keybr/keyboard-ui";
 import { Tasks } from "@keybr/lang";
 import { useSettings } from "@keybr/settings";
 import { ModifierState, useDepressedKeys } from "@keybr/textinput-events";
-import { type CodePoint } from "@keybr/unicode";
 import {
   CheckBox,
   Description,
@@ -24,7 +20,7 @@ import {
   FieldSet,
   OptionList,
 } from "@keybr/widget";
-import { memo, type ReactNode, useEffect, useState } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useState } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 
 export function KeyboardSettings(): ReactNode {
@@ -52,129 +48,39 @@ export function KeyboardSettings(): ReactNode {
   );
 }
 
+const SELECTABLE_LANGUAGES: readonly Language[] = [Language.ZH_SP, Language.EN];
+
 function LayoutProp(): ReactNode {
-  const { formatMessage } = useIntl();
-  const {
-    formatLanguageName, //
-    formatLayoutName,
-    formatFullLayoutName,
-  } = useFormattedNames();
-  const { compare } = useCollator();
+  const { formatLanguageName } = useFormattedNames();
   const { settings, updateSettings } = useSettings();
   const options = KeyboardOptions.from(settings);
+  const languages = SELECTABLE_LANGUAGES.includes(options.language)
+    ? SELECTABLE_LANGUAGES
+    : [...SELECTABLE_LANGUAGES, options.language];
   return (
-    <>
-      <FieldList>
-        <Field>
-          <FormattedMessage id="t_Language:" defaultMessage="Language:" />
-        </Field>
-        <Field>
-          <OptionList
-            options={options
-              .selectableLanguages()
-              .map((item) => ({
-                value: item.id,
-                name: formatLanguageName(item),
-              }))
-              .sort((a, b) => compare(a.name, b.name))}
-            value={options.language.id}
-            onSelect={(id) => {
-              updateSettings(
-                options
-                  .withLanguage(Language.ALL.get(id))
-                  .withGeometry(options.geometry)
-                  .withZones(options.zones)
-                  .save(settings),
-              );
-            }}
-          />
-        </Field>
-        <Field>
-          <FormattedMessage id="t_Layout:" defaultMessage="Layout:" />
-        </Field>
-        <Field>
-          <OptionList
-            options={options.selectableLayouts().map((item) => ({
-              value: item.id,
-              name:
-                item.language.id === options.language.id
-                  ? formatLayoutName(item)
-                  : formatFullLayoutName(item),
-            }))}
-            value={options.layout.id}
-            onSelect={(id) => {
-              updateSettings(
-                options
-                  .withLayout(Layout.ALL.get(id))
-                  .withGeometry(options.geometry)
-                  .withZones(options.zones)
-                  .save(settings),
-              );
-            }}
-          />
-        </Field>
-      </FieldList>
-      <FieldList>
-        <Field>
-          <CheckBox
-            checked={
-              settings.get(keyboardProps.emulation) === Emulation.Forward
-            }
-            disabled={!options.layout.emulate}
-            label={formatMessage({
-              id: "t_Emulate_layout",
-              defaultMessage: "Emulate layout",
-            })}
-            onChange={(value) => {
-              updateSettings(
-                settings.set(
-                  keyboardProps.emulation,
-                  value ? Emulation.Forward : Emulation.None,
-                ),
-              );
-            }}
-          />
-        </Field>
-      </FieldList>
-      <Explainer>
-        <Description>
-          <FormattedMessage
-            id="keyboard.emulation.forward.description"
-            defaultMessage="Keyboard emulation ignores the keyboard layout configured in your system and allows you to practice the selected keyboard regardless of how your system is configured. It is more convenient to keep the emulation option enabled. If the above option is disabled (greyed out), this means the layout cannot be emulated (mainly for layouts which use dead keys)."
-          />
-        </Description>
-      </Explainer>
-      <FieldList>
-        <Field>
-          <CheckBox
-            checked={
-              settings.get(keyboardProps.emulation) === Emulation.Reverse
-            }
-            disabled={!options.layout.emulate}
-            label={formatMessage({
-              id: "t_Keyboard_hardware_emulates_",
-              defaultMessage: "Keyboard hardware emulates layout",
-            })}
-            onChange={(value) => {
-              updateSettings(
-                settings.set(
-                  keyboardProps.emulation,
-                  value ? Emulation.Reverse : Emulation.None,
-                ),
-              );
-            }}
-          />
-        </Field>
-      </FieldList>
-      <Explainer>
-        <Description>
-          <FormattedMessage
-            id="keyboard.emulation.reverse.description"
-            defaultMessage="Use this option if you have a hardware layout switcher on your keyboard, and you see that incorrect keys are highlighted on the virtual keyboard."
-          />
-        </Description>
-      </Explainer>
-    </>
+    <FieldList>
+      <Field>
+        <FormattedMessage id="t_Language:" defaultMessage="Language:" />
+      </Field>
+      <Field>
+        <OptionList
+          options={languages.map((item) => ({
+            value: item.id,
+            name: formatLanguageName(item),
+          }))}
+          value={options.language.id}
+          onSelect={(id) => {
+            updateSettings(
+              options
+                .withLanguage(Language.ALL.get(id))
+                .withGeometry(options.geometry)
+                .withZones(options.zones)
+                .save(settings),
+            );
+          }}
+        />
+      </Field>
+    </FieldList>
   );
 }
 
@@ -284,7 +190,7 @@ const KeyboardPreview = memo(function KeyboardPreview(): ReactNode {
         toggledKeys={ModifierState.modifiers}
         showColors={colors}
       />
-      {pointers && <PointersPreview />}
+      {pointers && <PointersPreview key={keyboard.layout.id} />}
     </VirtualKeyboard>
   );
 });
@@ -292,11 +198,7 @@ const KeyboardPreview = memo(function KeyboardPreview(): ReactNode {
 const PointersPreview = memo(function PointersPreview(): ReactNode {
   const keyboard = useKeyboard();
   const [index, setIndex] = useState(0);
-  const [suffix, setSuffix] = useState<CodePoint[]>([]);
-  useEffect(() => {
-    setIndex(0);
-    setSuffix(keyboard.getExampleLetters());
-  }, [keyboard]);
+  const suffix = useMemo(() => keyboard.getExampleLetters(), [keyboard]);
   useEffect(() => {
     const tasks = new Tasks();
     tasks.delayed(1000, () => {

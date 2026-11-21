@@ -1,4 +1,16 @@
-import { Attr, type Char, type Line, type LineList } from "@keybr/textinput";
+import { Language } from "@keybr/keyboard";
+import {
+  Attr,
+  CaretMovementStyle,
+  CaretShapeStyle,
+  type Char,
+  Font,
+  type Line,
+  type LineList,
+  type TextDisplaySettings,
+  textDisplaySettings,
+  WhitespaceStyle,
+} from "@keybr/textinput";
 import {
   type CSSProperties,
   type ReactNode,
@@ -29,6 +41,8 @@ import { ZH_CODE_TO_WORD } from "./zhWords.ts";
 // 只改渲染，不动输入状态机——字母还是一个一个按，keybr 的统计照常。
 
 const STORAGE_KEY = "keytrace.zh.showCode";
+const DEFAULT_ZH_FONT_CSS: CSSProperties = Font.select(Language.ZH_SP).at(0)
+  .cssProperties;
 
 const COLOR = {
   /** 未打/已打的字都用这一个灰，不闪烁 */
@@ -71,6 +85,8 @@ const styles = {
     gap: "36px",
   },
   line: {
+    position: "relative" as const,
+    zIndex: 1,
     display: "flex",
     flexWrap: "wrap" as const,
     alignItems: "flex-end" as const,
@@ -85,7 +101,7 @@ const styles = {
     display: "inline-flex",
     alignItems: "flex-end" as const,
   },
-  /** 词与词之间的空格：半个汉字宽，中间点一个中点，也是光标可以停留的位置 */
+  /** 词与词之间的空格：半个汉字宽，附着在词尾以防行首出现中点或行尾丢点 */
   space: {
     display: "inline-flex",
     alignItems: "center",
@@ -95,6 +111,15 @@ const styles = {
     color: COLOR.todo,
     fontSize: "28px",
     lineHeight: 1.05,
+  },
+  spaceBar: {
+    display: "inline-block",
+    width: "9px",
+    height: "4px",
+    borderLeft: "1.5px solid currentColor",
+    borderBottom: "1.5px solid currentColor",
+    borderRight: "1.5px solid currentColor",
+    marginTop: "8px",
   },
   unit: {
     position: "relative" as const,
@@ -106,7 +131,6 @@ const styles = {
   hanzi: {
     fontSize: "28px",
     lineHeight: 1.05,
-    fontFamily: '"Songti SC", "SimSun", serif',
     letterSpacing: 0,
   },
   code: {
@@ -118,15 +142,13 @@ const styles = {
     letterSpacing: "0.04em",
     whiteSpace: "nowrap" as const,
   },
-  // 光标层：位置和宽度由 JS 按当前字算出来
+  // 光标层：位置和尺寸由 JS 按当前字与光标形状算出来
   cursorLayer: {
     position: "absolute" as const,
     top: 0,
     left: 0,
     height: `${LINE_HEIGHT}px`,
     display: "flex",
-    borderRadius: "1.5px",
-    overflow: "hidden",
     pointerEvents: "none" as const,
     willChange: "transform,width",
   },
@@ -146,14 +168,21 @@ type Unit = {
   readonly cursor: boolean;
 };
 
+type SpaceToken = {
+  readonly cursor: boolean;
+  /** 空格自己的状态，用来决定空白标记变绿还是变红 */
+  readonly attrs: number;
+};
+
 type Group =
-  | { readonly kind: "word"; readonly units: readonly Unit[] }
   | {
+      readonly kind: "word";
+      readonly units: readonly Unit[];
+      readonly trailingSpace?: SpaceToken;
+    }
+  | ({
       readonly kind: "space";
-      readonly cursor: boolean;
-      /** 空格自己的状态，用来决定中点变绿还是变红 */
-      readonly attrs: number;
-    };
+    } & SpaceToken);
 
 function has(attr: number, mask: number): boolean {
   return (attr & mask) !== 0;
@@ -212,11 +241,17 @@ function toGroups(chars: readonly Char[]): Group[] {
   for (const char of chars) {
     if (char.codePoint === 0x20) {
       flush();
-      groups.push({
-        kind: "space",
+      const space: SpaceToken = {
         cursor: has(char.attrs, Attr.Cursor),
         attrs: char.attrs,
-      });
+      };
+      const prev = groups[groups.length - 1];
+      if (prev != null && prev.kind === "word" && prev.trailingSpace == null) {
+        // 把词尾空格附着到上一个词组内，防止 flex 换行把间隔点丢到行首或藏掉。
+        groups[groups.length - 1] = { ...prev, trailingSpace: space };
+      } else {
+        groups.push({ kind: "space", ...space });
+      }
       continue;
     }
     if (isPunctuation(char.codePoint)) {
@@ -227,7 +262,7 @@ function toGroups(chars: readonly Char[]): Group[] {
         cursor: has(char.attrs, Attr.Cursor),
       };
       const prev = groups[groups.length - 1];
-      if (prev != null && prev.kind === "word") {
+      if (prev != null && prev.kind === "word" && prev.trailingSpace == null) {
         // Attach punctuation to the preceding word so line wraps keep them together.
         groups[groups.length - 1] = {
           kind: "word",
@@ -300,14 +335,57 @@ function offsetIn(el: HTMLElement, board: HTMLElement): { x: number; y: number }
   return { x, y };
 }
 
-// 把光标挪到当前字下面。
+type CursorMeta = {
+  readonly left: string;
+  readonly right: string | null;
+  readonly halfIndex: 0 | 1;
+};
+
+function findCursorMeta(groupsByLine: readonly Group[][]): CursorMeta | null {
+  for (const groups of groupsByLine) {
+    for (const group of groups) {
+      if (group.kind === "space") {
+        if (group.cursor) {
+          return { left: COLOR.current, right: null, halfIndex: 0 };
+        }
+        continue;
+      }
+      for (const unit of group.units) {
+        if (unit.cursor) {
+          const first = unit.chars[0]?.attrs ?? 0;
+          const second =
+            unit.chars.length === 2 ? (unit.chars[1]?.attrs ?? 0) : null;
+          const halfIndex: 0 | 1 =
+            second != null &&
+            has(unit.chars[1].attrs, Attr.Cursor) &&
+            !has(unit.chars[0].attrs, Attr.Cursor)
+              ? 1
+              : 0;
+          return {
+            left: stateColor(first) ?? COLOR.current,
+            right:
+              second == null ? null : (stateColor(second) ?? COLOR.current),
+            halfIndex,
+          };
+        }
+      }
+      if (group.trailingSpace?.cursor) {
+        return { left: COLOR.current, right: null, halfIndex: 0 };
+      }
+    }
+  }
+  return null;
+}
+
+// 把光标挪到当前字或空格处。
 //
-// 关键：width 不能参与 transition。之前把 `width` 也写进过渡列表，
-// 窗口缩放时宽度会从旧值往新值"长大"，屏幕上就是一条被拉长的白条——
-// 位置可以平滑，宽度必须瞬变。
+// 关键：width/height 不能参与 transition。窗口缩放或字宽变化时只能位置平滑，
+// 尺寸必须瞬变，否则缩放或换字宽时会出现被拉长的白条。
 function placeCursor(
   board: HTMLElement,
   cursor: HTMLElement,
+  caretShapeStyle: CaretShapeStyle,
+  halfIndex: 0 | 1,
   smooth: boolean,
 ): void {
   const target = board.querySelector<HTMLElement>('[data-cursor="1"]');
@@ -319,44 +397,109 @@ function placeCursor(
   // rect 是"缩放之后"的视觉坐标，而 transform: translate() 作用在"缩放之前"的
   // 布局坐标系里。keybr 的 Zoomer 会给文本区套 transform: scale，
   // 两者一旦混用，缩放后光标就会整体偏移。
-  // offset 是纯布局坐标，完全不受 transform 影响，天然对齐。
-  // unit 和空格的 offsetParent 都是 board（中间几层都没有 position），所以直接可用。
-  const x = offsetIn(target, board).x;
-  const y = offsetIn(target, board).y + target.offsetHeight - LINE_GAP - LINE_HEIGHT;
-  const w = Math.max(14, target.offsetWidth);
+  const targetOffset = offsetIn(target, board);
+  const body = target.querySelector<HTMLElement>("[data-hanzi]") ?? target;
+  const bodyOffset = body === target ? targetOffset : offsetIn(body, board);
 
-  cursor.style.transition = smooth ? "transform 110ms ease-out, opacity 110ms" : "none";
-  cursor.style.width = `${w}px`;
+  let x = targetOffset.x;
+  let y = targetOffset.y;
+  let width = Math.max(14, target.offsetWidth);
+  let height = LINE_HEIGHT;
+
+  switch (caretShapeStyle) {
+    case CaretShapeStyle.Underline:
+      y = targetOffset.y + target.offsetHeight - LINE_GAP - LINE_HEIGHT;
+      break;
+    case CaretShapeStyle.Block:
+    case CaretShapeStyle.Box: {
+      const padX = caretShapeStyle === CaretShapeStyle.Box ? 1 : 0;
+      x = bodyOffset.x - padX;
+      y = bodyOffset.y;
+      width = Math.max(14, body.offsetWidth) + padX * 2;
+      height = Math.max(24, body.offsetHeight);
+      break;
+    }
+    case CaretShapeStyle.Line: {
+      const bodyWidth = Math.max(14, body.offsetWidth);
+      const isTwoKey = target.dataset.two === "1";
+      x =
+        bodyOffset.x +
+        (isTwoKey && halfIndex === 1 ? Math.round(bodyWidth / 2) : 0);
+      y = bodyOffset.y;
+      width = 2;
+      height = Math.max(24, body.offsetHeight);
+      break;
+    }
+  }
+
+  cursor.style.transition = smooth
+    ? "transform 110ms ease-out, opacity 110ms"
+    : "none";
+  cursor.style.width = `${width}px`;
+  cursor.style.height = `${height}px`;
   cursor.style.transform = `translate(${x}px, ${y}px)`;
   cursor.style.opacity = "1";
 }
 
-// 换行是 CSS 算出来的，React 里不知道"哪一行从哪个词开始"。
-// 所以在渲染后量一次：紧贴容器左边的空格就是行首，把它中间那个点藏掉，
-// 否则一行会以「·」开头。宽度保留，保证换行位置不会因此跳来跳去。
-function hideLineStartDots(board: HTMLElement): void {
-  const left = board.getBoundingClientRect().left;
-  for (const el of board.querySelectorAll<HTMLElement>("[data-space]")) {
-    const rect = el.getBoundingClientRect();
-    const atLineStart = Math.abs(rect.left - left) < 2;
-    const dot = el.querySelector<HTMLElement>("[data-dot]");
-    if (dot != null) {
-      dot.style.visibility = atLineStart ? "hidden" : "visible";
-    }
+function getCursorLayerStyle(caretShapeStyle: CaretShapeStyle): CSSProperties {
+  switch (caretShapeStyle) {
+    case CaretShapeStyle.Block:
+      return {
+        ...styles.cursorLayer,
+        zIndex: 0,
+        borderRadius: "2px",
+        overflow: "hidden",
+        opacity: 0,
+      };
+    case CaretShapeStyle.Box:
+      return {
+        ...styles.cursorLayer,
+        zIndex: 2,
+        boxSizing: "border-box",
+        border: "1.5px solid var(--textinput-cursor__background-color, #a8a29a)",
+        borderRadius: "2px",
+        background: "transparent",
+        opacity: 0,
+      };
+    case CaretShapeStyle.Line:
+      return {
+        ...styles.cursorLayer,
+        zIndex: 2,
+        borderRadius: "1px",
+        backgroundColor: "var(--textinput-cursor__background-color, #a8a29a)",
+        opacity: 0,
+      };
+    case CaretShapeStyle.Underline:
+      return {
+        ...styles.cursorLayer,
+        zIndex: 2,
+        borderRadius: "1.5px",
+        overflow: "hidden",
+        opacity: 0,
+      };
   }
 }
 
 export function ZhLines({
+  settings,
   lines,
   focus,
   cursor = true,
   showToggle = true,
 }: {
+  readonly settings?: TextDisplaySettings;
   readonly lines: LineList;
   readonly focus: boolean;
   readonly cursor?: boolean;
   readonly showToggle?: boolean;
 }): ReactNode {
+  const effectiveSettings = settings ?? textDisplaySettings;
+  const { caretShapeStyle, caretMovementStyle, whitespaceStyle, font } =
+    effectiveSettings;
+  const hanziFontCss = font.scripts.includes("han")
+    ? font.cssProperties
+    : DEFAULT_ZH_FONT_CSS;
+
   const [showCode, setShowCode] = useState<boolean>(() => {
     try {
       return window.localStorage.getItem(STORAGE_KEY) !== "0";
@@ -380,6 +523,13 @@ export function ZhLines({
   const boardRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
   const mountedRef = useRef(false);
+  const prevShapeRef = useRef(caretShapeStyle);
+
+  const groupsByLine = lines.lines.map((line: Line) => toGroups(line.chars));
+  const cursorMeta = findCursorMeta(groupsByLine);
+  const halfIndex: 0 | 1 = cursorMeta?.halfIndex ?? 0;
+
+  const cursorLayoutRef = useRef({ cursor, caretShapeStyle, halfIndex });
 
   // 布局变了（窗口缩放、换行、字体加载完）就重算一次，且不带过渡——
   // 这种变化不是"光标走了一步"，不该有滑动动画。
@@ -389,11 +539,17 @@ export function ZhLines({
       return;
     }
     const replant = () => {
+      const current = cursorLayoutRef.current;
       const cursorEl = cursorRef.current;
-      if (cursorEl != null) {
-        placeCursor(board, cursorEl, false);
+      if (current.cursor && cursorEl != null) {
+        placeCursor(
+          board,
+          cursorEl,
+          current.caretShapeStyle,
+          current.halfIndex,
+          false,
+        );
       }
-      hideLineStartDots(board);
     };
     window.addEventListener("resize", replant);
     let observer: ResizeObserver | null = null;
@@ -401,7 +557,7 @@ export function ZhLines({
       observer = new ResizeObserver(replant);
       observer.observe(board);
     }
-    // 宋体/思源宋体加载完成前用的是回退字体，字宽度不一样，位置会偏
+    // 字体加载完成前可能用的是回退字体，字宽度不一样，位置会偏
     document.fonts?.ready.then(replant).catch(() => {});
     return () => {
       window.removeEventListener("resize", replant);
@@ -409,50 +565,24 @@ export function ZhLines({
     };
   }, []);
 
-  const groupsByLine = lines.lines.map((line: Line) => toGroups(line.chars));
-
-  // 找出光标落在哪，顺便定它的两半颜色
-  let cursorColor: { left: string; right: string | null } | null = null;
-  for (const groups of groupsByLine) {
-    for (const group of groups) {
-      if (group.kind === "space") {
-        if (group.cursor) {
-          // 空格只有一个宽度，整条一个颜色
-          cursorColor = { left: COLOR.current, right: null };
-        }
-        continue;
-      }
-      for (const unit of group.units) {
-        if (unit.cursor) {
-          const first = unit.chars[0]?.attrs ?? 0;
-          const second = unit.chars.length === 2 ? (unit.chars[1]?.attrs ?? 0) : null;
-          cursorColor = {
-            left: stateColor(first) ?? COLOR.current,
-            right: second == null ? null : (stateColor(second) ?? COLOR.current),
-          };
-        }
-      }
-      if (cursorColor != null) {
-        break;
-      }
-    }
-    if (cursorColor != null) {
-      break;
-    }
-  }
-
-  // 每次渲染后把光标挪到当前字底下。首次渲染不做过渡，避免从左上角飞过来。
+  // 每次渲染后把光标挪到当前字或空格处。首次渲染与切换光标形状不做过渡。
   useIsomorphicLayoutEffect(() => {
+    cursorLayoutRef.current = { cursor, caretShapeStyle, halfIndex };
     const board = boardRef.current;
     if (board == null) {
       return;
     }
+    const shapeChanged = prevShapeRef.current !== caretShapeStyle;
+    prevShapeRef.current = caretShapeStyle;
     const cursorEl = cursorRef.current;
     if (cursor && cursorEl != null) {
-      placeCursor(board, cursorEl, mountedRef.current);
+      const smooth =
+        caretMovementStyle === CaretMovementStyle.Smooth &&
+        mountedRef.current &&
+        !shapeChanged;
+      placeCursor(board, cursorEl, caretShapeStyle, halfIndex, smooth);
       mountedRef.current = true;
     }
-    hideLineStartDots(board);
   });
 
   return (
@@ -487,36 +617,35 @@ export function ZhLines({
             >
               {groups.map((group, groupIndex) => {
                 if (group.kind === "space") {
-                  // 空格是被真正输入的字符（打完一个词光标停在它上面），
-                  // 颜色只认它自己的状态。之前让它继承前一个字是错的——
-                  // 前一个字一打完它就绿，比实际敲空格早一步。
                   return (
-                    <span
+                    <SpaceView
                       key={groupIndex}
-                      data-space="1"
-                      data-cursor={cursor && group.cursor ? "1" : undefined}
-                      style={{
-                        ...styles.space,
-                        color: stateColor(group.attrs) ?? COLOR.todo,
-                      }}
-                    >
-                      {/* 中点：跟 keybr 原版一样，让词与词的边界看得见 */}
-                      <span data-dot="1">{"\u00b7"}</span>
-                    </span>
+                      space={group}
+                      showCursor={cursor}
+                      whitespaceStyle={whitespaceStyle}
+                    />
                   );
                 }
                 const chars = resolveWordChars(group.units);
                 return (
-                  <span key={groupIndex} style={styles.word}>
+                  <span key={groupIndex} data-word="1" style={styles.word}>
                     {group.units.map((unit, i) => (
                       <UnitView
                         key={i}
                         unit={unit}
                         char={chars[i]}
+                        hanziFontCss={hanziFontCss}
                         showCode={showCode}
                         showCursor={cursor}
                       />
                     ))}
+                    {group.trailingSpace != null ? (
+                      <SpaceView
+                        space={group.trailingSpace}
+                        showCursor={cursor}
+                        whitespaceStyle={whitespaceStyle}
+                      />
+                    ) : null}
                   </span>
                 );
               })}
@@ -528,21 +657,53 @@ export function ZhLines({
           <span
             ref={cursorRef}
             aria-hidden={true}
-            style={{
-              ...styles.cursorLayer,
-              opacity: 0,
-            }}
+            data-caret-shape={caretShapeStyle}
+            data-caret-movement={caretMovementStyle}
+            style={getCursorLayerStyle(caretShapeStyle)}
           >
-            <span
-              style={{
-                ...styles.cursorHalf,
-                background: cursorColor?.left ?? COLOR.current,
-              }}
-            />
-            {cursorColor?.right != null ? (
-              <span
-                style={{ ...styles.cursorHalf, background: cursorColor.right }}
-              />
+            {caretShapeStyle === CaretShapeStyle.Underline ? (
+              <>
+                <span
+                  style={{
+                    ...styles.cursorHalf,
+                    background: cursorMeta?.left ?? COLOR.current,
+                  }}
+                />
+                {cursorMeta?.right != null ? (
+                  <span
+                    style={{
+                      ...styles.cursorHalf,
+                      background: cursorMeta.right,
+                    }}
+                  />
+                ) : null}
+              </>
+            ) : caretShapeStyle === CaretShapeStyle.Block ? (
+              <>
+                <span
+                  style={{
+                    ...styles.cursorHalf,
+                    background:
+                      "var(--textinput-cursor__background-color, #a8a29a)",
+                    opacity:
+                      cursorMeta?.right != null
+                        ? halfIndex === 0
+                          ? 0.34
+                          : 0.16
+                        : 0.34,
+                  }}
+                />
+                {cursorMeta?.right != null ? (
+                  <span
+                    style={{
+                      ...styles.cursorHalf,
+                      background:
+                        "var(--textinput-cursor__background-color, #a8a29a)",
+                      opacity: halfIndex === 1 ? 0.34 : 0.16,
+                    }}
+                  />
+                ) : null}
+              </>
             ) : null}
           </span>
         ) : null}
@@ -551,15 +712,47 @@ export function ZhLines({
   );
 }
 
+function SpaceView({
+  space,
+  showCursor,
+  whitespaceStyle,
+}: {
+  readonly space: SpaceToken;
+  readonly showCursor: boolean;
+  readonly whitespaceStyle: WhitespaceStyle;
+}): ReactNode {
+  return (
+    <span
+      data-space="1"
+      data-whitespace={whitespaceStyle}
+      data-cursor={showCursor && space.cursor ? "1" : undefined}
+      style={{
+        ...styles.space,
+        color: stateColor(space.attrs) ?? COLOR.todo,
+      }}
+    >
+      {whitespaceStyle === WhitespaceStyle.Bullet ? (
+        <span data-dot="1">{"\u00b7"}</span>
+      ) : whitespaceStyle === WhitespaceStyle.Bar ? (
+        <span data-bar="1" style={styles.spaceBar} />
+      ) : (
+        "\u00a0"
+      )}
+    </span>
+  );
+}
+
 function UnitView({
   unit,
   char,
+  hanziFontCss,
   showCode,
   showCursor,
 }: {
   readonly unit: Unit;
   /** 整词查表得到的汉字；空串表示查不到，退回按音节取字 */
   readonly char: string;
+  readonly hanziFontCss: CSSProperties;
   readonly showCode: boolean;
   readonly showCursor: boolean;
 }): ReactNode {
@@ -575,7 +768,7 @@ function UnitView({
   // 第一个键打错就是左红右灰；两半同色时用实色，避免多画一层渐变。
   const left = c1 ?? COLOR.todo;
   const right = two ? (c2 ?? COLOR.todo) : left;
-  const hanziStyle: CSSProperties = { ...styles.hanzi };
+  const hanziStyle: CSSProperties = { ...styles.hanzi, ...hanziFontCss };
   if (two && left !== right) {
     hanziStyle.backgroundImage = `linear-gradient(90deg, ${left} 0 50%, ${right} 50% 100%)`;
     hanziStyle.WebkitBackgroundClip = "text";
@@ -593,6 +786,7 @@ function UnitView({
   return (
     <span
       style={styles.unit}
+      data-two={two ? "1" : undefined}
       data-cursor={showCursor && unit.cursor ? "1" : undefined}
     >
       {showCode ? (
@@ -604,7 +798,9 @@ function UnitView({
           ))}
         </span>
       ) : null}
-      <span style={hanziStyle}>{char !== "" ? char : pickChar(unit.code)}</span>
+      <span data-hanzi="1" style={hanziStyle}>
+        {char !== "" ? char : pickChar(unit.code)}
+      </span>
     </span>
   );
 }

@@ -20,8 +20,9 @@ export class Font implements EnumItem {
   }
 
   static select(language: Language) {
+    const script: Script = language.id === "zh-sp" ? "han" : language.script;
     return new Enum(
-      ...Font.ALL.filter((font) => font.scripts.includes(language.script)),
+      ...Font.ALL.filter((font) => font.scripts.includes(script)),
     );
   }
 

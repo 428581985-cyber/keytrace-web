@@ -10,7 +10,7 @@ export function StaticText({
   size,
   cursor = false,
   focus = true,
-  zh = false,
+  zh,
 }: {
   readonly settings?: TextDisplaySettings;
   readonly lines: LineList;
@@ -20,9 +20,11 @@ export function StaticText({
   readonly focus?: boolean;
   readonly zh?: boolean;
 }): ReactNode {
-  if (zh) {
+  const isZh = zh ?? settings?.language?.id === "zh-sp";
+  if (isZh) {
     return (
       <ZhLines
+        settings={settings}
         lines={lines}
         focus={focus}
         cursor={cursor}

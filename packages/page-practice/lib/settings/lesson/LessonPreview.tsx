@@ -23,17 +23,22 @@ export function LessonPreview({
   const { formatMessage } = useIntl();
   const { settings } = useSettings();
   const { results } = useResults();
-  const zh = settings.get(keyboardProps.language).id === "zh-sp";
+  const layout = settings.get(keyboardProps.layout);
+  const zh = layout.language.id === "zh-sp";
   const { lessonKeys, textInput } = useMemo(() => {
+    const filteredResults = lesson
+      .filter(results)
+      .filter((result) => result.layout.xid === layout.xid);
     const lessonKeys = lesson.update(
-      makeKeyStatsMap(lesson.letters, lesson.filter(results)),
+      makeKeyStatsMap(lesson.letters, filteredResults),
+      { persistFocus: false },
     );
     const textInput = new TextInput(
       lesson.generate(lessonKeys, LCG(123)),
       toTextInputSettings(settings),
     );
     return { lessonKeys, textInput };
-  }, [settings, lesson, results]);
+  }, [settings, lesson, results, layout.xid]);
   return (
     <FieldSet
       legend={formatMessage({

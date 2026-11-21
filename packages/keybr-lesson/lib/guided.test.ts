@@ -718,3 +718,114 @@ describe("zh-sp punctuation separator", () => {
     equal(/[,.]\s|\s[,.]/.test(textFull), false);
   });
 });
+
+describe("zh-sp sticky weak-key focus and word inclusion", () => {
+  it("locks on weakest real-time confidence key until reaching target (>= 1), then switches", () => {
+    const keyboard = loadKeyboard(Layout.ZH_SP);
+    const model = new FakePhoneticModel([
+      "abcd",
+      "abef",
+      "bcef",
+      "ghij",
+      "cdef",
+    ]);
+    Object.defineProperty(model, "language", {
+      value: keyboard.layout.language,
+    });
+    const words = ["abcd", "abef", "bcef", "ghij", "cdef"];
+    const settings = new Settings().set(lessonProps.guided.recoverKeys, false);
+    const lesson = new GuidedLesson(settings, keyboard, model, words);
+
+    const makeStats = (overrides: Record<number, [number, number]>) =>
+      fakeKeyStatsMap(
+        settings,
+        model.letters.map((letter) => {
+          const entry = overrides[letter.codePoint];
+          return [
+            letter,
+            entry != null ? entry[0] : 1.2,
+            entry != null ? entry[1] : 1.2,
+          ];
+        }),
+      );
+
+    // b (letter2) has real-time confidence 0.25 even though bestConfidence was 1.5;
+    // c (letter3) has confidence 0.45 -> must focus B as real-time weakest.
+    const k1 = lesson.update(
+      makeStats({
+        [model.letters[1].codePoint]: [0.25, 1.5],
+        [model.letters[2].codePoint]: [0.45, 0.9],
+      }),
+    );
+    equal(k1.findFocusedKey()?.letter.codePoint, model.letters[1].codePoint);
+
+    // c drops to 0.10, while b is still 0.50 (< 1.0) -> stay locked on b!
+    const k2 = lesson.update(
+      makeStats({
+        [model.letters[1].codePoint]: [0.5, 1.5],
+        [model.letters[2].codePoint]: [0.1, 0.9],
+      }),
+    );
+    equal(k2.findFocusedKey()?.letter.codePoint, model.letters[1].codePoint);
+
+    // persistFocus: false previewing a hypothetical target where b >= 1 must not clobber lock
+    const kPreview = lesson.update(
+      makeStats({
+        [model.letters[1].codePoint]: [1.1, 1.5],
+        [model.letters[2].codePoint]: [0.4, 0.9],
+      }),
+      { persistFocus: false },
+    );
+    equal(kPreview.findFocusedKey()?.letter.codePoint, model.letters[2].codePoint);
+
+    // With lock intact, returning to b = 0.6 (< 1) still keeps lock on b.
+    const k2After = lesson.update(
+      makeStats({
+        [model.letters[1].codePoint]: [0.6, 1.5],
+        [model.letters[2].codePoint]: [0.2, 0.9],
+      }),
+    );
+    equal(k2After.findFocusedKey()?.letter.codePoint, model.letters[1].codePoint);
+
+    // Now b truly hits confidence >= 1.0 -> unlock and switch to next weakest (c).
+    const k3 = lesson.update(
+      makeStats({
+        [model.letters[1].codePoint]: [1.05, 1.5],
+        [model.letters[2].codePoint]: [0.2, 0.9],
+      }),
+    );
+    equal(k3.findFocusedKey()?.letter.codePoint, model.letters[2].codePoint);
+  });
+
+  it("includes focused key in every generated word", () => {
+    const keyboard = loadKeyboard(Layout.ZH_SP);
+    const model = new FakePhoneticModel(["abcd", "efgh", "ijab"]);
+    Object.defineProperty(model, "language", {
+      value: keyboard.layout.language,
+    });
+    const words = ["abcd", "efgh", "ghij", "abgh", "ijcd"];
+    const settings = new Settings().set(lessonProps.punctuators, 0.4);
+    const lesson = new GuidedLesson(settings, keyboard, model, words);
+
+    const stats = fakeKeyStatsMap(
+      settings,
+      model.letters.map((letter) => [
+        letter,
+        letter.codePoint === model.letters[9].codePoint ? 0.2 : 1.2,
+        letter.codePoint === model.letters[9].codePoint ? 0.2 : 1.2,
+      ]),
+    );
+    const lessonKeys = lesson.update(stats);
+    equal(
+      lessonKeys.findFocusedKey()?.letter.codePoint,
+      model.letters[9].codePoint,
+    ); // 'j'
+
+    const generated = lesson.generate(lessonKeys, model.rng);
+    const generatedWords = generated.split(/[ ,.]+/).filter(Boolean);
+    equal(generatedWords.length > 0, true);
+    for (const word of generatedWords) {
+      equal(word.includes("j"), true);
+    }
+  });
+});
