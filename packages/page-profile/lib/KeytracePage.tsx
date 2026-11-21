@@ -377,14 +377,18 @@ export function KeytracePage({
           />
 
           <div className={styles.twoCols}>
-            <CorrectionsSection
-              items={data.recentCorrections}
-              isZhLocale={isZhLocale}
-            />
-            <CommitsSection
-              items={data.recentCommits}
-              isZhLocale={isZhLocale}
-            />
+            <div>
+              <CorrectionsSection
+                items={data.recentCorrections}
+                isZhLocale={isZhLocale}
+              />
+            </div>
+            <div>
+              <CommitsSection
+                items={data.recentCommits}
+                isZhLocale={isZhLocale}
+              />
+            </div>
           </div>
         </>
       )}
@@ -521,7 +525,7 @@ function DailyChartSection({
                 y={height - 8}
                 textAnchor="middle"
                 fill="var(--Name-color, #888)"
-                fontSize="11"
+                fontSize="12"
               >
                 {label}
               </text>
@@ -576,16 +580,26 @@ function WeakKeysSection({
       )}
     >
       <div className={styles.tabRow}>
-        <Button
-          label={t("中文双拼", "Chinese Shuangpin")}
+        <button
+          type="button"
+          className={clsx(
+            styles.tabButton,
+            keyTab === "zh-sp" && styles.tabButtonActive,
+          )}
           onClick={() => onTabChange("zh-sp")}
-          disabled={keyTab === "zh-sp"}
-        />
-        <Button
-          label={t("英文", "English")}
+        >
+          {t("中文双拼", "Chinese Shuangpin")}
+        </button>
+        <button
+          type="button"
+          className={clsx(
+            styles.tabButton,
+            keyTab === "en-us" && styles.tabButtonActive,
+          )}
           onClick={() => onTabChange("en-us")}
-          disabled={keyTab === "en-us"}
-        />
+        >
+          {t("英文", "English")}
+        </button>
       </div>
 
       {list.length === 0 ? (
@@ -598,32 +612,44 @@ function WeakKeysSection({
             const highErr = k.errorRate >= 0.08 || k.medianIkiMs >= 320;
             return (
               <div key={k.codePoint} className={styles.keyCard}>
-                <span
-                  className={clsx(
-                    styles.keyTile,
-                    highErr ? styles.keyTileSlow : styles.keyTileWarn,
-                  )}
-                >
-                  {k.letter}
-                </span>
-                <div className={styles.keyMeta}>
-                  <div>
-                    {t("错", "Err")} {formatPct(k.errorRate)} ({k.misses}/
-                    {k.hits})
+                <div className={styles.keyCardTop}>
+                  <span
+                    className={clsx(
+                      styles.keyTile,
+                      highErr ? styles.keyTileSlow : styles.keyTileWarn,
+                    )}
+                  >
+                    {k.letter}
+                  </span>
+                  <div className={styles.keyPrimary}>
+                    <span className={styles.keyErrRate}>
+                      {t("错率", "Err")} {formatPct(k.errorRate)}
+                    </span>
+                    <span className={styles.keyHits}>
+                      {k.misses} / {k.hits} {t("键", "keys")}
+                    </span>
                   </div>
-                  <div>
-                    {k.medianIkiMs}ms · {k.wpm} wpm
-                  </div>
+                  <button
+                    type="button"
+                    className={styles.drillButton}
+                    title={t(
+                      `跳转到练习页专注练习 ${k.letter} 键`,
+                      `Practice key ${k.letter}`,
+                    )}
+                    onClick={() => onPractice(k.letter, keyTab)}
+                  >
+                    <Icon shape={mdiKeyboardOutline} />
+                    <span>{t("去练习", "Drill")}</span>
+                  </button>
                 </div>
-                <Button
-                  icon={<Icon shape={mdiKeyboardOutline} />}
-                  label={t("练", "Drill")}
-                  title={t(
-                    `跳转到练习页专注练习 ${k.letter} 键`,
-                    `Practice key ${k.letter}`,
-                  )}
-                  onClick={() => onPractice(k.letter, keyTab)}
-                />
+                <div className={styles.keyCardBottom}>
+                  <span>
+                    {t("中位", "Median")} {k.medianIkiMs} ms
+                  </span>
+                  <span>
+                    {t("等效", "Speed")} {k.wpm} wpm
+                  </span>
+                </div>
               </div>
             );
           })}

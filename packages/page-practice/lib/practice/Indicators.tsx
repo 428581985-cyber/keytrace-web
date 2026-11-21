@@ -176,7 +176,7 @@ function KeyTracePracticePill(): ReactNode {
         alignItems: "center",
         gap: "0.45rem",
         marginBlockStart: "0.25rem",
-        fontSize: "0.78rem",
+        fontSize: "1rem",
         color: "var(--Name-color)",
       }}
     >
