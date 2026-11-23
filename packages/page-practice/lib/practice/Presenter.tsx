@@ -1,4 +1,9 @@
-import { keyboardProps, type KeyId } from "@keybr/keyboard";
+import {
+  isZhLanguage,
+  isZhQuanpin,
+  keyboardProps,
+  type KeyId,
+} from "@keybr/keyboard";
 import { names } from "@keybr/lesson-ui";
 import { Screen } from "@keybr/pages-shared";
 import { enumProp, Preferences } from "@keybr/settings";
@@ -88,8 +93,10 @@ export class Presenter extends PureComponent<Props, State> {
       handleTourClose,
     } = this;
 
-    // 中文双拼：练习文本是两个字母一个词，交给 ZhLines 画成汉字
-    const zh = state.settings.get(keyboardProps.language).id === "zh-sp";
+    // 中文拼音（小鹤双拼 / 全拼）：交给 ZhLines 按词渲染成汉字
+    const language = state.settings.get(keyboardProps.language);
+    const zh = isZhLanguage(language);
+    const scheme = isZhQuanpin(language) ? "zh-qp" : "zh-sp";
 
     switch (view) {
       case View.Normal:
@@ -113,6 +120,7 @@ export class Presenter extends PureComponent<Props, State> {
                   focusRef={this.focusRef}
                   settings={state.textDisplaySettings}
                   zh={zh}
+                  scheme={zh ? scheme : undefined}
                   lines={lines}
                   size="X0"
                   demo={tour}
@@ -147,6 +155,7 @@ export class Presenter extends PureComponent<Props, State> {
                   focusRef={this.focusRef}
                   settings={state.textDisplaySettings}
                   zh={zh}
+                  scheme={zh ? scheme : undefined}
                   lines={lines}
                   size="X1"
                   demo={tour}
@@ -180,6 +189,7 @@ export class Presenter extends PureComponent<Props, State> {
                   focusRef={this.focusRef}
                   settings={state.textDisplaySettings}
                   zh={zh}
+                  scheme={zh ? scheme : undefined}
                   lines={lines}
                   size="X2"
                   demo={tour}

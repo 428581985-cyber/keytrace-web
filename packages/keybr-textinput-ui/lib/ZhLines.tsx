@@ -1,4 +1,4 @@
-import { Language } from "@keybr/keyboard";
+import { isZhQuanpin, Language, type ZhInputScheme } from "@keybr/keyboard";
 import {
   Attr,
   CaretMovementStyle,
@@ -7,12 +7,16 @@ import {
   Font,
   type Line,
   type LineList,
+  resolveQuanpinWord,
+  splitQuanpinFallback,
   type TextDisplaySettings,
   textDisplaySettings,
   WhitespaceStyle,
+  ZH_QP_SYLLABLE_TO_CHARS,
 } from "@keybr/textinput";
 import {
   type CSSProperties,
+  type MouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -24,39 +28,39 @@ import { FormattedMessage } from "react-intl";
 import { ZH_CODE_TO_CHARS } from "./zhMap.ts";
 import { ZH_CODE_TO_WORD } from "./zhWords.ts";
 
-// 中文双拼的练习文本渲染。
+// 中文拼音（小鹤双拼 zh-sp / 全拼 zh-qp）的练习文本渲染。
 //
-// 一个"词"由空格分隔，词内每两个字母是一个汉字（hc = 好、hcde = 好的）。
+// - 双拼（zh-sp）：每两个字母对应一个汉字，整词查 ZH_CODE_TO_WORD，查不到退回 zhMap.ts。
+// - 全拼（zh-qp）：每字 1–6 键变长，整词查 resolveQuanpinWord（精确音节长度切片），
+//   查不到退回 splitQuanpinFallback + ZH_QP_SYLLABLE_TO_CHARS。
+//   开启「显示拼音」时拼音行使用流内 flex（position: static），让 6 键音节自然撑开字宽、
+//   不与邻字重叠，且整词 nowrap 换行、底部汉字基线严格对齐。
 //
-// 显示汉字时优先整词查 ZH_CODE_TO_WORD：练习文本里存的是双拼码，
-// 同一个码对应一堆同音字，逐音节猜会把「巴黎」画成「罢李」、「备案」画成「被安」。
-// 查不到才退回按音节取字（zhMap.ts），保证不至于显示成光秃秃的码。
-//
-// 光标是一条贴在字底的横线，单独绝对定位在整块文本上（不在每个字里面），
-// 这样换字时可以 transition 平滑滑过去，也能落在词与词之间的空格上。
-// 左半段＝第一个键、右半段＝第二个键，各自取色：
-// 打对绿、打错红、还没打白。汉字和拼音本身只标错（红），其余一律灰，
-// 打字进度完全靠光标判断。
-//
-// 只改渲染，不动输入状态机——字母还是一个一个按，keybr 的统计照常。
+// 光标单独绝对定位在整块文本上，支持 Underline / Block / Box / Line 四种形状与
+// 1–6 段 N 等分逐键进度高亮，换字时可按设置平滑滑动。
 
-const STORAGE_KEY = "keytrace.zh.showCode";
-const DEFAULT_ZH_FONT_CSS: CSSProperties = Font.select(Language.ZH_SP).at(0)
-  .cssProperties;
+const STORAGE_KEY_SP = "keytrace.zh.showCode";
+const STORAGE_KEY_QP = "keytrace.zh-qp.showCode";
+const DEFAULT_ZH_FONT_CSS: CSSProperties = Font.select(Language.ZH_SP).at(
+  0,
+).cssProperties;
 
 const COLOR = {
   /** 未打/已打的字都用这一个灰，不闪烁 */
   todo: "#8a857c",
   hit: "#7fae8f",
   miss: "#d4503a",
-  /** 光标还没走到的那半段（灰色，不用白色，白色在大片灰字里太跳） */
+  /** 光标还没走到的那段（灰色，不用白色，白色在大片灰字里太跳） */
   current: "#a8a29a",
   code: "#6d6a63",
+  /** 全拼拼音行当前待敲字母高亮色（跟随主题前景色，兼顾亮暗主题） */
+  activeCode: "var(--textinput-cursor__background-color, #a8a29a)",
 };
 
 /** 光标线离字底的间距，和 unit 的 padding-bottom 对应 */
 const LINE_GAP = 4;
 const LINE_HEIGHT = 2.5;
+const QUANPIN_UNIT_PAD_X = 3;
 
 const styles = {
   root: {
@@ -77,11 +81,9 @@ const styles = {
     position: "relative" as const,
     display: "flex",
     flexDirection: "column" as const,
-    // 拼音悬在字上方 19px，放大后会更靠外，留出空间别顶到容器边框。
-    // 不显示拼音时这里要收回去，否则顶部会空一大块（运行时按 showCode 覆盖）
+    // 双拼拼音悬在字上方 19px，留出空间别顶到容器边框；
+    // 不显示拼音或全拼流内布局时在运行时覆盖 paddingTop。
     paddingTop: "22px",
-    // 行间距要同时容下「上一行的光标线」和「下一行字上方的拼音」。
-    // 拼音悬在字顶上方 13px、高 10px，光标线在行底往上 4~6.5px。
     gap: "36px",
   },
   line: {
@@ -90,15 +92,13 @@ const styles = {
     display: "flex",
     flexWrap: "wrap" as const,
     alignItems: "flex-end" as const,
-    // 词间距完全由空格元素承担（半字宽），这里不能再加 columnGap，
-    // 否则 space 两侧各多 9px，词间距会接近一整字
+    // 词间距完全由空格元素承担（半字宽），不能再加 columnGap
     columnGap: 0,
-    // 真正的行间距在这里：文本只有一行 LineList，三行是 flex 自动换行出来的，
-    // board 的 gap 管不到换行，必须由 rowGap 决定
     rowGap: "30px",
   },
   word: {
     display: "inline-flex",
+    flexWrap: "nowrap" as const,
     alignItems: "flex-end" as const,
   },
   /** 词与词之间的空格：半个汉字宽，附着在词尾以防行首出现中点或行尾丢点 */
@@ -128,6 +128,15 @@ const styles = {
     alignItems: "center",
     padding: "0 0.5px 5px",
   },
+  unitQuanpinCode: {
+    position: "relative" as const,
+    display: "inline-flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    justifyContent: "flex-end" as const,
+    minWidth: "28px",
+    padding: `0 ${QUANPIN_UNIT_PAD_X}px 5px`,
+  },
   hanzi: {
     fontSize: "28px",
     lineHeight: 1.05,
@@ -142,6 +151,20 @@ const styles = {
     letterSpacing: "0.04em",
     whiteSpace: "nowrap" as const,
   },
+  codeQuanpin: {
+    position: "static" as const,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "18px",
+    lineHeight: "18px",
+    marginBottom: "2px",
+    fontSize: "13px",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    color: COLOR.code,
+    letterSpacing: "0.02em",
+    whiteSpace: "nowrap" as const,
+  },
   // 光标层：位置和尺寸由 JS 按当前字与光标形状算出来
   cursorLayer: {
     position: "absolute" as const,
@@ -152,7 +175,7 @@ const styles = {
     pointerEvents: "none" as const,
     willChange: "transform,width",
   },
-  cursorHalf: {
+  cursorSegment: {
     flex: 1,
     height: "100%",
   },
@@ -164,6 +187,10 @@ const useIsomorphicLayoutEffect =
 type Unit = {
   readonly code: string;
   readonly chars: readonly Char[];
+  /** 已解析出的汉字或中文标点（空串表示交给回退映射） */
+  readonly hanzi?: string;
+  /** stopOnError=false 时当前字存在未清除的错字 */
+  readonly hasGarbage?: boolean;
   /** 光标正停在这个字上 */
   readonly cursor: boolean;
 };
@@ -208,7 +235,38 @@ function isPunctuation(codePoint: number): boolean {
   );
 }
 
-function toGroups(chars: readonly Char[]): Group[] {
+function mapPunctuation(code: string): string | null {
+  switch (code) {
+    case ",":
+      return "，";
+    case ".":
+      return "。";
+    case "?":
+      return "？";
+    case "!":
+      return "！";
+    default:
+      return null;
+  }
+}
+
+function readShowCode(storageKey: string): boolean {
+  try {
+    return window.localStorage.getItem(storageKey) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeShowCode(storageKey: string, value: boolean): void {
+  try {
+    window.localStorage.setItem(storageKey, value ? "1" : "0");
+  } catch {
+    // 隐私模式下写不了，忽略
+  }
+}
+
+function toGroupsShuangpin(chars: readonly Char[]): Group[] {
   const groups: Group[] = [];
   let buffer: Char[] = [];
 
@@ -279,17 +337,152 @@ function toGroups(chars: readonly Char[]): Group[] {
   return groups;
 }
 
-function pickChar(code: string): string {
-  // 标点在文本里存的是 ASCII（键盘上真按的键），显示成中文标点
-  switch (code) {
-    case ",":
-      return "，";
-    case ".":
-      return "。";
-    case "?":
-      return "？";
-    case "!":
-      return "！";
+function pickQuanpinSyllableChar(syllable: string): string {
+  const chars = ZH_QP_SYLLABLE_TO_CHARS[syllable.toLowerCase()];
+  if (chars == null || chars.length === 0) {
+    return "";
+  }
+  return Array.from(chars)[0] ?? "";
+}
+
+function toGroupsQuanpin(chars: readonly Char[]): Group[] {
+  const groups: Group[] = [];
+  let buffer: Char[] = [];
+
+  const flush = () => {
+    if (buffer.length === 0) {
+      return;
+    }
+    const canonical = buffer.filter((c) => !has(c.attrs, Attr.Garbage));
+    if (canonical.length === 0) {
+      groups.push({
+        kind: "word",
+        units: [
+          {
+            code: buffer.map((c) => String.fromCodePoint(c.codePoint)).join(""),
+            chars: buffer,
+            hanzi: "",
+            hasGarbage: true,
+            cursor: buffer.some((c) => has(c.attrs, Attr.Cursor)),
+          },
+        ],
+      });
+      buffer = [];
+      return;
+    }
+
+    const normalized = canonical
+      .map((c) => String.fromCodePoint(c.codePoint))
+      .join("")
+      .toLowerCase();
+
+    const wordEntry = resolveQuanpinWord(normalized);
+    let lengths: readonly number[];
+    let hanziList: readonly string[];
+
+    if (
+      wordEntry != null &&
+      wordEntry.lengths.reduce((sum, n) => sum + n, 0) === canonical.length
+    ) {
+      lengths = wordEntry.lengths;
+      hanziList = wordEntry.chars;
+    } else {
+      const syllables = splitQuanpinFallback(normalized);
+      const total = syllables.reduce((sum, s) => sum + s.length, 0);
+      if (syllables.length > 0 && total === canonical.length) {
+        lengths = syllables.map((s) => s.length);
+        hanziList = syllables.map((s) => pickQuanpinSyllableChar(s));
+      } else {
+        lengths = [canonical.length];
+        hanziList = [pickQuanpinSyllableChar(normalized)];
+      }
+    }
+
+    const units: Unit[] = [];
+    let bufIndex = 0;
+    for (let u = 0; u < lengths.length; u++) {
+      const targetLen = lengths[u];
+      const unitChars: Char[] = [];
+      let unitHasGarbage = false;
+      while (bufIndex < buffer.length && unitChars.length < targetLen) {
+        const ch = buffer[bufIndex];
+        bufIndex++;
+        if (has(ch.attrs, Attr.Garbage)) {
+          unitHasGarbage = true;
+        } else {
+          unitChars.push(ch);
+        }
+      }
+      if (u === lengths.length - 1) {
+        while (bufIndex < buffer.length) {
+          if (has(buffer[bufIndex].attrs, Attr.Garbage)) {
+            unitHasGarbage = true;
+          }
+          bufIndex++;
+        }
+      }
+      units.push({
+        code: unitChars.map((c) => String.fromCodePoint(c.codePoint)).join(""),
+        chars: unitChars,
+        hanzi: hanziList[u] ?? "",
+        hasGarbage: unitHasGarbage,
+        cursor: unitChars.some((c) => has(c.attrs, Attr.Cursor)),
+      });
+    }
+
+    groups.push({ kind: "word", units });
+    buffer = [];
+  };
+
+  for (const char of chars) {
+    if (!has(char.attrs, Attr.Garbage) && char.codePoint === 0x20) {
+      flush();
+      const space: SpaceToken = {
+        cursor: has(char.attrs, Attr.Cursor),
+        attrs: char.attrs,
+      };
+      const prev = groups[groups.length - 1];
+      if (prev != null && prev.kind === "word" && prev.trailingSpace == null) {
+        groups[groups.length - 1] = { ...prev, trailingSpace: space };
+      } else {
+        groups.push({ kind: "space", ...space });
+      }
+      continue;
+    }
+    if (!has(char.attrs, Attr.Garbage) && isPunctuation(char.codePoint)) {
+      flush();
+      const code = String.fromCodePoint(char.codePoint);
+      const punctUnit: Unit = {
+        code,
+        chars: [char],
+        hanzi: mapPunctuation(code) ?? code,
+        cursor: has(char.attrs, Attr.Cursor),
+      };
+      const prev = groups[groups.length - 1];
+      if (prev != null && prev.kind === "word" && prev.trailingSpace == null) {
+        groups[groups.length - 1] = {
+          kind: "word",
+          units: [...prev.units, punctUnit],
+        };
+      } else {
+        groups.push({ kind: "word", units: [punctUnit] });
+      }
+      continue;
+    }
+    buffer.push(char);
+  }
+  flush();
+  return groups;
+}
+
+function toGroups(chars: readonly Char[], scheme: ZhInputScheme): Group[] {
+  return scheme === "zh-qp" ? toGroupsQuanpin(chars) : toGroupsShuangpin(chars);
+}
+
+function pickCharShuangpin(code: string): string {
+  const punct = mapPunctuation(code);
+  if (punct != null) {
+    return punct;
   }
   const chars = ZH_CODE_TO_CHARS[code];
   if (chars == null || chars.length === 0) {
@@ -299,10 +492,19 @@ function pickChar(code: string): string {
   return chars[0];
 }
 
-// 整词取汉字：把一个 group 里的音节码拼回完整的词码，查表拿到真词。
+function pickCharQuanpin(code: string): string {
+  const punct = mapPunctuation(code);
+  if (punct != null) {
+    return punct;
+  }
+  const char = pickQuanpinSyllableChar(code);
+  return char !== "" ? char : code;
+}
+
+// 整词取汉字（双拼）：把一个 group 里的音节码拼回完整的词码，查表拿到真词。
 // 词尾可能跟着一个 ASCII 标点（, . ? !），它也是独立的一个 unit，要先剥掉。
-// 返回与 units 等长的数组，值是空串表示"这个词没查到，调用方自己退回 pickChar"。
-function resolveWordChars(units: readonly Unit[]): readonly string[] {
+// 返回与 units 等长的数组，值是空串表示"这个词没查到，调用方自己退回 pickCharShuangpin"。
+function resolveWordCharsShuangpin(units: readonly Unit[]): readonly string[] {
   const isCode = (u: Unit) => /^[a-z]{2}$/.test(u.code);
   let end = units.length;
   while (end > 0 && !isCode(units[end - 1])) {
@@ -322,8 +524,45 @@ function resolveWordChars(units: readonly Unit[]): readonly string[] {
   return units.map((_, i) => (i < end ? chars[i] : ""));
 }
 
+function formatPercent(index: number, total: number): string {
+  if (index === 0) {
+    return "0%";
+  }
+  if (index === total) {
+    return "100%";
+  }
+  const pct = (index * 100) / total;
+  return Number.isInteger(pct) ? `${pct}%` : `${Number(pct.toFixed(4))}%`;
+}
+
+function buildHanziGradient(colors: readonly string[]): string | null {
+  const n = colors.length;
+  if (n <= 1) {
+    return null;
+  }
+  const first = colors[0];
+  if (colors.every((c) => c === first)) {
+    return null;
+  }
+  const stops: string[] = [];
+  let start = 0;
+  while (start < n) {
+    const color = colors[start];
+    let end = start + 1;
+    while (end < n && colors[end] === color) {
+      end++;
+    }
+    stops.push(`${color} ${formatPercent(start, n)} ${formatPercent(end, n)}`);
+    start = end;
+  }
+  return `linear-gradient(90deg, ${stops.join(", ")})`;
+}
+
 // 累加 offsetLeft/offsetTop 直到 board，得到纯布局坐标（不受 scale 影响）
-function offsetIn(el: HTMLElement, board: HTMLElement): { x: number; y: number } {
+function offsetIn(
+  el: HTMLElement,
+  board: HTMLElement,
+): { x: number; y: number } {
   let x = 0;
   let y = 0;
   let node: HTMLElement | null = el;
@@ -336,9 +575,8 @@ function offsetIn(el: HTMLElement, board: HTMLElement): { x: number; y: number }
 }
 
 type CursorMeta = {
-  readonly left: string;
-  readonly right: string | null;
-  readonly halfIndex: 0 | 1;
+  readonly segments: readonly string[];
+  readonly activeIndex: number;
 };
 
 function findCursorMeta(groupsByLine: readonly Group[][]): CursorMeta | null {
@@ -346,31 +584,34 @@ function findCursorMeta(groupsByLine: readonly Group[][]): CursorMeta | null {
     for (const group of groups) {
       if (group.kind === "space") {
         if (group.cursor) {
-          return { left: COLOR.current, right: null, halfIndex: 0 };
+          return { segments: [COLOR.current], activeIndex: 0 };
         }
         continue;
       }
       for (const unit of group.units) {
         if (unit.cursor) {
-          const first = unit.chars[0]?.attrs ?? 0;
-          const second =
-            unit.chars.length === 2 ? (unit.chars[1]?.attrs ?? 0) : null;
-          const halfIndex: 0 | 1 =
-            second != null &&
-            has(unit.chars[1].attrs, Attr.Cursor) &&
-            !has(unit.chars[0].attrs, Attr.Cursor)
-              ? 1
-              : 0;
+          const activeIndex = Math.max(
+            0,
+            unit.chars.findIndex((c) => has(c.attrs, Attr.Cursor)),
+          );
+          const segments = unit.chars.map((c, idx) => {
+            const color = stateColor(c.attrs);
+            if (color != null) {
+              return color;
+            }
+            if (unit.hasGarbage && idx === activeIndex) {
+              return COLOR.miss;
+            }
+            return COLOR.current;
+          });
           return {
-            left: stateColor(first) ?? COLOR.current,
-            right:
-              second == null ? null : (stateColor(second) ?? COLOR.current),
-            halfIndex,
+            segments: segments.length > 0 ? segments : [COLOR.current],
+            activeIndex,
           };
         }
       }
       if (group.trailingSpace?.cursor) {
-        return { left: COLOR.current, right: null, halfIndex: 0 };
+        return { segments: [COLOR.current], activeIndex: 0 };
       }
     }
   }
@@ -385,7 +626,7 @@ function placeCursor(
   board: HTMLElement,
   cursor: HTMLElement,
   caretShapeStyle: CaretShapeStyle,
-  halfIndex: 0 | 1,
+  activeIndex: number,
   smooth: boolean,
 ): void {
   const target = board.querySelector<HTMLElement>('[data-cursor="1"]');
@@ -408,6 +649,10 @@ function placeCursor(
 
   switch (caretShapeStyle) {
     case CaretShapeStyle.Underline:
+      if (target.dataset.inflow === "1") {
+        x = targetOffset.x + QUANPIN_UNIT_PAD_X;
+        width = Math.max(14, target.offsetWidth - QUANPIN_UNIT_PAD_X * 2);
+      }
       y = targetOffset.y + target.offsetHeight - LINE_GAP - LINE_HEIGHT;
       break;
     case CaretShapeStyle.Block:
@@ -421,10 +666,16 @@ function placeCursor(
     }
     case CaretShapeStyle.Line: {
       const bodyWidth = Math.max(14, body.offsetWidth);
-      const isTwoKey = target.dataset.two === "1";
+      const segmentCount = Math.max(
+        1,
+        Number(target.dataset.segments ?? (target.dataset.two === "1" ? 2 : 1)),
+      );
+      const clampedIndex = Math.min(activeIndex, segmentCount - 1);
       x =
         bodyOffset.x +
-        (isTwoKey && halfIndex === 1 ? Math.round(bodyWidth / 2) : 0);
+        (segmentCount > 1
+          ? Math.round((bodyWidth * clampedIndex) / segmentCount)
+          : 0);
       y = bodyOffset.y;
       width = 2;
       height = Math.max(24, body.offsetHeight);
@@ -441,7 +692,11 @@ function placeCursor(
   cursor.style.opacity = "1";
 }
 
-function getCursorLayerStyle(caretShapeStyle: CaretShapeStyle): CSSProperties {
+function getCursorLayerStyle(
+  caretShapeStyle: CaretShapeStyle,
+  isQuanpin: boolean,
+  segmentCount: number,
+): CSSProperties {
   switch (caretShapeStyle) {
     case CaretShapeStyle.Block:
       return {
@@ -456,7 +711,8 @@ function getCursorLayerStyle(caretShapeStyle: CaretShapeStyle): CSSProperties {
         ...styles.cursorLayer,
         zIndex: 2,
         boxSizing: "border-box",
-        border: "1.5px solid var(--textinput-cursor__background-color, #a8a29a)",
+        border:
+          "1.5px solid var(--textinput-cursor__background-color, #a8a29a)",
         borderRadius: "2px",
         background: "transparent",
         opacity: 0,
@@ -473,6 +729,7 @@ function getCursorLayerStyle(caretShapeStyle: CaretShapeStyle): CSSProperties {
       return {
         ...styles.cursorLayer,
         zIndex: 2,
+        gap: isQuanpin && segmentCount > 1 ? "1.5px" : "0px",
         borderRadius: "1.5px",
         overflow: "hidden",
         opacity: 0,
@@ -482,54 +739,87 @@ function getCursorLayerStyle(caretShapeStyle: CaretShapeStyle): CSSProperties {
 
 export function ZhLines({
   settings,
+  scheme,
   lines,
   focus,
   cursor = true,
   showToggle = true,
 }: {
   readonly settings?: TextDisplaySettings;
+  readonly scheme?: ZhInputScheme;
   readonly lines: LineList;
   readonly focus: boolean;
   readonly cursor?: boolean;
   readonly showToggle?: boolean;
 }): ReactNode {
   const effectiveSettings = settings ?? textDisplaySettings;
+  const resolvedScheme: ZhInputScheme =
+    scheme ??
+    (settings?.language != null && isZhQuanpin(settings.language)
+      ? "zh-qp"
+      : "zh-sp");
+  const isQuanpin = resolvedScheme === "zh-qp";
+
   const { caretShapeStyle, caretMovementStyle, whitespaceStyle, font } =
     effectiveSettings;
   const hanziFontCss = font.scripts.includes("han")
     ? font.cssProperties
     : DEFAULT_ZH_FONT_CSS;
 
-  const [showCode, setShowCode] = useState<boolean>(() => {
-    try {
-      return window.localStorage.getItem(STORAGE_KEY) !== "0";
-    } catch {
-      return true;
-    }
-  });
+  const [showCodeByScheme, setShowCodeByScheme] = useState<
+    Record<ZhInputScheme, boolean>
+  >(() => ({
+    "zh-sp": readShowCode(STORAGE_KEY_SP),
+    "zh-qp": readShowCode(STORAGE_KEY_QP),
+  }));
+  const showCode = showCodeByScheme[resolvedScheme];
 
-  const toggle = useCallback(() => {
-    setShowCode((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
-      } catch {
-        // 隐私模式下写不了，忽略
-      }
-      return next;
+  const handleToggle = useCallback(() => {
+    setShowCodeByScheme((prev) => {
+      const next = !prev[resolvedScheme];
+      writeShowCode(
+        resolvedScheme === "zh-qp" ? STORAGE_KEY_QP : STORAGE_KEY_SP,
+        next,
+      );
+      return { ...prev, [resolvedScheme]: next };
     });
-  }, []);
+  }, [resolvedScheme]);
 
+  const toggleInputRef = useRef<HTMLInputElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
+
+  const handleToggleMouseDown = useCallback(
+    (event: MouseEvent<HTMLLabelElement>) => {
+      event.preventDefault();
+    },
+    [],
+  );
+
+  const handleToggleLabelClick = useCallback(
+    (event: MouseEvent<HTMLLabelElement>) => {
+      if (event.target !== toggleInputRef.current) {
+        event.preventDefault();
+        handleToggle();
+      }
+    },
+    [handleToggle],
+  );
   const mountedRef = useRef(false);
-  const prevShapeRef = useRef(caretShapeStyle);
+  const prevLayoutModeRef = useRef({
+    caretShapeStyle,
+    showCode,
+    resolvedScheme,
+  });
 
-  const groupsByLine = lines.lines.map((line: Line) => toGroups(line.chars));
+  const groupsByLine = lines.lines.map((line: Line) =>
+    toGroups(line.chars, resolvedScheme),
+  );
   const cursorMeta = findCursorMeta(groupsByLine);
-  const halfIndex: 0 | 1 = cursorMeta?.halfIndex ?? 0;
+  const segments = cursorMeta?.segments ?? [COLOR.current];
+  const activeIndex = cursorMeta?.activeIndex ?? 0;
 
-  const cursorLayoutRef = useRef({ cursor, caretShapeStyle, halfIndex });
+  const cursorLayoutRef = useRef({ cursor, caretShapeStyle, activeIndex });
 
   // 布局变了（窗口缩放、换行、字体加载完）就重算一次，且不带过渡——
   // 这种变化不是"光标走了一步"，不该有滑动动画。
@@ -546,7 +836,7 @@ export function ZhLines({
           board,
           cursorEl,
           current.caretShapeStyle,
-          current.halfIndex,
+          current.activeIndex,
           false,
         );
       }
@@ -565,35 +855,58 @@ export function ZhLines({
     };
   }, []);
 
-  // 每次渲染后把光标挪到当前字或空格处。首次渲染与切换光标形状不做过渡。
+  // 每次渲染后把光标挪到当前字或空格处。首次渲染、切换光标形状、开关拼音或切换方案不做过渡。
   useIsomorphicLayoutEffect(() => {
-    cursorLayoutRef.current = { cursor, caretShapeStyle, halfIndex };
+    cursorLayoutRef.current = { cursor, caretShapeStyle, activeIndex };
     const board = boardRef.current;
     if (board == null) {
       return;
     }
-    const shapeChanged = prevShapeRef.current !== caretShapeStyle;
-    prevShapeRef.current = caretShapeStyle;
+    const prevMode = prevLayoutModeRef.current;
+    const layoutModeChanged =
+      prevMode.caretShapeStyle !== caretShapeStyle ||
+      prevMode.showCode !== showCode ||
+      prevMode.resolvedScheme !== resolvedScheme;
+    prevLayoutModeRef.current = { caretShapeStyle, showCode, resolvedScheme };
     const cursorEl = cursorRef.current;
     if (cursor && cursorEl != null) {
       const smooth =
         caretMovementStyle === CaretMovementStyle.Smooth &&
         mountedRef.current &&
-        !shapeChanged;
-      placeCursor(board, cursorEl, caretShapeStyle, halfIndex, smooth);
+        !layoutModeChanged;
+      placeCursor(board, cursorEl, caretShapeStyle, activeIndex, smooth);
       mountedRef.current = true;
     }
   });
 
+  const boardPaddingTop = showCode ? (isQuanpin ? "4px" : "22px") : "2px";
+  const lineRowGap = showCode ? (isQuanpin ? "16px" : "30px") : "12px";
+
   return (
-    <div style={styles.root}>
+    <div style={styles.root} data-scheme={resolvedScheme}>
       {showToggle ? (
-        <label style={styles.toggleRow}>
-          <input type="checkbox" checked={showCode} onChange={toggle} />
-          <FormattedMessage
-            id="practice.zh.showCode"
-            defaultMessage="Show Shuangpin code"
+        <label
+          style={styles.toggleRow}
+          onMouseDown={handleToggleMouseDown}
+          onClick={handleToggleLabelClick}
+        >
+          <input
+            ref={toggleInputRef}
+            type="checkbox"
+            checked={showCode}
+            onChange={handleToggle}
           />
+          {isQuanpin ? (
+            <FormattedMessage
+              id="practice.zh.showPinyin"
+              defaultMessage="Show Pinyin"
+            />
+          ) : (
+            <FormattedMessage
+              id="practice.zh.showCode"
+              defaultMessage="Show Shuangpin code"
+            />
+          )}
         </label>
       ) : null}
 
@@ -601,8 +914,7 @@ export function ZhLines({
         ref={boardRef}
         style={{
           ...styles.board,
-          // 不显示拼音时，字上方那 19px 和行间为拼音留的空隙都不需要了
-          paddingTop: showCode ? "22px" : "2px",
+          paddingTop: boardPaddingTop,
         }}
       >
         {groupsByLine.map((groups, lineIndex) => {
@@ -611,7 +923,7 @@ export function ZhLines({
               key={lineIndex}
               style={{
                 ...styles.line,
-                rowGap: showCode ? "30px" : "12px",
+                rowGap: lineRowGap,
                 opacity: focus ? 1 : 0.55,
               }}
             >
@@ -626,7 +938,9 @@ export function ZhLines({
                     />
                   );
                 }
-                const chars = resolveWordChars(group.units);
+                const chars = isQuanpin
+                  ? group.units.map((u) => u.hanzi ?? "")
+                  : resolveWordCharsShuangpin(group.units);
                 return (
                   <span key={groupIndex} data-word="1" style={styles.word}>
                     {group.units.map((unit, i) => (
@@ -634,6 +948,7 @@ export function ZhLines({
                         key={i}
                         unit={unit}
                         char={chars[i]}
+                        isQuanpin={isQuanpin}
                         hanziFontCss={hanziFontCss}
                         showCode={showCode}
                         showCursor={cursor}
@@ -659,52 +974,52 @@ export function ZhLines({
             aria-hidden={true}
             data-caret-shape={caretShapeStyle}
             data-caret-movement={caretMovementStyle}
-            style={getCursorLayerStyle(caretShapeStyle)}
+            data-cursor-segments={String(segments.length)}
+            data-cursor-active-index={String(activeIndex)}
+            style={getCursorLayerStyle(
+              caretShapeStyle,
+              isQuanpin,
+              segments.length,
+            )}
           >
-            {caretShapeStyle === CaretShapeStyle.Underline ? (
-              <>
-                <span
-                  style={{
-                    ...styles.cursorHalf,
-                    background: cursorMeta?.left ?? COLOR.current,
-                  }}
-                />
-                {cursorMeta?.right != null ? (
+            {caretShapeStyle === CaretShapeStyle.Underline
+              ? segments.map((bg, i) => (
                   <span
+                    key={i}
+                    data-cursor-segment={String(i)}
+                    data-cursor-active={i === activeIndex ? "1" : undefined}
                     style={{
-                      ...styles.cursorHalf,
-                      background: cursorMeta.right,
+                      ...styles.cursorSegment,
+                      background: bg,
+                      opacity:
+                        isQuanpin && segments.length > 1 && i > activeIndex
+                          ? 0.35
+                          : 1,
+                      borderRadius:
+                        isQuanpin && segments.length > 1 ? "1px" : undefined,
                     }}
                   />
-                ) : null}
-              </>
-            ) : caretShapeStyle === CaretShapeStyle.Block ? (
-              <>
-                <span
-                  style={{
-                    ...styles.cursorHalf,
-                    background:
-                      "var(--textinput-cursor__background-color, #a8a29a)",
-                    opacity:
-                      cursorMeta?.right != null
-                        ? halfIndex === 0
-                          ? 0.34
-                          : 0.16
-                        : 0.34,
-                  }}
-                />
-                {cursorMeta?.right != null ? (
-                  <span
-                    style={{
-                      ...styles.cursorHalf,
-                      background:
-                        "var(--textinput-cursor__background-color, #a8a29a)",
-                      opacity: halfIndex === 1 ? 0.34 : 0.16,
-                    }}
-                  />
-                ) : null}
-              </>
-            ) : null}
+                ))
+              : caretShapeStyle === CaretShapeStyle.Block
+                ? segments.map((_, i) => (
+                    <span
+                      key={i}
+                      data-cursor-segment={String(i)}
+                      data-cursor-active={i === activeIndex ? "1" : undefined}
+                      style={{
+                        ...styles.cursorSegment,
+                        background:
+                          "var(--textinput-cursor__background-color, #a8a29a)",
+                        opacity:
+                          segments.length > 1
+                            ? i === activeIndex
+                              ? 0.34
+                              : 0.16
+                            : 0.34,
+                      }}
+                    />
+                  ))
+                : null}
           </span>
         ) : null}
       </div>
@@ -745,6 +1060,7 @@ function SpaceView({
 function UnitView({
   unit,
   char,
+  isQuanpin,
   hanziFontCss,
   showCode,
   showCursor,
@@ -752,54 +1068,94 @@ function UnitView({
   readonly unit: Unit;
   /** 整词查表得到的汉字；空串表示查不到，退回按音节取字 */
   readonly char: string;
+  readonly isQuanpin: boolean;
   readonly hanziFontCss: CSSProperties;
   readonly showCode: boolean;
   readonly showCursor: boolean;
 }): ReactNode {
-  const two = unit.chars.length === 2;
-  const first = unit.chars[0]?.attrs ?? 0;
-  const second = two ? (unit.chars[1]?.attrs ?? 0) : 0;
+  const segmentCount = unit.chars.length;
+  const two = segmentCount === 2;
+  const activeIdx = unit.cursor
+    ? Math.max(
+        0,
+        unit.chars.findIndex((c) => has(c.attrs, Attr.Cursor)),
+      )
+    : -1;
 
-  // 一个字里两个键各自的状态色（绿/红），没打过是 null
-  const c1 = stateColor(first);
-  const c2 = two ? stateColor(second) : null;
+  // 每个键的状态色（绿/红），未打为 null
+  const keyColors = unit.chars.map((c, idx) => {
+    const color = stateColor(c.attrs);
+    if (color != null) {
+      return color;
+    }
+    if (unit.hasGarbage && idx === activeIdx) {
+      return COLOR.miss;
+    }
+    return null;
+  });
 
-  // 汉字：左右两半分别跟着两个键走。打对一半就是左绿右灰，
-  // 第一个键打错就是左红右灰；两半同色时用实色，避免多画一层渐变。
-  const left = c1 ?? COLOR.todo;
-  const right = two ? (c2 ?? COLOR.todo) : left;
+  // 汉字：按音节长度 N 等分跟着每个键走；全部同色时用实色，避免多余渐变层。
+  const hanziColors = keyColors.map((c) => c ?? COLOR.todo);
+  const gradient = buildHanziGradient(hanziColors);
   const hanziStyle: CSSProperties = { ...styles.hanzi, ...hanziFontCss };
-  if (two && left !== right) {
-    hanziStyle.backgroundImage = `linear-gradient(90deg, ${left} 0 50%, ${right} 50% 100%)`;
+  if (gradient != null) {
+    hanziStyle.backgroundImage = gradient;
     hanziStyle.WebkitBackgroundClip = "text";
     hanziStyle.backgroundClip = "text";
     hanziStyle.color = "transparent";
   } else {
-    hanziStyle.color = left;
+    hanziStyle.color = hanziColors[0] ?? COLOR.todo;
   }
 
-  // 拼音也拆成两个字符分别上色：第一个字符对应第一个键、第二个字符对应第二个键
+  // 拼音/双拼码按字符分别上色
   const codeChars = Array.from(unit.code);
-  const codeColor = (i: number): string =>
-    (i === 0 ? c1 : c2) ?? COLOR.code;
+  const inFlowCode = isQuanpin && showCode;
+  const displayChar =
+    char !== ""
+      ? char
+      : isQuanpin
+        ? pickCharQuanpin(unit.code)
+        : pickCharShuangpin(unit.code);
 
   return (
     <span
-      style={styles.unit}
+      style={inFlowCode ? styles.unitQuanpinCode : styles.unit}
+      data-unit="1"
       data-two={two ? "1" : undefined}
+      data-segments={String(segmentCount)}
+      data-inflow={inFlowCode ? "1" : undefined}
       data-cursor={showCursor && unit.cursor ? "1" : undefined}
     >
       {showCode ? (
-        <span style={styles.code}>
-          {codeChars.map((ch, i) => (
-            <span key={i} style={{ color: codeColor(i) }}>
-              {ch}
-            </span>
-          ))}
+        <span
+          data-code="1"
+          style={isQuanpin ? styles.codeQuanpin : styles.code}
+        >
+          {codeChars.map((ch, i) => {
+            const keyColor = keyColors[i] ?? null;
+            const isCurrentKey =
+              isQuanpin &&
+              showCursor &&
+              unit.cursor &&
+              i === activeIdx &&
+              keyColor == null;
+            return (
+              <span
+                key={i}
+                data-code-active={isCurrentKey ? "1" : undefined}
+                style={{
+                  color:
+                    keyColor ?? (isCurrentKey ? COLOR.activeCode : COLOR.code),
+                }}
+              >
+                {ch}
+              </span>
+            );
+          })}
         </span>
       ) : null}
       <span data-hanzi="1" style={hanziStyle}>
-        {char !== "" ? char : pickChar(unit.code)}
+        {displayChar}
       </span>
     </span>
   );

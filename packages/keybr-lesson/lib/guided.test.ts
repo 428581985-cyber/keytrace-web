@@ -1,6 +1,7 @@
 import { describe, it, test } from "node:test";
-import { Layout, loadKeyboard } from "@keybr/keyboard";
-import { FakePhoneticModel } from "@keybr/phonetic-model";
+import { type Language, Layout, loadKeyboard } from "@keybr/keyboard";
+import { FakePhoneticModel, Letter } from "@keybr/phonetic-model";
+import { LCG } from "@keybr/rand";
 import { makeKeyStatsMap } from "@keybr/result";
 import { Settings } from "@keybr/settings";
 import { deepEqual, equal } from "rich-assert";
@@ -827,5 +828,242 @@ describe("zh-sp sticky weak-key focus and word inclusion", () => {
     for (const word of generatedWords) {
       equal(word.includes("j"), true);
     }
+  });
+});
+
+function makeFullAlphabetZhModel(language: Language): FakePhoneticModel {
+  const letters: Letter[] = [];
+  for (let i = 0; i < 26; i++) {
+    const cp = 0x61 + i;
+    letters.push(
+      new Letter(cp, (26 - i) / 351, String.fromCodePoint(cp).toUpperCase()),
+    );
+  }
+  const model = new FakePhoneticModel(["zhongguo", "fangan"]);
+  Object.defineProperty(model, "language", { value: language });
+  Object.defineProperty(model, "letters", { value: letters });
+  return model;
+}
+
+function withMockLocalStorage(fn: (store: Map<string, string>) => void): void {
+  const store = new Map<string, string>();
+  const mockStorage = {
+    getItem(key: string): string | null {
+      return store.get(key) ?? null;
+    },
+    setItem(key: string, value: string): void {
+      store.set(key, value);
+    },
+    removeItem(key: string): void {
+      store.delete(key);
+    },
+    clear(): void {
+      store.clear();
+    },
+  };
+  const prevDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "localStorage",
+  );
+  Object.defineProperty(globalThis, "localStorage", {
+    value: mockStorage,
+    configurable: true,
+    writable: true,
+  });
+  try {
+    fn(store);
+  } finally {
+    if (prevDescriptor != null) {
+      Object.defineProperty(globalThis, "localStorage", prevDescriptor);
+    } else {
+      delete (globalThis as { localStorage?: unknown }).localStorage;
+    }
+  }
+}
+
+describe("zh-qp guided lesson", () => {
+  it("partitions idioms using isQuanpinIdiom rather than 8-letter length", () => {
+    const keyboard = loadKeyboard(Layout.ZH_QP);
+    const model = makeFullAlphabetZhModel(keyboard.layout.language);
+    const words = [
+      "zhongguo", // 8 letters, 2-char common word -> NOT idiom
+      "zhuangkuang", // 11 letters, 2-char common word -> NOT idiom
+      "fangan", // 6 letters, 2-char common word -> NOT idiom
+      "yixinyiyi", // 9 letters, 4-char idiom -> idiom
+      "jingshenwenming", // 15 letters, 4-char idiom -> idiom
+    ];
+    const settings = new Settings();
+    const lesson = new GuidedLesson(settings, keyboard, model, words);
+
+    deepEqual([...lesson.idioms], ["yixinyiyi", "jingshenwenming"]);
+    deepEqual([...lesson.dictionary], ["zhongguo", "zhuangkuang", "fangan"]);
+
+    // Full alphabet is unlocked immediately for zh-qp.
+    const lessonKeys = lesson.update(makeKeyStatsMap(lesson.letters, []));
+    equal(lessonKeys.findIncludedKeys().length, 26);
+
+    // Idiom ratio 1 draws exclusively from idioms when focused key is present.
+    const focusIStats = fakeKeyStatsMap(
+      settings,
+      lesson.letters.map((letter) => [
+        letter,
+        letter.codePoint === "i".codePointAt(0)! ? 0.2 : 1.2,
+        letter.codePoint === "i".codePointAt(0)! ? 0.2 : 1.2,
+      ]),
+    );
+    const idiomOnlyLesson = new GuidedLesson(
+      settings.set(lessonProps.idioms, 1),
+      keyboard,
+      model,
+      words,
+    );
+    const idiomKeys = idiomOnlyLesson.update(focusIStats);
+    const generated = idiomOnlyLesson.generate(idiomKeys, LCG(7));
+    const drawn = generated.split(/[ ,.]+/).filter(Boolean);
+    equal(drawn.length > 0, true);
+    for (const word of drawn) {
+      equal(
+        word === "yixinyiyi" || word === "jingshenwenming",
+        true,
+      );
+    }
+  });
+
+  it("isolates zh-qp and zh-sp lockedFocusKey and drillFocusKey in localStorage", () => {
+    withMockLocalStorage((store) => {
+      const settings = new Settings().set(lessonProps.guided.recoverKeys, false);
+
+      const spKeyboard = loadKeyboard(Layout.ZH_SP);
+      const spModel = makeFullAlphabetZhModel(spKeyboard.layout.language);
+      const spLesson = new GuidedLesson(settings, spKeyboard, spModel, [
+        "dage",
+        "ykgo",
+      ]);
+
+      const qpKeyboard = loadKeyboard(Layout.ZH_QP);
+      const qpModel = makeFullAlphabetZhModel(qpKeyboard.layout.language);
+      const qpLesson = new GuidedLesson(settings, qpKeyboard, qpModel, [
+        "zhongguo",
+        "fangan",
+      ]);
+
+      const makeStats = (
+        letters: readonly Letter[],
+        weakChar: string,
+      ) =>
+        fakeKeyStatsMap(
+          settings,
+          letters.map((letter) => {
+            const isWeak = letter.codePoint === weakChar.codePointAt(0)!;
+            return [letter, isWeak ? 0.25 : 1.2, isWeak ? 0.25 : 1.2];
+          }),
+        );
+
+      // Lock 'b' in zh-sp -> writes keybr.zh.lockedFocusKey only.
+      const spKeys = spLesson.update(makeStats(spLesson.letters, "b"));
+      equal(spKeys.findFocusedKey()?.letter.codePoint, "b".codePointAt(0)!);
+      equal(store.get("keybr.zh.lockedFocusKey"), "b");
+      equal(store.get("keybr.zh-qp.lockedFocusKey"), undefined);
+
+      // Lock 'v' in zh-qp -> writes keybr.zh-qp.lockedFocusKey and does NOT inherit 'b' from zh-sp.
+      const qpKeys = qpLesson.update(makeStats(qpLesson.letters, "v"));
+      equal(qpKeys.findFocusedKey()?.letter.codePoint, "v".codePointAt(0)!);
+      equal(store.get("keybr.zh-qp.lockedFocusKey"), "v");
+      equal(store.get("keybr.zh.lockedFocusKey"), "b");
+
+      // Drill override for zh-qp only affects zh-qp and leaves zh-sp drill override untouched.
+      store.set("keybr.zh.drillFocusKey", "f");
+      store.set("keybr.zh-qp.drillFocusKey", "p");
+
+      const qpDrilled = qpLesson.update(makeStats(qpLesson.letters, "v"));
+      equal(qpDrilled.findFocusedKey()?.letter.codePoint, "p".codePointAt(0)!);
+      equal(store.get("keybr.zh-qp.drillFocusKey"), undefined);
+      equal(store.get("keybr.zh-qp.lockedFocusKey"), "p");
+      equal(store.get("keybr.zh.drillFocusKey"), "f");
+
+      const spDrilled = spLesson.update(makeStats(spLesson.letters, "b"));
+      equal(spDrilled.findFocusedKey()?.letter.codePoint, "f".codePointAt(0)!);
+      equal(store.get("keybr.zh.drillFocusKey"), undefined);
+      equal(store.get("keybr.zh.lockedFocusKey"), "f");
+      equal(store.get("keybr.zh-qp.lockedFocusKey"), "p");
+    });
+  });
+
+  it("applies recent-word cooldown window to avoid repetition on low-frequency keys like v", () => {
+    const keyboard = loadKeyboard(Layout.ZH_QP);
+    const model = makeFullAlphabetZhModel(keyboard.layout.language);
+    const vWords = [
+      "lvyou",
+      "lvse",
+      "nvshi",
+      "zhanlve",
+      "nvedai",
+      "lvxing",
+      "lvshi",
+      "lvcha",
+      "nvyou",
+      "jilv",
+    ];
+    const settings = new Settings()
+      .set(lessonProps.idioms, 0)
+      .set(lessonProps.punctuators, 0)
+      .set(lessonProps.length, 0.5);
+    const lesson = new GuidedLesson(settings, keyboard, model, [
+      ...vWords,
+      "zhongguo",
+      "fangan",
+    ]);
+
+    const stats = fakeKeyStatsMap(
+      settings,
+      lesson.letters.map((letter) => {
+        const isV = letter.codePoint === "v".codePointAt(0)!;
+        return [letter, isV ? 0.2 : 1.2, isV ? 0.2 : 1.2];
+      }),
+    );
+    const lessonKeys = lesson.update(stats);
+    equal(lessonKeys.findFocusedKey()?.letter.codePoint, "v".codePointAt(0)!);
+
+    const rng = LCG(12345);
+    const generated = lesson.generate(lessonKeys, rng);
+    const drawn = generated.split(" ").filter(Boolean);
+    equal(drawn.length >= vWords.length, true);
+
+    // Every generated word contains 'v'.
+    for (const word of drawn) {
+      equal(word.includes("v"), true);
+    }
+    // No back-to-back identical words.
+    for (let i = 1; i < drawn.length; i++) {
+      equal(drawn[i] !== drawn[i - 1], true);
+    }
+    // All 10 distinct words must be exhausted before any word repeats.
+    const firstBatch = new Set(drawn.slice(0, vWords.length));
+    equal(firstBatch.size, vWords.length);
+
+    // With a 20-word pool, a 16-word cooldown prevents repeats across the first 16 draws
+    // and keeps the start of the next lesson fresh from the tail of the prior lesson.
+    const largeVPool = Array.from({ length: 20 }, (_, i) => `lvword${String.fromCodePoint(0x61 + i)}`);
+    const largeLesson = new GuidedLesson(settings, keyboard, model, largeVPool);
+    const largeKeys = largeLesson.update(stats);
+    const frag1 = largeLesson.generate(largeKeys, LCG(99)).split(" ").filter(Boolean);
+    const frag2 = largeLesson.generate(largeKeys, LCG(100)).split(" ").filter(Boolean);
+    equal(new Set(frag1.slice(0, 16)).size, Math.min(16, frag1.length));
+    const tail1 = new Set(frag1.slice(-Math.min(8, frag1.length)));
+    equal(tail1.has(frag2[0]), false);
+  });
+
+  it("uses either punctuation or space between words in zh-qp, never both", () => {
+    const keyboard = loadKeyboard(Layout.ZH_QP);
+    const model = makeFullAlphabetZhModel(keyboard.layout.language);
+    const words = ["zhongguo", "fangan", "shijian", "wenhua", "yanjiu", "lvyou"];
+
+    const sHalf = new Settings().set(lessonProps.punctuators, 0.5);
+    const lHalf = new GuidedLesson(sHalf, keyboard, model, words);
+    const kHalf = lHalf.update(makeKeyStatsMap(lHalf.letters, []));
+    const textHalf = lHalf.generate(kHalf, LCG(42));
+    equal(/[,.]\s|\s[,.]/.test(textHalf), false);
+    equal(/[,.]/.test(textHalf), true);
+    equal(/ /.test(textHalf), true);
   });
 });

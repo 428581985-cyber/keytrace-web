@@ -213,6 +213,12 @@ export class Language implements EnumItem {
     /* direction= */ "ltr",
     /* alphabet= */ "abcdefghijklmnopqrstuvwxyz",
   );
+  static readonly ZH_QP = new Language(
+    /* id= */ "zh-qp",
+    /* script= */ "latin",
+    /* direction= */ "ltr",
+    /* alphabet= */ "abcdefghijklmnopqrstuvwxyz",
+  );
 
   static readonly ALL = new Enum<Language>(
     Language.AR,
@@ -250,6 +256,7 @@ export class Language implements EnumItem {
     Language.UK,
     Language.VI,
     Language.ZH_SP,
+    Language.ZH_QP,
   );
 
   /** ISO 639-1 language code, https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes */
@@ -415,9 +422,26 @@ export class Language implements EnumItem {
   }
 }
 
+export type ZhInputScheme = "zh-sp" | "zh-qp";
+
+export function isZhLanguage(language: Language): boolean {
+  return language.id === "zh-sp" || language.id === "zh-qp";
+}
+
+export function isZhShuangpin(language: Language): boolean {
+  return language.id === "zh-sp";
+}
+
+export function isZhQuanpin(language: Language): boolean {
+  return language.id === "zh-qp";
+}
+
 export function getExampleText(language: Language): string {
   if (language.id === "zh-sp") {
     return "mwtm jmii tiug uuru sudu.";
+  }
+  if (language.id === "zh-qp") {
+    return "meitian jianchi tisheng shuru sudu.";
   }
   switch (language.script) {
     case "arabic":

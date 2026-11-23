@@ -112,6 +112,7 @@ import { LAYOUT_TH_TH_PAT } from "./layout/th_th_pat.ts";
 import { LAYOUT_TR_TR_F } from "./layout/tr_tr_f.ts";
 import { LAYOUT_TR_TR_Q } from "./layout/tr_tr_q.ts";
 import { LAYOUT_UK_UA } from "./layout/uk_ua.ts";
+import { LAYOUT_ZH_QP } from "./layout/zh_qp.ts";
 import { LAYOUT_ZH_SP } from "./layout/zh_sp.ts";
 import { nullMod, remapZones } from "./mod.ts";
 import { KeyboardOptions } from "./settings.ts";
@@ -174,6 +175,7 @@ const layouts = new Map<Layout, CharacterDict>([
   [Layout.EN_UK, LAYOUT_EN_UK],
   [Layout.EN_US, LAYOUT_EN_US],
   [Layout.ZH_SP, LAYOUT_ZH_SP],
+  [Layout.ZH_QP, LAYOUT_ZH_QP],
   [Layout.EN_WORKMAN, LAYOUT_EN_WORKMAN],
   [Layout.ES_DVORAK, LAYOUT_ES_DVORAK],
   [Layout.ES_ES, LAYOUT_ES_ES],

@@ -33,6 +33,7 @@ import TH from "@keybr/phonetic-model/assets/model-th.data";
 import TR from "@keybr/phonetic-model/assets/model-tr.data";
 import UK from "@keybr/phonetic-model/assets/model-uk.data";
 import VI from "@keybr/phonetic-model/assets/model-vi.data";
+import ZH_QP from "@keybr/phonetic-model/assets/model-zh-qp.data";
 import ZH_SP from "@keybr/phonetic-model/assets/model-zh-sp.data";
 
 export function modelAssetPath(language: Language): string {
@@ -107,6 +108,8 @@ export function modelAssetPath(language: Language): string {
       return VI;
     case Language.ZH_SP:
       return ZH_SP;
+    case Language.ZH_QP:
+      return ZH_QP;
     default:
       throw new Error();
   }

@@ -1,7 +1,13 @@
 import { writeFile } from "node:fs/promises";
 import { test } from "node:test";
-import { equal, includes, isNotEmpty } from "rich-assert";
-import { Language } from "./language.ts";
+import { equal, includes, isFalse, isNotEmpty, isTrue } from "rich-assert";
+import {
+  getExampleText,
+  isZhLanguage,
+  isZhQuanpin,
+  isZhShuangpin,
+  Language,
+} from "./language.ts";
 import { Layout } from "./layout.ts";
 
 test("find layout", () => {
@@ -17,6 +23,31 @@ test("find layout", () => {
   equal(Layout.findLayout("fr-FR"), Layout.FR_FR);
   equal(Layout.findLayout("fr-CA"), Layout.FR_CA);
   equal(Layout.findLayout("fr-XX"), Layout.FR_FR);
+
+  equal(Layout.findLayout("zh"), Layout.ZH_SP);
+  equal(Layout.findLayout("zh-CN"), Layout.ZH_SP);
+  equal(Layout.findLayout("zh-SP"), Layout.ZH_SP);
+  equal(Layout.findLayout("zh-QP"), Layout.ZH_QP);
+});
+
+test("zh language helpers and layout selection", () => {
+  isTrue(isZhLanguage(Language.ZH_SP));
+  isTrue(isZhLanguage(Language.ZH_QP));
+  isFalse(isZhLanguage(Language.EN));
+
+  isTrue(isZhShuangpin(Language.ZH_SP));
+  isFalse(isZhShuangpin(Language.ZH_QP));
+  isFalse(isZhShuangpin(Language.EN));
+
+  isTrue(isZhQuanpin(Language.ZH_QP));
+  isFalse(isZhQuanpin(Language.ZH_SP));
+  isFalse(isZhQuanpin(Language.EN));
+
+  equal(Layout.ZH_SP.xid, 0xfe);
+  equal(Layout.ZH_QP.xid, 0xfd);
+  equal(Layout.selectLayout(Language.ZH_SP), Layout.ZH_SP);
+  equal(Layout.selectLayout(Language.ZH_QP), Layout.ZH_QP);
+  equal(getExampleText(Language.ZH_QP), "meitian jianchi tisheng shuru sudu.");
 });
 
 test("find layouts for all languages", () => {

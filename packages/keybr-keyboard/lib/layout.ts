@@ -46,6 +46,21 @@ export class Layout implements XEnumItem {
       Geometry.MATRIX,
     ),
   );
+  static readonly ZH_QP = new Layout(
+    /* id= */ "zh-qp",
+    /* xid= */ 0xfd,
+    /* name= */ "{CN}",
+    /* family= */ "qwerty",
+    /* language= */ Language.ZH_QP,
+    /* emulate= */ false,
+    /* geometries= */ new Enum(
+      Geometry.ANSI_101,
+      Geometry.ANSI_101_FULL,
+      Geometry.ISO_102,
+      Geometry.ISO_102_FULL,
+      Geometry.MATRIX,
+    ),
+  );
   static readonly EN_DVORAK = new Layout(
     /* id= */ "en-dvorak",
     /* xid= */ 0x18,
@@ -1426,6 +1441,7 @@ export class Layout implements XEnumItem {
 
   static readonly ALL = new XEnum<Layout>(
     Layout.ZH_SP,
+    Layout.ZH_QP,
     Layout.EN_US,
     Layout.EN_DVORAK,
     Layout.EN_DVORAK_PROG,

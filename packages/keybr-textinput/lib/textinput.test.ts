@@ -689,6 +689,251 @@ test("zh shuangpin fuzzy pinyin end-to-end", () => {
   );
 });
 
+test("zh quanpin fuzzy: skipped key does not forge 0ms step & stats stay valid", () => {
+  const fuzzy = {
+    enEng: false,
+    anAng: true,
+    inIng: false,
+    ianIang: false,
+    uanUang: false,
+    zhZ: true,
+    chC: false,
+    shS: false,
+    lN: false,
+    fH: false,
+    rL: false,
+    veUe: false,
+  };
+
+  // Target: "zhongguo fangan" (中国 方案)
+  // Type:   "zongguo fanan" (skip 'h' in zhong, skip 'g' in fang)
+  const textInput = new TextInput("zhongguo fangan", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhQuanpin: true,
+    fuzzy,
+  });
+
+  const typed = "zongguo fanan";
+  let ts = 0;
+  for (const ch of typed) {
+    equal(
+      textInput.appendChar((ts += 150), ch.codePointAt(0)!, 150),
+      Feedback.Succeeded,
+    );
+  }
+
+  isTrue(textInput.completed);
+  // Canonical length is 15, committed chars align 1:1 with canonical text.
+  equal(textInput.pos, 15);
+  equal(textInput.chars.length, 15);
+  equal(
+    showChars(textInput),
+    "z|h|o|n|g|g|u|o| |f|a|n|g|a|n",
+  );
+  // Real physical keystrokes recorded: 13 steps (no forged 0ms steps for 'h' or skipped 'g').
+  equal(textInput.steps.length, 13);
+  equal(
+    showSteps(textInput),
+    "z,150,150|o,300,150|n,450,150|g,600,150|g,750,150|u,900,150|o,1050,150| ,1200,150|f,1350,150|a,1500,150|n,1650,150|a,1800,150|n,1950,150",
+  );
+  const stats = makeStats(textInput.steps);
+  equal(stats.errors, 0);
+  equal(stats.length, 13);
+  isTrue(stats.histogram.validate());
+  // Skipped 'h' never entered histogram.
+  equal(stats.histogram.get("h".codePointAt(0)!), null);
+  // 'o' and 'a' keep real 150ms timeToType.
+  equal(stats.histogram.get("o".codePointAt(0)!)?.timeToType, 150);
+  equal(stats.histogram.get("a".codePointAt(0)!)?.timeToType, 150);
+});
+
+test("zh quanpin fuzzy: extra permissive keys, cross-syllable boundaries, and space boundary", () => {
+  const fuzzy = {
+    enEng: true,
+    anAng: true,
+    inIng: true,
+    ianIang: true,
+    uanUang: true,
+    zhZ: true,
+    chC: true,
+    shS: true,
+    lN: true,
+    fH: true,
+    rL: true,
+    veUe: true,
+  };
+
+  // Target: "ziji canguan fanggang fang zhanlve"
+  // Typed:  "zhiji cangguan fangang fan zhanlue"
+  // - ziji -> zhiji: consumeExtra 'h' (attributed to real pressed 'h')
+  // - canguan -> cangguan: (-n)+g- boundary extraG
+  // - fanggang -> fangang: (-ng)+g- boundary skipG
+  // - "fang " -> "fan ": omit trailing 'g' directly before space!
+  // - zhanlve -> zhanlue: same-length veUe substitute (step records 'v')
+  const textInput = new TextInput("ziji canguan fanggang fang zhanlve", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: true,
+    zhQuanpin: true,
+    fuzzy,
+  });
+
+  const typed = "zhiji cangguan fangang fan zhanlue";
+  let ts = 0;
+  for (const ch of typed) {
+    equal(
+      textInput.appendChar((ts += 120), ch.codePointAt(0)!, 120),
+      Feedback.Succeeded,
+    );
+  }
+
+  isTrue(textInput.completed);
+  equal(textInput.pos, "ziji canguan fanggang fang zhanlve".length);
+  equal(textInput.steps.length, typed.length);
+  const stats = makeStats(textInput.steps);
+  equal(stats.errors, 0);
+  isTrue(stats.histogram.validate());
+  // Extra 'h' from "zhiji" was attributed to 'h' with real timing (120ms).
+  equal(stats.histogram.get("h".codePointAt(0)!)?.hitCount, 2);
+  equal(stats.histogram.get("h".codePointAt(0)!)?.timeToType, 120);
+  // Same-length veUe substitute on zhanlve recorded expected 'v'.
+  equal(stats.histogram.get("v".codePointAt(0)!)?.hitCount, 1);
+
+  // Disabled zhQuanpin ignores Quanpin fuzzy rules.
+  const enInput = new TextInput("zhongguo", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhQuanpin: false,
+    fuzzy,
+  });
+  equal(enInput.appendChar(100, "z".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(enInput.appendChar(200, "o".codePointAt(0)!, 100), Feedback.Failed);
+
+  // spaceSkipsWords: false still allows omitting trailing 'g' directly before space
+  // and adding/omitting trailing 'g' directly before punctuation.
+  const spaceNoSkip = new TextInput("fang de,fan,fang.", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhQuanpin: true,
+    fuzzy: { ...fuzzy },
+  });
+  const typedPunct = "fan de,fang,fan.";
+  let ts2 = 0;
+  for (const ch of typedPunct) {
+    equal(
+      spaceNoSkip.appendChar((ts2 += 120), ch.codePointAt(0)!, 120),
+      Feedback.Succeeded,
+    );
+  }
+  isTrue(spaceNoSkip.completed);
+  equal(spaceNoSkip.steps.length, typedPunct.length);
+  equal(makeStats(spaceNoSkip.steps).errors, 0);
+});
+
+test("zh quanpin fuzzy: clearWord snapshot rollback after skip, extra, and boundary state", () => {
+  const fuzzy = {
+    enEng: false,
+    anAng: true,
+    inIng: false,
+    ianIang: false,
+    uanUang: false,
+    zhZ: true,
+    chC: false,
+    shS: false,
+    lN: false,
+    fH: false,
+    rL: false,
+    veUe: false,
+  };
+
+  // Word 1: "ziji" (type "zhiji" with extra 'h'), Word 2: "zhongguo" (skip 'h', then clearWord!)
+  const textInput = new TextInput("ziji zhongguo canguan", {
+    stopOnError: false,
+    forgiveErrors: false,
+    spaceSkipsWords: false,
+    zhQuanpin: true,
+    fuzzy,
+  });
+
+  let ts = 0;
+  for (const ch of "zhiji ") {
+    equal(
+      textInput.appendChar((ts += 100), ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  equal(textInput.pos, 5); // "ziji "
+  equal(textInput.steps.length, 6); // z,h,i,j,i,' '
+
+  // Start typing "zhongguo" as "zong" (skipping 'h').
+  for (const ch of "zong") {
+    equal(
+      textInput.appendChar((ts += 100), ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  equal(textInput.pos, 10); // "ziji zhong"
+  equal(textInput.steps.length, 10); // 6 ("zhiji ") + 4 ("zong")
+  // clearWord() must roll back cleanly to right after "ziji " (pos 5, steps 6)!
+  equal(textInput.clearWord(), Feedback.Succeeded);
+  equal(textInput.pos, 5);
+  equal(textInput.steps.length, 6);
+  equal(showChars(textInput), "z|i|j|i| |[z]|h|o|n|g|g|u|o| |c|a|n|g|u|a|n");
+
+  // Re-type "zhongguo " canonically; first char recovers from clearWord typo flag.
+  equal(
+    textInput.appendChar((ts += 100), "z".codePointAt(0)!, 100),
+    Feedback.Recovered,
+  );
+  for (const ch of "hongguo ") {
+    equal(
+      textInput.appendChar((ts += 100), ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  equal(textInput.pos, 14); // "ziji zhongguo "
+
+  // Now type "cang" (sets pendingBoundaryG: extraG), add typo 'x', clearChar() pops 'x',
+  // then second 'g' is still absorbed by pendingBoundaryG!
+  for (const ch of "cang") {
+    equal(
+      textInput.appendChar((ts += 100), ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  equal(
+    textInput.appendChar((ts += 100), "x".codePointAt(0)!, 100),
+    Feedback.Failed,
+  );
+  equal(textInput.clearChar(), Feedback.Succeeded);
+  equal(
+    textInput.appendChar((ts += 100), "g".codePointAt(0)!, 100),
+    Feedback.Recovered,
+  );
+  // Now clearWord() after extraG absorbed must roll back all of "canguan" cleanly to pos 14!
+  equal(textInput.clearWord(), Feedback.Succeeded);
+  equal(textInput.pos, 14);
+  equal(textInput.steps.length, 15); // 6 ("zhiji ") + 9 ("zhongguo ")
+
+  // Re-type "cangguan" cleanly to finish.
+  equal(
+    textInput.appendChar((ts += 100), "c".codePointAt(0)!, 100),
+    Feedback.Recovered,
+  );
+  for (const ch of "angguan") {
+    equal(
+      textInput.appendChar((ts += 100), ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  isTrue(textInput.completed);
+  equal(textInput.pos, "ziji zhongguo canguan".length);
+});
+
 function showSteps({ steps }: TextInput) {
   return steps
     .map(({ codePoint, timeStamp, timeToType, typo }) => {

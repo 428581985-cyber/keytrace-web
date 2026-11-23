@@ -1,4 +1,4 @@
-import { useKeyboard, ZH_KEY_LABELS } from "@keybr/keyboard";
+import { isZhShuangpin, useKeyboard, ZH_KEY_LABELS } from "@keybr/keyboard";
 import { lessonProps, Target } from "@keybr/lesson";
 import { type KeyStatsMap } from "@keybr/result";
 import { useSettings } from "@keybr/settings";
@@ -119,7 +119,7 @@ export function MasterySection({
   const { settings } = useSettings();
   const target = new Target(settings);
   const keyboard = useKeyboard();
-  const isZh = keyboard.layout.language.id === "zh-sp";
+  const showShuangpinLabels = isZhShuangpin(keyboard.layout.language);
   // 判定口径完全照 keybr 的 guided 算法：
   // recoverKeys 关闭（默认）时看 bestConfidence（历史最好成绩），
   // 打开时看 confidence（当前平滑速度）。不自己另发明一套标准。
@@ -148,7 +148,7 @@ export function MasterySection({
               const confidence = target.confidence(
                 recoverKeys ? stats.timeToType : stats.bestTimeToType,
               );
-              const sound = isZh
+              const sound = showShuangpinLabels
                 ? ZH_KEY_LABELS[`Key${ch.toUpperCase()}`]?.join("/")
                 : undefined;
               return (

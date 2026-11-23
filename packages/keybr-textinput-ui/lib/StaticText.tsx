@@ -1,3 +1,4 @@
+import { isZhLanguage, isZhQuanpin, type ZhInputScheme } from "@keybr/keyboard";
 import { type LineList, type TextDisplaySettings } from "@keybr/textinput";
 import { type ReactNode } from "react";
 import { TextLines, type TextLineSize } from "./TextLines.tsx";
@@ -11,6 +12,7 @@ export function StaticText({
   cursor = false,
   focus = true,
   zh,
+  scheme,
 }: {
   readonly settings?: TextDisplaySettings;
   readonly lines: LineList;
@@ -19,12 +21,22 @@ export function StaticText({
   readonly cursor?: boolean;
   readonly focus?: boolean;
   readonly zh?: boolean;
+  readonly scheme?: ZhInputScheme;
 }): ReactNode {
-  const isZh = zh ?? settings?.language?.id === "zh-sp";
+  const isZh =
+    zh ?? (settings?.language != null && isZhLanguage(settings.language));
   if (isZh) {
+    const resolvedScheme: ZhInputScheme | undefined =
+      scheme ??
+      (settings?.language != null
+        ? isZhQuanpin(settings.language)
+          ? "zh-qp"
+          : "zh-sp"
+        : undefined);
     return (
       <ZhLines
         settings={settings}
+        scheme={resolvedScheme}
         lines={lines}
         focus={focus}
         cursor={cursor}

@@ -1,4 +1,9 @@
-import { KeyboardOptions, Language } from "@keybr/keyboard";
+import {
+  isZhQuanpin,
+  isZhShuangpin,
+  KeyboardOptions,
+  Language,
+} from "@keybr/keyboard";
 import {
   booleanProp,
   enumProp,
@@ -8,17 +13,21 @@ import {
 import { Font } from "./font.ts";
 
 /**
- * Fuzzy pinyin settings for Chinese Shuangpin mode.
+ * Fuzzy pinyin settings for Chinese Shuangpin and Quanpin modes.
  */
 export type FuzzyPinyinSettings = {
   readonly enEng: boolean;
   readonly anAng: boolean;
   readonly inIng: boolean;
   readonly ianIang: boolean;
+  readonly uanUang?: boolean;
   readonly zhZ: boolean;
   readonly chC: boolean;
   readonly shS: boolean;
   readonly lN: boolean;
+  readonly fH?: boolean;
+  readonly rL?: boolean;
+  readonly veUe?: boolean;
 };
 
 /**
@@ -43,13 +52,17 @@ export type TextInputSettings = {
    */
   readonly spaceSkipsWords: boolean;
   /**
-   * Fuzzy pinyin options for Chinese Shuangpin mode.
+   * Fuzzy pinyin options for Chinese Shuangpin and Quanpin modes.
    */
   readonly fuzzy?: FuzzyPinyinSettings;
   /**
    * Whether Chinese Shuangpin mode is active.
    */
   readonly zhShuangpin?: boolean;
+  /**
+   * Whether Chinese Quanpin (Full Pinyin) mode is active.
+   */
+  readonly zhQuanpin?: boolean;
 };
 
 export const textInputSettings = {
@@ -67,28 +80,38 @@ export const textInputProps = {
     anAng: booleanProp("textInput.fuzzy.anAng", false),
     inIng: booleanProp("textInput.fuzzy.inIng", false),
     ianIang: booleanProp("textInput.fuzzy.ianIang", false),
+    uanUang: booleanProp("textInput.fuzzy.uanUang", false),
     zhZ: booleanProp("textInput.fuzzy.zhZ", false),
     chC: booleanProp("textInput.fuzzy.chC", false),
     shS: booleanProp("textInput.fuzzy.shS", false),
     lN: booleanProp("textInput.fuzzy.lN", false),
+    fH: booleanProp("textInput.fuzzy.fH", false),
+    rL: booleanProp("textInput.fuzzy.rL", false),
+    veUe: booleanProp("textInput.fuzzy.veUe", false),
   } as const,
 } as const;
 
 export function toTextInputSettings(settings: Settings): TextInputSettings {
+  const { language } = KeyboardOptions.from(settings);
   return {
     stopOnError: settings.get(textInputProps.stopOnError),
     forgiveErrors: settings.get(textInputProps.forgiveErrors),
     spaceSkipsWords: settings.get(textInputProps.spaceSkipsWords),
-    zhShuangpin: KeyboardOptions.from(settings).language.id === "zh-sp",
+    zhShuangpin: isZhShuangpin(language),
+    zhQuanpin: isZhQuanpin(language),
     fuzzy: {
       enEng: settings.get(textInputProps.fuzzy.enEng),
       anAng: settings.get(textInputProps.fuzzy.anAng),
       inIng: settings.get(textInputProps.fuzzy.inIng),
       ianIang: settings.get(textInputProps.fuzzy.ianIang),
+      uanUang: settings.get(textInputProps.fuzzy.uanUang),
       zhZ: settings.get(textInputProps.fuzzy.zhZ),
       chC: settings.get(textInputProps.fuzzy.chC),
       shS: settings.get(textInputProps.fuzzy.shS),
       lN: settings.get(textInputProps.fuzzy.lN),
+      fH: settings.get(textInputProps.fuzzy.fH),
+      rL: settings.get(textInputProps.fuzzy.rL),
+      veUe: settings.get(textInputProps.fuzzy.veUe),
     },
   };
 }

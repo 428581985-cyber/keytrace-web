@@ -1,4 +1,9 @@
-import { KeyboardOptions, Layout, useKeyboard } from "@keybr/keyboard";
+import {
+  isZhLanguage,
+  KeyboardOptions,
+  Layout,
+  useKeyboard,
+} from "@keybr/keyboard";
 import { type NamedUser, Screen, usePageData } from "@keybr/pages-shared";
 import {
   activeDayCount,
@@ -57,7 +62,7 @@ export function ProfilePage() {
 function Content({ keyStatsMap }: { keyStatsMap: KeyStatsMap }) {
   const { publicUser } = usePageData();
   const keyboard = useKeyboard();
-  const isZh = keyboard.layout.language.id === "zh-sp";
+  const isZh = isZhLanguage(keyboard.layout.language);
   const { results } = keyStatsMap;
   const stats = makeSummaryStats(results);
   const dailyStatsMap = new DailyStatsMap(results);

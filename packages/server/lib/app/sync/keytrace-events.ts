@@ -92,10 +92,12 @@ export type KeyTraceWeakKey = {
   readonly samples: number;
 };
 
+export type KeyTraceLayoutId = "zh-sp" | "zh-qp" | "en-us";
+
 export type KeyTraceCorrectionItem = {
   readonly ts: number;
   readonly exe: string;
-  readonly layoutId: "zh-sp" | "en-us";
+  readonly layoutId: KeyTraceLayoutId;
   readonly wrongChar: string;
   readonly rightChar: string;
   readonly contextText: string;
@@ -104,7 +106,7 @@ export type KeyTraceCorrectionItem = {
 export type KeyTraceCommitItem = {
   readonly ts: number;
   readonly exe: string;
-  readonly layoutId: "zh-sp" | "en-us";
+  readonly layoutId: KeyTraceLayoutId;
   readonly text: string;
   readonly keys: number;
 };
@@ -124,6 +126,7 @@ export type KeyTraceDashboardData = {
   readonly apps: readonly KeyTraceAppEntry[];
   readonly weakKeys: {
     readonly "zh-sp": readonly KeyTraceWeakKey[];
+    readonly "zh-qp": readonly KeyTraceWeakKey[];
     readonly "en-us": readonly KeyTraceWeakKey[];
   };
   readonly recentCorrections: readonly KeyTraceCorrectionItem[];
@@ -158,7 +161,7 @@ type KeyAccumulator = {
 
 type DayBucket = {
   readonly day: string;
-  readonly layoutId: "zh-sp" | "en-us";
+  readonly layoutId: KeyTraceLayoutId;
   lastTs: number;
   length: number;
   errors: number;
@@ -166,11 +169,89 @@ type DayBucket = {
   readonly keys: Map<number, KeyAccumulator>;
 };
 
+type ImeTimelineEntry = {
+  readonly ts: number;
+  readonly mono: number;
+  readonly order: number;
+  readonly ime: string;
+};
+
 type DayFileEntry = {
   readonly date: string;
   readonly path: string;
   readonly gzip: boolean;
 };
+
+export function resolveZhLayoutFromIme(
+  ime: string | null | undefined,
+): "zh-sp" | "zh-qp" {
+  if (typeof ime !== "string") {
+    return "zh-sp";
+  }
+  const normalized = ime.trim().toLowerCase();
+  if (
+    normalized === "full-pinyin" ||
+    normalized.startsWith("full-pinyin/") ||
+    normalized.includes("quanpin")
+  ) {
+    return "zh-qp";
+  }
+  return "zh-sp";
+}
+
+function isZhKeyTraceLayout(layoutId: KeyTraceLayoutId): boolean {
+  return layoutId === "zh-sp" || layoutId === "zh-qp";
+}
+
+function extractImeFromMeta(event: RawEvent): string | null {
+  if (event.ev !== "meta" || typeof event.text !== "string") {
+    return null;
+  }
+  const match = event.text.match(/^ime=(.+)$/);
+  if (match == null) {
+    return null;
+  }
+  const value = match[1].trim();
+  return value.length > 0 ? value : null;
+}
+
+function collectImeMetaEvents(
+  events: readonly RawEvent[],
+  timeline: ImeTimelineEntry[],
+): void {
+  let added = false;
+  for (const event of events) {
+    const ime = extractImeFromMeta(event);
+    if (ime != null) {
+      timeline.push({
+        ts: event.ts,
+        mono: event.mono,
+        order: timeline.length,
+        ime,
+      });
+      added = true;
+    }
+  }
+  if (added && timeline.length > 1) {
+    timeline.sort(
+      (a, b) => a.ts - b.ts || a.mono - b.mono || a.order - b.order,
+    );
+  }
+}
+
+function findActiveIme(
+  timeline: readonly ImeTimelineEntry[],
+  ts: number,
+  mono: number,
+): string | null {
+  for (let i = timeline.length - 1; i >= 0; i -= 1) {
+    const entry = timeline[i];
+    if (entry.ts < ts || (entry.ts === ts && entry.mono <= mono)) {
+      return entry.ime;
+    }
+  }
+  return null;
+}
 
 export async function readKeyTraceSyncData(options?: {
   readonly eventsDir?: string;
@@ -201,6 +282,7 @@ export async function readKeyTraceSyncData(options?: {
 
   const buckets = new Map<string, DayBucket>();
   const commitKeys = includeCommitKeys ? new Set<string>() : null;
+  const imeTimeline: ImeTimelineEntry[] = [];
   let currentSessionKey: string | null = null;
   let kdBuffer: KdEvent[] = [];
 
@@ -216,9 +298,14 @@ export async function readKeyTraceSyncData(options?: {
       continue;
     }
 
+    collectImeMetaEvents(dayEvents, imeTimeline);
     dayEvents.sort(compareEvents);
 
     for (const event of dayEvents) {
+      if (event.ev === "meta") {
+        continue;
+      }
+
       const sessionKey = getSessionKey(event);
       if (sessionKey != null && sessionKey !== currentSessionKey) {
         currentSessionKey = sessionKey;
@@ -284,7 +371,10 @@ export async function readKeyTraceSyncData(options?: {
         continue;
       }
 
-      const layoutId = detectLayoutId(cleanText);
+      const zhLayoutId = resolveZhLayoutFromIme(
+        findActiveIme(imeTimeline, event.ts, event.mono),
+      );
+      const layoutId = detectLayoutId(cleanText, zhLayoutId);
       if (layoutId == null) {
         continue;
       }
@@ -518,9 +608,12 @@ function detectLegacyLayoutId(cleanText: string): "zh-sp" | "en-us" | null {
   return null;
 }
 
-function detectLayoutId(cleanText: string): "zh-sp" | "en-us" | null {
+function detectLayoutId(
+  cleanText: string,
+  zhLayoutId: "zh-sp" | "zh-qp",
+): KeyTraceLayoutId | null {
   if (CJK_RE.test(cleanText)) {
-    return "zh-sp";
+    return zhLayoutId;
   }
   if (ALNUM_RE.test(cleanText) && !isLeakedPinyin(cleanText)) {
     return "en-us";
@@ -530,7 +623,7 @@ function detectLayoutId(cleanText: string): "zh-sp" | "en-us" | null {
 
 function toEligibleCodePoint(
   vk: number,
-  layoutId: "zh-sp" | "en-us",
+  layoutId: KeyTraceLayoutId,
 ): number | null {
   if (vk >= 65 && vk <= 90) {
     return 97 + (vk - 65);
@@ -544,7 +637,7 @@ function toEligibleCodePoint(
 function accumulateCommit(
   buckets: Map<string, DayBucket>,
   day: string,
-  layoutId: "zh-sp" | "en-us",
+  layoutId: KeyTraceLayoutId,
   ts: number,
   slice: readonly KdEvent[],
   onCorrection?: (wrongCp: number | null, rightCp: number) => void,
@@ -819,7 +912,7 @@ function mergeBucketsToSummary(
   };
   for (const b of list) {
     acc.totalKeys += b.length;
-    if (b.layoutId === "zh-sp") {
+    if (isZhKeyTraceLayout(b.layoutId)) {
       acc.zhKeys += b.length;
     } else {
       acc.enKeys += b.length;
@@ -832,7 +925,7 @@ function mergeBucketsToSummary(
 
 function buildWeakKeys(
   buckets: Iterable<DayBucket>,
-  layoutId: "zh-sp" | "en-us",
+  layoutId: KeyTraceLayoutId,
 ): KeyTraceWeakKey[] {
   const merged = new Map<number, KeyAccumulator>();
   for (const b of buckets) {
@@ -907,7 +1000,7 @@ export async function readKeyTraceDashboard(options?: {
       overall: emptySummaryBucket(),
       daily: [],
       apps: [],
-      weakKeys: { "zh-sp": [], "en-us": [] },
+      weakKeys: { "zh-sp": [], "zh-qp": [], "en-us": [] },
       recentCorrections: [],
       recentCommits: [],
     };
@@ -947,7 +1040,7 @@ export async function readKeyTraceDashboard(options?: {
   let currentSessionKey: string | null = null;
   let kdBuffer: KdEvent[] = [];
   let lastEventTs: number | null = null;
-  let imeName: string | null = null;
+  const imeTimeline: ImeTimelineEntry[] = [];
 
   for (const { date, files } of dayGroups) {
     const dayEvents: RawEvent[] = [];
@@ -960,6 +1053,7 @@ export async function readKeyTraceDashboard(options?: {
     if (dayEvents.length === 0) {
       continue;
     }
+    collectImeMetaEvents(dayEvents, imeTimeline);
     dayEvents.sort(compareEvents);
 
     for (const event of dayEvents) {
@@ -971,11 +1065,7 @@ export async function readKeyTraceDashboard(options?: {
         lastEventTs = event.ts;
       }
 
-      if (event.ev === "meta" && typeof event.text === "string") {
-        const m = event.text.match(/^ime=(.+)$/);
-        if (m) {
-          imeName = m[1];
-        }
+      if (event.ev === "meta") {
         continue;
       }
 
@@ -1033,7 +1123,10 @@ export async function readKeyTraceDashboard(options?: {
         continue;
       }
 
-      const layoutId = detectLayoutId(cleanText);
+      const zhLayoutId = resolveZhLayoutFromIme(
+        findActiveIme(imeTimeline, event.ts, event.mono),
+      );
+      const layoutId = detectLayoutId(cleanText, zhLayoutId);
       if (layoutId == null) {
         continue;
       }
@@ -1105,7 +1198,7 @@ export async function readKeyTraceDashboard(options?: {
           appMap.set(exeRaw, app);
         }
         app.totalKeys += deltaKeys;
-        if (layoutId === "zh-sp") {
+        if (isZhKeyTraceLayout(layoutId)) {
           app.zhKeys += deltaKeys;
         } else {
           app.enKeys += deltaKeys;
@@ -1180,6 +1273,9 @@ export async function readKeyTraceDashboard(options?: {
   const active =
     todayBytes > 0 && lastEventTs != null && now - lastEventTs <= 15 * 60 * 1000;
 
+  const imeName =
+    imeTimeline.length > 0 ? imeTimeline[imeTimeline.length - 1].ime : null;
+
   return {
     status: {
       active,
@@ -1199,6 +1295,7 @@ export async function readKeyTraceDashboard(options?: {
     apps,
     weakKeys: {
       "zh-sp": buildWeakKeys(allBuckets, "zh-sp"),
+      "zh-qp": buildWeakKeys(allBuckets, "zh-qp"),
       "en-us": buildWeakKeys(allBuckets, "en-us"),
     },
     recentCorrections: recentCorrections.slice(-20).reverse(),

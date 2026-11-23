@@ -21,3 +21,12 @@ test("select Chinese fonts for zh-sp with Songti default", () => {
     isTrue(font.scripts.includes("han"));
   }
 });
+
+test("select Chinese fonts for zh-qp with Songti default", () => {
+  const fonts = Font.select(Language.ZH_QP);
+  equal(fonts.size, 7);
+  equal(fonts.at(0).name, "宋体");
+  for (const font of fonts) {
+    isTrue(font.scripts.includes("han"));
+  }
+});

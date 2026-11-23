@@ -1,3 +1,4 @@
+import { isZhLanguage, isZhQuanpin } from "@keybr/keyboard";
 import { type GuidedLesson } from "@keybr/lesson";
 import { Description, Explainer, FieldSet } from "@keybr/widget";
 import { type ReactNode } from "react";
@@ -19,9 +20,11 @@ export function GuidedLessonSettings({
   readonly lesson: GuidedLesson;
 }): ReactNode {
   const { formatMessage } = useIntl();
-  // 中文双拼是「26 个键一开始就全开」，上游那套「先解锁几个键、按成绩逐渐放」
+  // 中文（双拼 / 全拼）是「26 个键一开始就全开」，上游那套「先解锁几个键、按成绩逐渐放」
   // 在这里既不生效也没意义，相关开关全部隐藏，免得看着像一个能调的选项。
-  const isZh = lesson.model.language.id === "zh-sp";
+  const { language } = lesson.model;
+  const isZh = isZhLanguage(language);
+  const zhScheme = isZhQuanpin(language) ? "zh-qp" : "zh-sp";
   return (
     <>
       <Explainer>
@@ -46,7 +49,7 @@ export function GuidedLessonSettings({
         {!isZh && <AlphabetSizeProp />}
         <TextManglingProp showCapitals={!isZh} />
         {isZh && <ZhProp />}
-        {isZh && <FuzzyPinyinProp />}
+        {isZh && <FuzzyPinyinProp scheme={zhScheme} />}
         <LessonLengthProp />
       </FieldSet>
     </>

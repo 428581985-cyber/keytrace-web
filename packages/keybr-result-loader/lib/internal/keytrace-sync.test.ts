@@ -5,7 +5,7 @@ import { deepEqual, equal } from "rich-assert";
 import { syncKeyTraceResults } from "./keytrace-sync.ts";
 
 function makeValidResult(
-  layoutId: "zh-sp" | "en-us",
+  layoutId: "zh-sp" | "zh-qp" | "en-us",
   ts: number,
   length = 20,
 ): Result {
@@ -149,6 +149,145 @@ test("uses incremental ?since sync when already on syncVersion 2", async () => {
     deepEqual(
       JSON.parse(window.localStorage.getItem("keybr.keytrace.syncedKeys")!),
       ["zh-sp:1700000020", "zh-sp:1700000030"],
+    );
+  } finally {
+    globalThis.fetch = origFetch;
+    window.localStorage.clear();
+  }
+});
+
+test("syncs zh-qp records and isolates dedup keys from zh-sp at the same timestamp", async () => {
+  window.localStorage.clear();
+  window.localStorage.setItem("keybr.keytrace.syncVersion", "2");
+  window.localStorage.setItem("keybr.keytrace.lastSyncedTs", "1700000020000");
+  window.localStorage.setItem(
+    "keybr.keytrace.syncedKeys",
+    JSON.stringify(["zh-sp:1700000020"]),
+  );
+
+  const existingSp = makeValidResult("zh-sp", 1700000040000, 20);
+  const incomingQpSameTs = makeValidResult("zh-qp", 1700000040000, 26);
+  const incomingQpLater = makeValidResult("zh-qp", 1700000050000, 24);
+
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        syncVersion: 2,
+        records: [
+          resultToJson(existingSp),
+          resultToJson(incomingQpSameTs),
+          resultToJson(incomingQpLater),
+        ],
+        latestTs: 1700000050000,
+        daysScanned: 2,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    )) as typeof fetch;
+
+  try {
+    let appended: readonly Result[] = [];
+    const summary1 = await syncKeyTraceResults(
+      [existingSp],
+      (items) => {
+        appended = items;
+      },
+      () => {
+        throw new Error("should not replace during v2 incremental sync");
+      },
+    );
+
+    equal(summary1.added, 2);
+    equal(appended.length, 2);
+    equal(appended[0].layout.id, "zh-qp");
+    equal(appended[0].timeStamp, 1700000040000);
+    equal(appended[1].layout.id, "zh-qp");
+    equal(appended[1].timeStamp, 1700000050000);
+    deepEqual(
+      JSON.parse(window.localStorage.getItem("keybr.keytrace.syncedKeys")!),
+      ["zh-sp:1700000020", "zh-qp:1700000040", "zh-qp:1700000050"],
+    );
+
+    // Re-syncing the same zh-qp records deduplicates cleanly.
+    let appendedAgain: readonly Result[] = [];
+    const summary2 = await syncKeyTraceResults(
+      [existingSp, ...appended],
+      (items) => {
+        appendedAgain = items;
+      },
+    );
+    equal(summary2.added, 0);
+    equal(appendedAgain.length, 0);
+  } finally {
+    globalThis.fetch = origFetch;
+    window.localStorage.clear();
+  }
+});
+
+test("migration preserves native zh-qp practice results alongside synced zh-sp and zh-qp records", async () => {
+  window.localStorage.clear();
+  window.localStorage.setItem("keybr.keytrace.lastSyncedTs", "1700000010000");
+
+  const staleKeyTraceSp = makeValidResult("zh-sp", 1700000010000, 30);
+  const nativeSiteQp = makeValidResult("zh-qp", 1700000015000, 28);
+  const freshKeyTraceSp = makeValidResult("zh-sp", 1700000020000, 22);
+  const freshKeyTraceQp = makeValidResult("zh-qp", 1700000025000, 25);
+
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        syncVersion: 2,
+        records: [
+          resultToJson(freshKeyTraceSp),
+          resultToJson(freshKeyTraceQp),
+        ],
+        latestTs: 1700000025000,
+        daysScanned: 2,
+        commitKeys: ["zh-sp:1700000010"],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    )) as typeof fetch;
+
+  try {
+    let replaced: readonly Result[] | null = null;
+    const summary = await syncKeyTraceResults(
+      [staleKeyTraceSp, nativeSiteQp],
+      () => {},
+      (items) => {
+        replaced = items;
+      },
+    );
+
+    equal(summary.added, 2);
+    equal(replaced!.length, 3);
+    equal(
+      replaced!.some(
+        (r) => r.layout.id === "zh-qp" && r.timeStamp === 1700000015000,
+      ),
+      true,
+    );
+    equal(
+      replaced!.some(
+        (r) => r.layout.id === "zh-qp" && r.timeStamp === 1700000025000,
+      ),
+      true,
+    );
+    equal(
+      replaced!.some(
+        (r) => r.layout.id === "zh-sp" && r.timeStamp === 1700000020000,
+      ),
+      true,
+    );
+    equal(
+      replaced!.some(
+        (r) => r.layout.id === "zh-sp" && r.timeStamp === 1700000010000,
+      ),
+      false,
+    );
+    deepEqual(
+      JSON.parse(window.localStorage.getItem("keybr.keytrace.syncedKeys")!),
+      ["zh-sp:1700000020", "zh-qp:1700000025"],
     );
   } finally {
     globalThis.fetch = origFetch;

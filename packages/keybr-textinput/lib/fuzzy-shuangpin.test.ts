@@ -15,10 +15,14 @@ const ALL_OFF: FuzzyPinyinSettings = {
   anAng: false,
   inIng: false,
   ianIang: false,
+  uanUang: false,
   zhZ: false,
   chC: false,
   shS: false,
   lN: false,
+  fH: false,
+  rL: false,
+  veUe: false,
 };
 
 const ALL_ON: FuzzyPinyinSettings = {
@@ -26,10 +30,14 @@ const ALL_ON: FuzzyPinyinSettings = {
   anAng: true,
   inIng: true,
   ianIang: true,
+  uanUang: true,
   zhZ: true,
   chC: true,
   shS: true,
   lN: true,
+  fH: true,
+  rL: true,
+  veUe: true,
 };
 
 const cp = (ch: string) => ch.codePointAt(0)!;
@@ -145,6 +153,7 @@ test("settings defaults and toTextInputSettings", () => {
   const defaults = new Settings();
   const enInput = toTextInputSettings(defaults);
   isFalse(enInput.zhShuangpin);
+  isFalse(enInput.zhQuanpin);
   deepEqual(enInput.fuzzy, ALL_OFF);
 
   const zhSettings = defaults
@@ -153,9 +162,27 @@ test("settings defaults and toTextInputSettings", () => {
     .set(textInputProps.fuzzy.enEng, true);
   const zhInput = toTextInputSettings(zhSettings);
   isTrue(zhInput.zhShuangpin);
+  isFalse(zhInput.zhQuanpin);
   deepEqual(zhInput.fuzzy, {
     ...ALL_OFF,
     zhZ: true,
     enEng: true,
+  });
+
+  const qpSettings = defaults
+    .set(keyboardProps.language, Language.ZH_QP)
+    .set(textInputProps.fuzzy.uanUang, true)
+    .set(textInputProps.fuzzy.fH, true)
+    .set(textInputProps.fuzzy.rL, true)
+    .set(textInputProps.fuzzy.veUe, true);
+  const qpInput = toTextInputSettings(qpSettings);
+  isFalse(qpInput.zhShuangpin);
+  isTrue(qpInput.zhQuanpin);
+  deepEqual(qpInput.fuzzy, {
+    ...ALL_OFF,
+    uanUang: true,
+    fH: true,
+    rL: true,
+    veUe: true,
   });
 });

@@ -30,6 +30,9 @@ const factory = (intl: IntlShape): IntlDisplayNames => {
     if (id === "zh-sp") {
       return locale.startsWith("zh") ? "中文双拼（小鹤）" : "Chinese Shuangpin";
     }
+    if (id === "zh-qp") {
+      return locale.startsWith("zh") ? "中文全拼" : "Chinese Full Pinyin";
+    }
     const dn = intl.formatters.getDisplayNames(locale, {
       type: "language",
       fallback: "none",
@@ -39,6 +42,9 @@ const factory = (intl: IntlShape): IntlDisplayNames => {
   const formatLocalLanguageName = (id: string): string => {
     if (id === "zh-sp") {
       return "中文双拼（小鹤）";
+    }
+    if (id === "zh-qp") {
+      return "中文全拼";
     }
     const dn = intl.formatters.getDisplayNames(id, {
       type: "language",

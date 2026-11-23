@@ -1,4 +1,4 @@
-import { type Language } from "@keybr/keyboard";
+import { isZhLanguage, type Language } from "@keybr/keyboard";
 import { Enum, type EnumItem } from "@keybr/lang";
 import {
   type FontFace,
@@ -20,7 +20,7 @@ export class Font implements EnumItem {
   }
 
   static select(language: Language) {
-    const script: Script = language.id === "zh-sp" ? "han" : language.script;
+    const script: Script = isZhLanguage(language) ? "han" : language.script;
     return new Enum(
       ...Font.ALL.filter((font) => font.scripts.includes(script)),
     );

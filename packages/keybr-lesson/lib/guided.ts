@@ -1,9 +1,15 @@
 import { type WordList } from "@keybr/content";
-import { type Keyboard } from "@keybr/keyboard";
+import {
+  isZhLanguage,
+  isZhQuanpin,
+  type Keyboard,
+  type Language,
+} from "@keybr/keyboard";
 import { Filter, Letter, type PhoneticModel } from "@keybr/phonetic-model";
 import { randomSample, type RNGStream } from "@keybr/rand";
 import { type KeyStatsMap } from "@keybr/result";
 import { type Settings } from "@keybr/settings";
+import { isQuanpinIdiom } from "@keybr/textinput";
 import { Dictionary, filterWordList } from "./dictionary.ts";
 import { LessonKey, LessonKeys } from "./key.ts";
 import { Lesson } from "./lesson.ts";
@@ -23,8 +29,29 @@ const SLOW_BOOST = 4;
 const ERROR_BOOST = 3;
 /** 当前聚焦的那个键再乘一点，让练习更集中 */
 const FOCUS_BOOST = 1.5;
-const ZH_LOCKED_FOCUS_KEY = "keybr.zh.lockedFocusKey";
-const ZH_DRILL_OVERRIDE_KEY = "keybr.zh.drillFocusKey";
+/** 中文抽词冷却窗口：近期抽过的词短期内不重复，避免低频键（如 v/p/f）词池复读 */
+const ZH_COOLDOWN_WINDOW = 16;
+
+const ZH_SP_LOCKED_FOCUS_KEY = "keybr.zh.lockedFocusKey";
+const ZH_SP_DRILL_OVERRIDE_KEY = "keybr.zh.drillFocusKey";
+const ZH_QP_LOCKED_FOCUS_KEY = "keybr.zh-qp.lockedFocusKey";
+const ZH_QP_DRILL_OVERRIDE_KEY = "keybr.zh-qp.drillFocusKey";
+
+function zhStorageKeys(language: Language): {
+  readonly lockedKey: string;
+  readonly drillKey: string;
+} {
+  if (isZhQuanpin(language)) {
+    return {
+      lockedKey: ZH_QP_LOCKED_FOCUS_KEY,
+      drillKey: ZH_QP_DRILL_OVERRIDE_KEY,
+    };
+  }
+  return {
+    lockedKey: ZH_SP_LOCKED_FOCUS_KEY,
+    drillKey: ZH_SP_DRILL_OVERRIDE_KEY,
+  };
+}
 
 function readStorageCodePoint(key: string): number | null {
   try {
@@ -41,15 +68,11 @@ function readStorageCodePoint(key: string): number | null {
   }
 }
 
-function readLockedFocusStorage(): number | null {
-  return readStorageCodePoint(ZH_LOCKED_FOCUS_KEY);
-}
-
-function consumeDrillOverrideStorage(): number | null {
-  const cp = readStorageCodePoint(ZH_DRILL_OVERRIDE_KEY);
+function consumeDrillOverrideStorage(key: string): number | null {
+  const cp = readStorageCodePoint(key);
   if (cp != null) {
     try {
-      localStorage.removeItem(ZH_DRILL_OVERRIDE_KEY);
+      localStorage.removeItem(key);
     } catch {
       // Ignore storage errors.
     }
@@ -57,18 +80,15 @@ function consumeDrillOverrideStorage(): number | null {
   return cp;
 }
 
-function writeLockedFocusStorage(codePoint: number | null): void {
+function writeLockedFocusStorage(key: string, codePoint: number | null): void {
   try {
     if (typeof localStorage === "undefined") {
       return;
     }
     if (codePoint == null) {
-      localStorage.removeItem(ZH_LOCKED_FOCUS_KEY);
+      localStorage.removeItem(key);
     } else {
-      localStorage.setItem(
-        ZH_LOCKED_FOCUS_KEY,
-        String.fromCodePoint(codePoint),
-      );
+      localStorage.setItem(key, String.fromCodePoint(codePoint));
     }
   } catch {
     // Ignore storage errors (e.g. restricted or full storage).
@@ -98,6 +118,95 @@ function sampleWeighted<T>(
   return items[items.length - 1];
 }
 
+function sampleWeightedExcluding(
+  items: readonly string[],
+  weights: Float64Array,
+  excluded: ReadonlySet<string>,
+  rng: RNGStream,
+): string | null {
+  let total = 0;
+  let count = 0;
+  for (let i = 0; i < items.length; i++) {
+    if (excluded.has(items[i])) {
+      continue;
+    }
+    total += weights[i];
+    count += 1;
+  }
+  if (count === 0) {
+    return null;
+  }
+  if (!(total > 0)) {
+    let target = Math.floor(rng() * count);
+    for (let i = 0; i < items.length; i++) {
+      if (excluded.has(items[i])) {
+        continue;
+      }
+      if (target === 0) {
+        return items[i];
+      }
+      target -= 1;
+    }
+  }
+  let r = rng() * total;
+  let lastValid = items[0];
+  for (let i = 0; i < items.length; i++) {
+    if (excluded.has(items[i])) {
+      continue;
+    }
+    lastValid = items[i];
+    r -= weights[i];
+    if (r <= 0) {
+      return items[i];
+    }
+  }
+  return lastValid;
+}
+
+function pickWithCooldown(
+  pool: readonly string[],
+  weights: Float64Array,
+  recent: string[],
+  rng: RNGStream,
+): string | null {
+  if (pool.length === 0) {
+    return null;
+  }
+  if (pool.length === 1) {
+    return pool[0];
+  }
+  const fullExcluded = new Set<string>(recent);
+  let chosen = sampleWeightedExcluding(pool, weights, fullExcluded, rng);
+  if (chosen == null) {
+    // Small pool: exclude only the most recent half of pool entries (at least 1).
+    const halfWindow = Math.max(1, Math.floor(pool.length / 2));
+    const poolSet = new Set<string>(pool);
+    const partialExcluded = new Set<string>();
+    for (
+      let i = recent.length - 1;
+      i >= 0 && partialExcluded.size < halfWindow;
+      i--
+    ) {
+      const word = recent[i];
+      if (poolSet.has(word)) {
+        partialExcluded.add(word);
+      }
+    }
+    chosen =
+      sampleWeightedExcluding(pool, weights, partialExcluded, rng) ??
+      sampleWeighted(pool, weights, rng);
+  }
+  const existingIdx = recent.indexOf(chosen);
+  if (existingIdx >= 0) {
+    recent.splice(existingIdx, 1);
+  }
+  recent.push(chosen);
+  if (recent.length > ZH_COOLDOWN_WINDOW) {
+    recent.shift();
+  }
+  return chosen;
+}
+
 export class GuidedLesson extends Lesson {
   readonly dictionary: Dictionary;
   readonly idioms: Dictionary;
@@ -106,17 +215,20 @@ export class GuidedLesson extends Lesson {
   // 空表 = 没有数据 = 均匀抽样（与原先行为一致）。
   #keyWeights = new Map<number, number>();
   #zhLockedFocusCodePoint: number | null = null;
+  #recentZhWords: string[] = [];
 
   #readZhLockedFocus(): number | null {
     if (typeof localStorage !== "undefined") {
-      return readLockedFocusStorage();
+      const { lockedKey } = zhStorageKeys(this.model.language);
+      return readStorageCodePoint(lockedKey);
     }
     return this.#zhLockedFocusCodePoint;
   }
 
   #writeZhLockedFocus(codePoint: number | null): void {
     this.#zhLockedFocusCodePoint = codePoint;
-    writeLockedFocusStorage(codePoint);
+    const { lockedKey } = zhStorageKeys(this.model.language);
+    writeLockedFocusStorage(lockedKey, codePoint);
   }
 
   constructor(
@@ -132,12 +244,15 @@ export class GuidedLesson extends Lesson {
     const filtered = filterWordList(wordList, this.codePoints).filter(
       (word) => word.length >= 2,
     );
-    // 中文词表里，四字成语是 8 个字母（每字两键），单独放一份，
-    // 好让"成语浓度"能在两池之间按比例抽词。
-    const isZh = this.model.language.id === "zh-sp";
-    const idioms = isZh ? filtered.filter((word) => word.length === 8) : [];
+    // 中文双拼四字成语固定 8 字母；中文全拼变长，改查词表元数据 isQuanpinIdiom。
+    const { language } = this.model;
+    const isZh = isZhLanguage(language);
+    const isIdiom = isZhQuanpin(language)
+      ? (word: string) => isQuanpinIdiom(word)
+      : (word: string) => word.length === 8;
+    const idioms = isZh ? filtered.filter(isIdiom) : [];
     const commons = isZh
-      ? filtered.filter((word) => word.length !== 8)
+      ? filtered.filter((word) => !isIdiom(word))
       : filtered;
     this.dictionary = new Dictionary(commons);
     this.idioms = new Dictionary(idioms);
@@ -151,11 +266,10 @@ export class GuidedLesson extends Lesson {
     keyStatsMap: KeyStatsMap,
     options?: { readonly persistFocus?: boolean },
   ) {
-    // 中文双拼不能按上游那套"先解锁几个字母"来：英文是 26 个字母慢慢扩，
-    // 双拼的每个音节都是"声母键 + 韵母键"，只解锁 6 个键时能拼出的合法音节
-    // 只剩 a / da / fa 这几种，屏幕上就全是同一个字。这里直接全解锁。
-    const isZhShuangpin = this.model.language.id === "zh-sp";
-    const alphabetSize = isZhShuangpin
+    // 中文（双拼与全拼）不能按上游那套"先解锁几个字母"来：英文是 26 个字母慢慢扩，
+    // 中文只解锁 6 个键时几乎抽不出自然真词，这里直接全解锁。
+    const isZh = isZhLanguage(this.model.language);
+    const alphabetSize = isZh
       ? 1
       : this.settings.get(lessonProps.guided.alphabetSize);
     const recoverKeys = this.settings.get(lessonProps.guided.recoverKeys);
@@ -212,7 +326,7 @@ export class GuidedLesson extends Lesson {
 
     // Find the least confident of all included keys and focus on it.
     const confidenceOf = (key: LessonKey): number => {
-      if (isZhShuangpin) {
+      if (isZh) {
         return key.confidence ?? 0;
       }
       return recoverKeys ? (key.confidence ?? 0) : (key.bestConfidence ?? 0);
@@ -222,10 +336,11 @@ export class GuidedLesson extends Lesson {
       .filter((key) => confidenceOf(key) < 1)
       .sort((a, b) => confidenceOf(a) - confidenceOf(b));
     const persistFocus = options?.persistFocus ?? true;
-    if (isZhShuangpin) {
+    if (isZh) {
+      const { drillKey } = zhStorageKeys(this.model.language);
       const overrideCp = persistFocus
-        ? consumeDrillOverrideStorage()
-        : readStorageCodePoint(ZH_DRILL_OVERRIDE_KEY);
+        ? consumeDrillOverrideStorage(drillKey)
+        : readStorageCodePoint(drillKey);
       const overrideKey =
         overrideCp != null
           ? includedKeys.find((key) => key.letter.codePoint === overrideCp)
@@ -335,9 +450,9 @@ export class GuidedLesson extends Lesson {
       lessonKeys.findFocusedKey(),
     );
     const wordGenerator = this.#makeWordGenerator(filter, rng);
-    const isZh = this.model.language.id === "zh-sp";
+    const isZh = isZhLanguage(this.model.language);
     if (isZh) {
-      // 中文双拼标点只有逗号和句号，词与词之间要么用标点分隔，要么用空格分隔，不叠加出现。
+      // 中文标点只有逗号和句号，词与词之间要么用标点分隔，要么用空格分隔，不叠加出现。
       return generateZhFragment(
         this.settings,
         uniqueWords(wordGenerator),
@@ -376,9 +491,9 @@ export class GuidedLesson extends Lesson {
   }
 
   #makeWordGenerator(filter: Filter, rng: RNGStream) {
-    const isZh = this.model.language.id === "zh-sp";
+    const isZh = isZhLanguage(this.model.language);
     if (isZh) {
-      // 中文不走音素模型：直接从真实词表里抽包含当前聚焦键（声母或韵母）的词；
+      // 中文不走音素模型：直接从真实词表里抽包含当前聚焦键的词；
       // 仅在普通词和成语都找不到包含聚焦键的词时才退回全词表，避免空池。
       let commons = this.dictionary.find(filter, false);
       let idioms = this.idioms.find(filter, false);
@@ -390,6 +505,7 @@ export class GuidedLesson extends Lesson {
       // 权重进来时算一次，之后每次抽词只做采样，不重复遍历词表
       const commonsWeights = this.#weightsFor(commons);
       const idiomsWeights = this.#weightsFor(idioms);
+      const recent = this.#recentZhWords;
       return (): string | null => {
         const useIdiom = idioms.length > 0 && rng() < ratio;
         const pool = useIdiom ? idioms : commons;
@@ -397,10 +513,10 @@ export class GuidedLesson extends Lesson {
         const fallback = useIdiom ? commons : idioms;
         const fallbackWeights = useIdiom ? commonsWeights : idiomsWeights;
         if (pool.length > 0) {
-          return sampleWeighted(pool, poolWeights, rng);
+          return pickWithCooldown(pool, poolWeights, recent, rng);
         }
         return fallback.length > 0
-          ? sampleWeighted(fallback, fallbackWeights, rng)
+          ? pickWithCooldown(fallback, fallbackWeights, recent, rng)
           : null;
       };
     }

@@ -1,4 +1,4 @@
-import { keyboardProps } from "@keybr/keyboard";
+import { isZhLanguage, isZhQuanpin, keyboardProps } from "@keybr/keyboard";
 import { type Lesson } from "@keybr/lesson";
 import { CurrentKeyRow, KeySetRow } from "@keybr/lesson-ui";
 import { LCG } from "@keybr/rand";
@@ -24,7 +24,8 @@ export function LessonPreview({
   const { settings } = useSettings();
   const { results } = useResults();
   const layout = settings.get(keyboardProps.layout);
-  const zh = layout.language.id === "zh-sp";
+  const zh = isZhLanguage(layout.language);
+  const scheme = isZhQuanpin(layout.language) ? "zh-qp" : "zh-sp";
   const { lessonKeys, textInput } = useMemo(() => {
     const filteredResults = lesson
       .filter(results)
@@ -54,6 +55,7 @@ export function LessonPreview({
             settings={toTextDisplaySettings(settings)}
             lines={textInput.lines}
             zh={zh}
+            scheme={zh ? scheme : undefined}
           />
         </div>
       </div>

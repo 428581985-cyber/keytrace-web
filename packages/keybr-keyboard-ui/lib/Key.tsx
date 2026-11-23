@@ -1,5 +1,6 @@
 import {
   type DeadCharacter,
+  isZhShuangpin,
   KeyCharacters,
   type KeyShape,
   type LabelShape,
@@ -28,8 +29,8 @@ export function makeKeyComponent(
   const { isCodePoint, isDead, isLigature } = KeyCharacters;
   const { id, a, b, c, d } = shape;
 
-  // 中文双拼：键帽不显示 a-z，直接显示这个键打的音（U 是 sh，C 是 ao）
-  const zh = language.id === "zh-sp" ? ZH_KEY_LABELS[id] : undefined;
+  // 仅中文小鹤双拼在键帽上显示声母/韵母标注；全拼（zh-qp）保持纯字母 A–Z 与 F/J 定位点
+  const zh = isZhShuangpin(language) ? ZH_KEY_LABELS[id] : undefined;
   const x = shape.x * keySize;
   const y = shape.y * keySize;
   const w = shape.w * keySize - keyGap;
@@ -52,7 +53,9 @@ export function makeKeyComponent(
     children.push(makeLabel(label));
   }
   if (zh != null) {
-    children.push(...makeZhLabels(zh, isCodePoint(a) ? letterName(a) : "", w, h));
+    children.push(
+      ...makeZhLabels(zh, isCodePoint(a) ? letterName(a) : "", w, h),
+    );
   } else {
     const ta = isCodePoint(a);
     const tb = isCodePoint(b);

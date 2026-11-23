@@ -248,6 +248,13 @@ export async function loadWordList(language: Language): Promise<WordList> {
           { with: { type: "json" } }
         )
       ).default;
+    case Language.ZH_QP:
+      return (
+        await import(
+          /* webpackChunkName: "words-zh-qp" */ "./data/words-zh-qp.json",
+          { with: { type: "json" } }
+        )
+      ).default;
     default:
       throw new Error();
   }

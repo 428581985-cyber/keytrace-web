@@ -239,11 +239,11 @@
 - `0xfa`:
 - `0xfb`:
 - `0xfc`:
-- `0xfd`:
+- `0xfd`: Chinese (QP)/China
 - `0xfe`: Chinese (SP)/China
 - `0xff`:
 
-99 allocated identifiers
+100 allocated identifiers
 
-141 free identifiers
+140 free identifiers
 

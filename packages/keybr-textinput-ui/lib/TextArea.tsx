@@ -1,3 +1,4 @@
+import { isZhLanguage, isZhQuanpin, type ZhInputScheme } from "@keybr/keyboard";
 import { type LineList, type TextDisplaySettings } from "@keybr/textinput";
 import {
   type IInputEvent,
@@ -35,6 +36,7 @@ export function TextArea({
   lineTemplate,
   demo,
   zh,
+  scheme,
   moving,
   focusRef,
   onFocus,
@@ -49,8 +51,9 @@ export function TextArea({
   readonly size?: TextLineSize;
   readonly lineTemplate?: ComponentType<any>;
   readonly demo?: boolean;
-  /** 中文双拼模式：按词渲染成汉字，可选显示双拼码 */
+  /** 中文拼音模式（双拼/全拼）：按词渲染成汉字，可选显示拼音或双拼码 */
   readonly zh?: boolean;
+  readonly scheme?: ZhInputScheme;
   readonly moving?: boolean;
   readonly focusRef?: RefObject<Focusable | null>;
   readonly onFocus?: () => void;
@@ -96,22 +99,34 @@ export function TextArea({
     onBlur?.();
   }, [onBlur]);
   const handleClick = (event: BaseSyntheticEvent): void => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("label, input, button, a") != null) {
+      return;
+    }
     innerRef.current?.focus();
     event.preventDefault();
   };
+  const isZh = zh ?? isZhLanguage(settings.language);
+  const zhScheme: ZhInputScheme =
+    scheme ?? (isZhQuanpin(settings.language) ? "zh-qp" : "zh-sp");
   return (
     <div ref={ref} className={styles.root} onClick={handleClick}>
       <TextEvents
         focusRef={innerRef}
-        bypassIme={zh}
+        bypassIme={isZh}
         onFocus={handleFocus}
         onBlur={handleBlur}
         onKeyDown={onKeyDown}
         onKeyUp={onKeyUp}
         onInput={onInput}
       />
-      {zh ? (
-        <ZhLines settings={settings} lines={lines} focus={demo || focus} />
+      {isZh ? (
+        <ZhLines
+          settings={settings}
+          scheme={zhScheme}
+          lines={lines}
+          focus={demo || focus}
+        />
       ) : (
         <TextLines
           settings={settings}

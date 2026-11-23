@@ -83,6 +83,8 @@ const USAGE = `用法: npx tsnode scripts/import-keytrace.ts [选项]
   --send            真正上传（默认只做 dry run）
   --dry-run         只打印将要发送的内容（默认行为）
   --stats <path>    KeyTrace 统计文件，默认 %USERPROFILE%\\.keytrace\\stats.json
+  --layout <id>     目标键盘布局，默认 en-us（中文小鹤双拼用 zh-sp，中文全拼用 zh-qp）
+  --force           忽略已导入标记，用于换布局再导一次
   --data-dir <path> 服务端 DATA_DIR，默认取 $DATA_DIR，再退回 /var/lib/keybr
   --url <url>       keybr 地址，默认 $KEYBR_URL 或 http://localhost:3000
   -h, --help        显示帮助`;
@@ -92,7 +94,7 @@ type Options = {
   readonly statsFile: string;
   readonly dataDir: string;
   readonly baseUrl: string;
-  /** 目标键盘布局，默认 en-us。中文双拼用 zh-sp。 */
+  /** 目标键盘布局，默认 en-us。中文小鹤双拼用 zh-sp，中文全拼用 zh-qp。 */
   readonly layout: string;
   /** 忽略「已导入」标记，用于换布局再导一次 */
   readonly force: boolean;

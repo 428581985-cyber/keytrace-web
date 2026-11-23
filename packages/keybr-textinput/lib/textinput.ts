@@ -8,6 +8,12 @@ import {
   splitStyledText,
   type StyledText,
 } from "./chars.ts";
+import {
+  evalQuanpinFuzzy,
+  nextQuanpinFuzzyStateOnExactMatch,
+  type QuanpinFuzzyAction,
+  type QuanpinFuzzyState,
+} from "./fuzzy-quanpin.ts";
 import { matchesFuzzyShuangpin } from "./fuzzy-shuangpin.ts";
 import {
   type FuzzyPinyinSettings,
@@ -29,6 +35,12 @@ export type Step = {
 
 export type StepListener = (step: Step) => void;
 
+type InputSnapshot = {
+  readonly pos: number;
+  readonly stepsLen: number;
+  readonly fuzzyState: QuanpinFuzzyState;
+};
+
 const recoverBufferLength = 3;
 const garbageBufferLength = 10;
 
@@ -38,12 +50,16 @@ export class TextInput {
   readonly forgiveErrors: boolean;
   readonly spaceSkipsWords: boolean;
   readonly zhShuangpin: boolean;
+  readonly zhQuanpin: boolean;
   readonly fuzzy?: FuzzyPinyinSettings;
   readonly onStep: StepListener;
   readonly #text: string;
   readonly #chars: readonly Char[];
-  #steps: (Step & { readonly char: Char })[] = [];
+  #committedChars: Char[] = [];
+  #steps: Step[] = [];
   #garbage: (Step & { readonly char: Char })[] = [];
+  #fuzzyState: QuanpinFuzzyState = {};
+  #snapshots: InputSnapshot[] = [];
   #typo!: boolean;
   #output!: { chars: Char[]; lines: LineList; remaining: Char[] };
 
@@ -54,6 +70,7 @@ export class TextInput {
       forgiveErrors,
       spaceSkipsWords,
       zhShuangpin = false,
+      zhQuanpin = false,
       fuzzy,
     }: TextInputSettings,
     onStep: StepListener = () => {},
@@ -63,6 +80,7 @@ export class TextInput {
     this.forgiveErrors = forgiveErrors;
     this.spaceSkipsWords = spaceSkipsWords;
     this.zhShuangpin = zhShuangpin;
+    this.zhQuanpin = zhQuanpin;
     this.fuzzy = fuzzy;
     this.onStep = onStep;
     this.#text = flattenStyledText(text);
@@ -71,8 +89,11 @@ export class TextInput {
   }
 
   reset(): void {
+    this.#committedChars = [];
     this.#steps = [];
     this.#garbage = [];
+    this.#fuzzyState = {};
+    this.#snapshots = [];
     this.#typo = false;
     this.#update();
   }
@@ -86,7 +107,7 @@ export class TextInput {
   }
 
   get pos(): number {
-    return this.#steps.length;
+    return this.#committedChars.length;
   }
 
   get completed(): boolean {
@@ -142,7 +163,13 @@ export class TextInput {
   clearWord(): Feedback {
     this.#garbage = [];
     while (this.pos > 0 && this.at(this.pos - 1).codePoint !== 0x0020) {
-      this.#steps.pop();
+      const snapshot = this.#snapshots.pop();
+      if (snapshot == null) {
+        break;
+      }
+      this.#committedChars.length = snapshot.pos;
+      this.#steps.length = snapshot.stepsLen;
+      this.#fuzzyState = snapshot.fuzzyState;
     }
     this.#typo = true;
     return this.#return(Feedback.Succeeded);
@@ -158,6 +185,76 @@ export class TextInput {
     }
 
     const { codePoint: expected } = this.at(this.pos);
+    const canAdvance = this.forgiveErrors || this.#garbage.length === 0;
+
+    // Evaluate Quanpin fuzzy match before space-skip/space-ignore handling so
+    // omitting a trailing 'g' directly before a space (e.g. "fang " typed "fan ")
+    // cleanly advances via skipAndMatch rather than triggering space-skip/ignore.
+    const quanpinAction: QuanpinFuzzyAction =
+      this.zhQuanpin &&
+      canAdvance &&
+      expected !== codePoint &&
+      filterText.normalize(expected) !== codePoint
+        ? evalQuanpinFuzzy(
+            this.#chars,
+            this.pos,
+            codePoint,
+            this.fuzzy,
+            this.#fuzzyState,
+          )
+        : { kind: "none" };
+
+    if (quanpinAction.kind !== "none") {
+      const typo = this.#typo;
+      if (quanpinAction.kind === "substitute") {
+        this.#addStep(
+          {
+            timeStamp,
+            codePoint: expected,
+            timeToType,
+            typo,
+          },
+          this.at(this.pos),
+          quanpinAction.nextState,
+        );
+      } else if (quanpinAction.kind === "skipAndMatch") {
+        const skippedChar = this.at(this.pos);
+        const matchedChar = this.at(this.pos + 1);
+        const matchedCodePoint =
+          matchedChar.codePoint === codePoint ||
+          filterText.normalize(matchedChar.codePoint) === codePoint
+            ? codePoint
+            : matchedChar.codePoint;
+        this.#addSkipAndMatch(
+          {
+            timeStamp,
+            codePoint: matchedCodePoint,
+            timeToType,
+            typo,
+          },
+          skippedChar,
+          matchedChar,
+          quanpinAction.nextState,
+        );
+      } else {
+        this.#addConsumeExtra(
+          {
+            timeStamp,
+            codePoint,
+            timeToType,
+            typo,
+          },
+          quanpinAction.nextState,
+        );
+      }
+      this.#garbage = [];
+      this.#typo = false;
+      if (typo) {
+        return this.#return(Feedback.Recovered);
+      } else {
+        return this.#return(Feedback.Succeeded);
+      }
+    }
 
     if (expected !== 0x0020 && codePoint === 0x0020) {
       if (
@@ -187,9 +284,17 @@ export class TextInput {
       (expected === codePoint ||
         filterText.normalize(expected) === codePoint ||
         fuzzyMatch) &&
-      (this.forgiveErrors || this.#garbage.length === 0)
+      canAdvance
     ) {
       const typo = this.#typo;
+      const nextFuzzyState = this.zhQuanpin
+        ? nextQuanpinFuzzyStateOnExactMatch(
+            this.#chars,
+            this.pos,
+            this.fuzzy,
+            this.#fuzzyState,
+          )
+        : {};
       this.#addStep(
         {
           timeStamp,
@@ -198,6 +303,7 @@ export class TextInput {
           typo,
         },
         this.at(this.pos),
+        nextFuzzyState,
       );
       this.#garbage = [];
       this.#typo = false;
@@ -243,7 +349,7 @@ export class TextInput {
     const text = this.#text;
     const remaining = this.#chars.slice(this.pos);
     const chars = [];
-    chars.push(...this.#steps.map(({ char }) => char));
+    chars.push(...this.#committedChars);
     if (!this.stopOnError) {
       chars.push(...this.#garbage.map(({ char }) => char));
     }
@@ -255,9 +361,48 @@ export class TextInput {
     this.#output = { chars, lines, remaining };
   }
 
-  #addStep(step: Step, char: Char): void {
+  #saveSnapshot(): void {
+    this.#snapshots.push({
+      pos: this.#committedChars.length,
+      stepsLen: this.#steps.length,
+      fuzzyState: this.#fuzzyState,
+    });
+  }
+
+  #addStep(
+    step: Step,
+    char: Char,
+    nextFuzzyState: QuanpinFuzzyState = {},
+  ): void {
+    this.#saveSnapshot();
     const attrs = step.typo ? Attr.Miss : Attr.Hit;
-    this.#steps.push({ ...step, char: { ...char, attrs } });
+    this.#committedChars.push({ ...char, attrs });
+    this.#steps.push(step);
+    this.#fuzzyState = nextFuzzyState;
+    this.onStep(step);
+  }
+
+  #addSkipAndMatch(
+    step: Step,
+    skippedChar: Char,
+    matchedChar: Char,
+    nextFuzzyState: QuanpinFuzzyState,
+  ): void {
+    this.#saveSnapshot();
+    const matchedAttrs = step.typo ? Attr.Miss : Attr.Hit;
+    this.#committedChars.push(
+      { ...skippedChar, attrs: Attr.Hit },
+      { ...matchedChar, attrs: matchedAttrs },
+    );
+    this.#steps.push(step);
+    this.#fuzzyState = nextFuzzyState;
+    this.onStep(step);
+  }
+
+  #addConsumeExtra(step: Step, nextFuzzyState: QuanpinFuzzyState): void {
+    this.#saveSnapshot();
+    this.#steps.push(step);
+    this.#fuzzyState = nextFuzzyState;
     this.onStep(step);
   }
 
@@ -324,7 +469,8 @@ export class TextInput {
 
     // Append successful steps.
     for (let i = 1; i < this.#garbage.length; i++) {
-      this.#addStep(this.#garbage[i], this.#garbage[i].char);
+      const { timeStamp, codePoint, timeToType, typo, char } = this.#garbage[i];
+      this.#addStep({ timeStamp, codePoint, timeToType, typo }, char);
     }
 
     this.#garbage = [];
@@ -366,7 +512,8 @@ export class TextInput {
 
     // Append successful steps.
     for (let i = 0; i < this.#garbage.length; i++) {
-      this.#addStep(this.#garbage[i], this.#garbage[i].char);
+      const { timeStamp, codePoint, timeToType, typo, char } = this.#garbage[i];
+      this.#addStep({ timeStamp, codePoint, timeToType, typo }, char);
     }
 
     this.#garbage = [];
