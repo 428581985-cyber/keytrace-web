@@ -32,8 +32,11 @@ test("render", () => {
     </PageDataContext.Provider>,
   );
 
-  isNotNull(r.queryByText("Polski"));
-  isNotNull(r.queryByText("English"));
-
-  r.unmount();
+  try {
+    isNotNull(r.queryByText("Polski"));
+    isNotNull(r.queryByText("简体中文"));
+    isNotNull(r.queryByText("en"));
+  } finally {
+    r.unmount();
+  }
 });

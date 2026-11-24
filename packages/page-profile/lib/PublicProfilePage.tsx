@@ -5,7 +5,7 @@ import {
   DailyStatsMap,
   type KeyStatsMap,
   makeKeyStatsMap,
-  makeSummaryStats,
+  makeWeightedSummaryStats,
   selectChartSeries,
   totalCharacters,
 } from "@keybr/result";
@@ -44,7 +44,7 @@ function Content({ keyStatsMap }: { keyStatsMap: KeyStatsMap }) {
   const keyboard = useKeyboard();
   const isZh = isZhLanguage(keyboard.layout.language);
   const { results } = keyStatsMap;
-  const stats = makeSummaryStats(results);
+  const stats = makeWeightedSummaryStats(results);
   const dailyStatsMap = new DailyStatsMap(results);
   const chartSeries = selectChartSeries(results);
   const chartKeyStatsMap =
@@ -81,7 +81,10 @@ function Content({ keyStatsMap }: { keyStatsMap: KeyStatsMap }) {
         showComplexity={!isZh}
       />
 
-      <KeySpeedChartSection keyStatsMap={chartKeyStatsMap} />
+      <KeySpeedChartSection
+        keyStatsMap={chartKeyStatsMap}
+        summaryKeyStatsMap={keyStatsMap}
+      />
 
       <KeySpeedHistogramSection keyStatsMap={keyStatsMap} />
 

@@ -480,7 +480,7 @@ test("treats > 3 consecutive backspaces as rewording without blaming replacement
     const data = await readKeyTraceSyncData({ eventsDir: dir });
     equal(data.records.length, 1);
     const rec = data.records[0];
-    equal(rec.e, 0); // rewording not attributed as typo on 'k'
+    equal(rec.e, 1); // rewording records 1 episode error without blaming 'k'
     equal(rec.h[107]?.m, 0); // 'k' not penalized
     equal(rec.h[107]?.t, 0); // 'k' starts fresh without post-BS IKI noise
   } finally {
@@ -1004,6 +1004,157 @@ test("captures VK 186 (;) as 0x003b only for Microsoft/Sogou Shuangpin and ignor
     const dash = await readKeyTraceDashboard({ eventsDir: dir, days: 7 });
     equal(dash.weakKeys["zh-sp-ms"].find((k) => k.codePoint === 0x003b)?.letter, ";");
     equal(dash.weakKeys["zh-sp"].find((k) => k.codePoint === 0x003b), undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("carries lastMono across <=3000ms same-session commits for activeMs and k1 IKI, while dropping >3000ms pauses", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-carry-"));
+  try {
+    const lines = [
+      // Commit 1: a(65)@100 -> b(66)@250 (intra = 150ms)
+      kd(65, 100, 1000, { sid: "s1", sessionStartTs: 1000 }),
+      kd(66, 250, 1150, { sid: "s1", sessionStartTs: 1000 }),
+      commit("好", 2, 260, 1200, { sid: "s1", sessionStartTs: 1000 }),
+      // Commit 2 (400ms after b(250)): c(67)@650 -> d(68)@800 (inter=400ms, intra=150ms)
+      kd(67, 650, 1650, { sid: "s1", sessionStartTs: 1000 }),
+      kd(68, 800, 1800, { sid: "s1", sessionStartTs: 1000 }),
+      commit("吗", 2, 810, 1850, { sid: "s1", sessionStartTs: 1000 }),
+      // Commit 3 (5000ms pause after d(800)): e(69)@5800 -> f(70)@5950 -> g(71)..j(74) (intra only)
+      kd(69, 5800, 6800, { sid: "s1", sessionStartTs: 1000 }),
+      kd(70, 5950, 6950, { sid: "s1", sessionStartTs: 1000 }),
+      kd(71, 6100, 7100, { sid: "s1", sessionStartTs: 1000 }),
+      kd(72, 6250, 7250, { sid: "s1", sessionStartTs: 1000 }),
+      kd(73, 6400, 7400, { sid: "s1", sessionStartTs: 1000 }),
+      kd(74, 6550, 7550, { sid: "s1", sessionStartTs: 1000 }),
+      commit("你我他她它啊", 6, 6560, 7600, { sid: "s1", sessionStartTs: 1000 }),
+    ];
+    await writeFile(join(dir, "2026-11-24.jsonl"), jsonl(lines), "utf8");
+
+    const data = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(data.records.length, 1);
+    const rec = data.records[0];
+    equal(rec.n, 10);
+    // Commit 1: 150ms, Commit 2: 400+150=550ms, Commit 3: 5*150=750ms (5000ms pause dropped) -> total 1450ms
+    equal(rec.t, 1450);
+    // Commit 2 first key 'c' (99) received inter-commit IKI 400ms
+    equal(rec.h[99]?.t, 400);
+    // Commit 3 first key 'e' (101) had >3000ms pause so IKI is 0
+    equal(rec.h[101]?.t, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("incremental sinceTs sync preserves inter-commit lastMono from skipped earlier commits", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-since-carry-"));
+  try {
+    const lines = [
+      // Commit 1 (<= sinceTs=2000): ended at mono=250
+      kd(65, 100, 1000, { sid: "s1", sessionStartTs: 1000 }),
+      kd(66, 250, 1150, { sid: "s1", sessionStartTs: 1000 }),
+      commit("好", 2, 260, 2000, { sid: "s1", sessionStartTs: 1000 }),
+      // Commit 2 (> sinceTs=2000): starts 300ms later at mono=550, 10 keys total
+      kd(67, 550, 2550, { sid: "s1", sessionStartTs: 1000 }),
+      kd(68, 700, 2700, { sid: "s1", sessionStartTs: 1000 }),
+      kd(69, 850, 2850, { sid: "s1", sessionStartTs: 1000 }),
+      kd(70, 1000, 3000, { sid: "s1", sessionStartTs: 1000 }),
+      kd(71, 1150, 3150, { sid: "s1", sessionStartTs: 1000 }),
+      kd(72, 1300, 3300, { sid: "s1", sessionStartTs: 1000 }),
+      kd(73, 1450, 3450, { sid: "s1", sessionStartTs: 1000 }),
+      kd(74, 1600, 3600, { sid: "s1", sessionStartTs: 1000 }),
+      kd(75, 1750, 3750, { sid: "s1", sessionStartTs: 1000 }),
+      kd(76, 1900, 3900, { sid: "s1", sessionStartTs: 1000 }),
+      commit("你我他她它", 10, 1910, 4000, { sid: "s1", sessionStartTs: 1000 }),
+    ];
+    await writeFile(join(dir, "2026-11-24.jsonl"), jsonl(lines), "utf8");
+
+    const inc = await readKeyTraceSyncData({ eventsDir: dir, sinceTs: 2000 });
+    equal(inc.records.length, 1);
+    const rec = inc.records[0];
+    equal(rec.n, 10);
+    // 300ms carried gap + 9*150ms intra = 1650ms
+    equal(rec.t, 1650);
+    // First key 'c' (99) got 300ms IKI from Commit 1
+    equal(rec.h[99]?.t, 300);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("isolates inter-commit lastMono across different layouts within same session", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-layout-iso-"));
+  try {
+    const lines = [
+      // Commit 1 (zh-sp): ended at mono=250
+      kd(65, 100, 1000, { sid: "s1", sessionStartTs: 1000 }),
+      kd(66, 250, 1150, { sid: "s1", sessionStartTs: 1000 }),
+      commit("好", 2, 260, 1200, { sid: "s1", sessionStartTs: 1000 }),
+      // Commit 2 (en-us, 300ms after Commit 1): should NOT carry zh-sp lastMono
+      kd(67, 550, 1550, { sid: "s1", sessionStartTs: 1000 }),
+      kd(68, 700, 1700, { sid: "s1", sessionStartTs: 1000 }),
+      kd(69, 850, 1850, { sid: "s1", sessionStartTs: 1000 }),
+      kd(70, 1000, 2000, { sid: "s1", sessionStartTs: 1000 }),
+      kd(71, 1150, 2150, { sid: "s1", sessionStartTs: 1000 }),
+      kd(72, 1300, 2300, { sid: "s1", sessionStartTs: 1000 }),
+      kd(73, 1450, 2450, { sid: "s1", sessionStartTs: 1000 }),
+      kd(74, 1600, 2600, { sid: "s1", sessionStartTs: 1000 }),
+      kd(75, 1750, 2750, { sid: "s1", sessionStartTs: 1000 }),
+      kd(76, 1900, 2900, { sid: "s1", sessionStartTs: 1000 }),
+      commit("cdefghijkl", 10, 1910, 3000, { sid: "s1", sessionStartTs: 1000 }),
+    ];
+    await writeFile(join(dir, "2026-11-24.jsonl"), jsonl(lines), "utf8");
+
+    const data = await readKeyTraceSyncData({ eventsDir: dir });
+    const enRec = data.records.find((r) => r.l === "en-us");
+    isNotNull(enRec ?? null);
+    equal(enRec!.t, 9 * 150); // 1350ms only, no 300ms cross-layout carry
+    equal(enRec!.h[99]?.t, 0); // 'c' has no cross-layout IKI
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("records aborted pending corrections (BS+Space, BS exhausting stack, empty-stack >3 BS) as 1 error without double counting", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-abort-corr-"));
+  try {
+    const lines = [
+      // Episode 1: a, b, c, BS, BS (corrActive=true), Space (aborts corrActive -> 1 error)
+      kd(65, 100, 1000, { sid: "s1" }),
+      kd(66, 250, 1150, { sid: "s1" }),
+      kd(67, 400, 1300, { sid: "s1" }),
+      kd(8, 550, 1450, { sid: "s1" }),
+      kd(8, 700, 1600, { sid: "s1" }),
+      kd(32, 850, 1750, { sid: "s1" }), // Space -> stack empty, aborted corrActive = 1 error
+      // Episode 2: empty-stack 4 BS -> 1 error (no double-count at BS 4)
+      kd(8, 1000, 1900, { sid: "s1" }),
+      kd(8, 1150, 2050, { sid: "s1" }),
+      kd(8, 1300, 2200, { sid: "s1" }),
+      kd(8, 1450, 2350, { sid: "s1" }),
+      // Episode 3: d, BS, BS (1st pops d, 2nd hits empty stack while corrActive=true -> 1 error)
+      kd(68, 1600, 2500, { sid: "s1" }),
+      kd(8, 1750, 2650, { sid: "s1" }),
+      kd(8, 1900, 2800, { sid: "s1" }),
+      // Remaining 9 valid keys -> total 10 surviving keys ('a' + 9)
+      kd(69, 2050, 2950, { sid: "s1" }),
+      kd(70, 2200, 3100, { sid: "s1" }),
+      kd(71, 2350, 3250, { sid: "s1" }),
+      kd(72, 2500, 3400, { sid: "s1" }),
+      kd(73, 2650, 3550, { sid: "s1" }),
+      kd(74, 2800, 3700, { sid: "s1" }),
+      kd(75, 2950, 3850, { sid: "s1" }),
+      kd(76, 3100, 4000, { sid: "s1" }),
+      kd(77, 3250, 4150, { sid: "s1" }),
+      commit("aefghijklm", 22, 3300, 4200, { sid: "s1" }),
+    ];
+    await writeFile(join(dir, "2026-11-24.jsonl"), jsonl(lines), "utf8");
+
+    const data = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(data.records.length, 1);
+    const rec = data.records[0];
+    equal(rec.n, 10);
+    equal(rec.e, 3); // Episode 1 (1) + Episode 2 (1) + Episode 3 (1)
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

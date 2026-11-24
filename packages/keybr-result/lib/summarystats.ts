@@ -8,6 +8,50 @@ export function makeSummaryStats(results: readonly Result[]): SummaryStats {
   return stats.copy();
 }
 
+export function makeWeightedSummaryStats(
+  results: readonly Result[],
+): SummaryStats {
+  const base = makeSummaryStats(results);
+  if (results.length === 0) {
+    return base;
+  }
+  let totalLength = 0;
+  let totalTime = 0;
+  let totalErrors = 0;
+  let weightedScoreSum = 0;
+  for (const r of results) {
+    if (r.length > 0 && r.time > 0 && r.complexity > 0) {
+      totalLength += r.length;
+      totalTime += r.time;
+      totalErrors += r.errors;
+      weightedScoreSum += r.score * r.length;
+    }
+  }
+  const speedAvg = totalTime > 0 ? (totalLength / (totalTime / 1000)) * 60 : 0;
+  const accuracyAvg =
+    totalLength > 0 ? (totalLength - totalErrors) / totalLength : 0;
+  const scoreAvg = totalLength > 0 ? weightedScoreSum / totalLength : 0;
+  return {
+    count: base.count,
+    time: base.time,
+    speed: {
+      ...base.speed,
+      avg: speedAvg,
+      delta: base.speed.last - speedAvg,
+    },
+    accuracy: {
+      ...base.accuracy,
+      avg: accuracyAvg,
+      delta: base.accuracy.last - accuracyAvg,
+    },
+    score: {
+      ...base.score,
+      avg: scoreAvg,
+      delta: base.score.last - scoreAvg,
+    },
+  };
+}
+
 export type SummaryStats = {
   /** The number of results. */
   readonly count: number;

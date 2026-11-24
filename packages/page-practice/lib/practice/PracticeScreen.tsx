@@ -5,8 +5,7 @@ import { type Lesson } from "@keybr/lesson";
 import { LessonLoader } from "@keybr/lesson-loader";
 import { LoadingProgress } from "@keybr/pages-shared";
 import { type Result, useResults } from "@keybr/result";
-import { useSettings } from "@keybr/settings";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Controller } from "./Controller.tsx";
 import { displayEvent, Progress } from "./state/index.ts";
 
@@ -41,25 +40,35 @@ function ProgressUpdater({ lesson }: { readonly lesson: Lesson }) {
 }
 
 function useProgress(lesson: Lesson, results: readonly Result[]) {
-  const { settings } = useSettings();
-  const [done, setDone] = useState(false);
-  const [loading, setLoading] = useState({ total: 0, current: 0 });
-  const progress = useMemo(
-    () => new Progress(settings, lesson),
-    [settings, lesson],
+  const [committedProgress, setCommittedProgress] = useState<Progress | null>(
+    null,
   );
+  const [loading, setLoading] = useState({ total: 0, current: 0 });
+  const activeProgressRef = useRef<Progress | null>(null);
+
   useEffect(() => {
     // Populating the progress object can take a long time, so we do this
     // asynchronously, interleaved with the browser event loop to avoid
     // freezing of the UI.
     const controller = new AbortController();
     const { signal } = controller;
-    schedule(progress.seedAsync(lesson.filter(results), setLoading), { signal })
-      .then(() => setDone(true))
+    const isSameLesson = activeProgressRef.current?.lesson === lesson;
+    const nextProgress = isSameLesson
+      ? activeProgressRef.current!
+      : new Progress(lesson.settings, lesson);
+    schedule(nextProgress.seedAsync(lesson.filter(results), setLoading), {
+      signal,
+    })
+      .then(() => {
+        if (!signal.aborted) {
+          activeProgressRef.current = nextProgress;
+          setCommittedProgress(nextProgress);
+        }
+      })
       .catch(catchError);
     return () => {
       controller.abort();
     };
-  }, [progress, lesson, results]);
-  return [done ? progress : null, loading] as const;
+  }, [lesson, results]);
+  return [committedProgress, loading] as const;
 }

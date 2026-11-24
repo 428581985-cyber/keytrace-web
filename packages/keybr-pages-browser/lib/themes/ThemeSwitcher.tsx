@@ -1,85 +1,75 @@
-import { COLORS, FONTS, useTheme } from "@keybr/themes";
-import {
-  Dialog,
-  ensureVisible,
-  Icon,
-  IconButton,
-  type OptionListOption,
-  Popover,
-} from "@keybr/widget";
+import { useTheme } from "@keybr/themes";
+import { Icon, IconButton } from "@keybr/widget";
 import {
   mdiArrowCollapseAll,
   mdiArrowExpandAll,
-  mdiFormatFont,
   mdiThemeLightDark,
 } from "@mdi/js";
-import { clsx } from "clsx";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { defineMessage, useIntl } from "react-intl";
 import * as styles from "./ThemeSwitcher.module.less";
 
-const LazyThemeDesigner = lazy(() => import("./LazyThemeDesigner.tsx"));
+const darkColorSchemeQuery = "(prefers-color-scheme: dark)";
+
+function subscribePrefersDark(listener: () => void): () => void {
+  if (
+    typeof window === "undefined" ||
+    typeof window.matchMedia !== "function"
+  ) {
+    return () => {};
+  }
+  const media = window.matchMedia(darkColorSchemeQuery);
+  media.addEventListener("change", listener);
+  return () => {
+    media.removeEventListener("change", listener);
+  };
+}
+
+function getPrefersDarkSnapshot(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia(darkColorSchemeQuery).matches
+    : false;
+}
+
+function getPrefersDarkServerSnapshot(): boolean {
+  return false;
+}
+
+function usePrefersDark(): boolean {
+  return useSyncExternalStore(
+    subscribePrefersDark,
+    getPrefersDarkSnapshot,
+    getPrefersDarkServerSnapshot,
+  );
+}
 
 export function ThemeSwitcher() {
-  const { color, font, switchColor, switchFont } = useTheme();
-  const [open, setOpen] = useState(null as "color" | "font" | null);
-  const [design, setDesign] = useState(false);
+  const { formatMessage } = useIntl();
+  const { color, switchColor } = useTheme();
+  const prefersDark = usePrefersDark();
+  const isDark =
+    color === "dark" ||
+    color === "chocolate" ||
+    (color === "system" && prefersDark);
   return (
     <div className={styles.root}>
-      {design && (
-        <Dialog
-          onClose={() => {
-            setDesign(false);
-          }}
-        >
-          <Suspense>
-            <LazyThemeDesigner />
-          </Suspense>
-        </Dialog>
-      )}
-      <Popover
-        open={open === "color"}
-        anchor={
-          <IconButton
-            icon={<Icon shape={mdiThemeLightDark} />}
-            onClick={() => {
-              setOpen(open === "color" ? null : "color");
-            }}
-          />
-        }
-        offset={10}
-      >
-        <ColorMenu
-          selectedId={color}
-          onSelect={(id) => {
-            setOpen(null);
-            switchColor(id);
-            if (id === "custom") {
-              setDesign(true);
-            }
-          }}
-        />
-      </Popover>
-      <Popover
-        open={open === "font"}
-        anchor={
-          <IconButton
-            icon={<Icon shape={mdiFormatFont} />}
-            onClick={() => {
-              setOpen(open === "font" ? null : "font");
-            }}
-          />
-        }
-        offset={10}
-      >
-        <FontMenu
-          selectedId={font}
-          onSelect={(id) => {
-            setOpen(null);
-            switchFont(id);
-          }}
-        />
-      </Popover>
+      <IconButton
+        icon={<Icon shape={mdiThemeLightDark} />}
+        title={formatMessage(
+          isDark
+            ? defineMessage({
+                id: "t_theme_Switch_to_light_",
+                defaultMessage: "Switch to light theme.",
+              })
+            : defineMessage({
+                id: "t_theme_Switch_to_dark_",
+                defaultMessage: "Switch to dark theme.",
+              }),
+        )}
+        onClick={() => {
+          switchColor(isDark ? "light" : "dark");
+        }}
+      />
       <FullscreenButton />
     </div>
   );
@@ -122,81 +112,4 @@ function FullscreenButton() {
     default:
       return <IconButton icon={<Icon shape={mdiArrowExpandAll} />} />;
   }
-}
-
-function ColorMenu({
-  selectedId,
-  onSelect,
-}: {
-  readonly selectedId: string;
-  readonly onSelect: (id: string) => void;
-}) {
-  const options = [...COLORS].map(({ id, name }) => ({ value: id, name }));
-  const selected = options.find(({ value }) => value === selectedId);
-  return (
-    <Menu
-      options={options}
-      selectedOption={selected ?? options[0]}
-      onSelect={({ value }) => {
-        onSelect(value);
-      }}
-    />
-  );
-}
-
-function FontMenu({
-  selectedId,
-  onSelect,
-}: {
-  readonly selectedId: string;
-  readonly onSelect: (id: string) => void;
-}) {
-  const options = [...FONTS].map(({ id, name }) => ({ value: id, name }));
-  const selected = options.find(({ value }) => value === selectedId);
-  return (
-    <Menu
-      options={options}
-      selectedOption={selected ?? options[0]}
-      onSelect={({ value }) => {
-        onSelect(value);
-      }}
-    />
-  );
-}
-
-function Menu({
-  options,
-  selectedOption,
-  onSelect,
-}: {
-  readonly options: readonly OptionListOption[];
-  readonly selectedOption: OptionListOption;
-  readonly onSelect: (value: OptionListOption) => void;
-}) {
-  const list = useRef(null);
-  const item = useRef(null);
-  useEffect(() => {
-    ensureVisible(list.current, item.current);
-  });
-  return (
-    <ul ref={list} role="menu" className={styles.menu}>
-      {options.map((option, index) => (
-        <li
-          key={index}
-          ref={option === selectedOption ? item : null}
-          role="menuitem"
-          className={clsx(
-            styles.item,
-            option === selectedOption && styles.item_selected,
-          )}
-          onClick={(event) => {
-            event.preventDefault();
-            onSelect(option);
-          }}
-        >
-          {option.name}
-        </li>
-      ))}
-    </ul>
-  );
 }

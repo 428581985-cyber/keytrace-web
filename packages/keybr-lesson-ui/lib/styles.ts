@@ -1,4 +1,5 @@
 import { mixColors, parseColor } from "@keybr/color";
+import { clamp } from "@keybr/lang";
 import { useComputedStyles } from "@keybr/themes";
 import { type CSSProperties, useMemo } from "react";
 
@@ -12,7 +13,8 @@ export function useKeyStyles() {
     const max = parseColor(fast);
 
     function confidenceColor(confidence: number) {
-      return mixColors(min, max, confidence);
+      const calibrated = Math.pow(clamp(confidence, 0, 1), 2.2);
+      return mixColors(min, max, calibrated);
     }
 
     function keyStyles(

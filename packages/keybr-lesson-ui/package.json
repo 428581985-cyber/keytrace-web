@@ -16,7 +16,9 @@
     "@keybr/themes": "*",
     "@keybr/widget": "*"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@keybr/textinput": "*"
+  },
   "scripts": {
     "clean": "rm -fr .types",
     "compile": "tsc",

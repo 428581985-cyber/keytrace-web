@@ -1,6 +1,6 @@
 import { LessonKey, Target } from "@keybr/lesson";
 import { type Letter } from "@keybr/phonetic-model";
-import { type KeyStatsMap } from "@keybr/result";
+import { computeKeyMastery, type KeyStatsMap } from "@keybr/result";
 import { useSettings } from "@keybr/settings";
 import { type FocusProps, useHotkeysHandler } from "@keybr/widget";
 import { Key } from "./Key.tsx";
@@ -66,22 +66,33 @@ export const KeySelector = ({
         ["ArrowDown"]: handleNext,
       })}
     >
-      {letters.map((letter) => (
-        <Key
-          key={letter.codePoint}
-          lessonKey={LessonKey.from(
-            keyStatsMap.get(letter),
-            target,
-          ).asIncluded()}
-          isSelectable={true}
-          isCurrent={current.codePoint === letter.codePoint}
-          onClick={() => {
-            if (onSelect != null) {
-              onSelect(letter);
-            }
-          }}
-        />
-      ))}
+      {letters.map((letter) => {
+        const keyStats = keyStatsMap.get(letter);
+        const base = LessonKey.from(keyStats, target);
+        const calibrated = new LessonKey({
+          letter: base.letter,
+          samples: base.samples,
+          timeToType: base.timeToType,
+          bestTimeToType: base.bestTimeToType,
+          confidence: computeKeyMastery(keyStats, target.targetSpeed, {
+            useRealTime: true,
+          }),
+          bestConfidence: base.bestConfidence,
+        }).asIncluded();
+        return (
+          <Key
+            key={letter.codePoint}
+            lessonKey={calibrated}
+            isSelectable={true}
+            isCurrent={current.codePoint === letter.codePoint}
+            onClick={() => {
+              if (onSelect != null) {
+                onSelect(letter);
+              }
+            }}
+          />
+        );
+      })}
     </span>
   );
 };

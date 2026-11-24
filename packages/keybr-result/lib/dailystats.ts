@@ -1,7 +1,10 @@
 import { ResultGroups } from "./group.ts";
 import { LocalDate } from "./localdate.ts";
 import { type Result } from "./result.ts";
-import { makeSummaryStats, type SummaryStats } from "./summarystats.ts";
+import {
+  makeWeightedSummaryStats,
+  type SummaryStats,
+} from "./summarystats.ts";
 
 export type DailyStats = {
   readonly date: LocalDate;
@@ -40,5 +43,5 @@ export class DailyStatsMap implements Iterable<DailyStats> {
 }
 
 function makeStats(date: LocalDate, results: readonly Result[]): DailyStats {
-  return { date, results, stats: makeSummaryStats(results) };
+  return { date, results, stats: makeWeightedSummaryStats(results) };
 }

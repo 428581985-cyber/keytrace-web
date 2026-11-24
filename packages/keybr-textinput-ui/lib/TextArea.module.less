@@ -1,16 +1,22 @@
 .root {
   contain: content;
   position: relative;
+  block-size: var(--text-area-block-size, auto);
   margin-inline: -1rem;
   margin-block: -1rem;
   padding-inline: 1rem;
   padding-block: 1rem;
+  overflow-inline: clip;
+  overflow-block: var(--text-area-overflow-block, visible);
 }
 
 .messageArea {
   display: flex;
+  position: var(--text-area-message-position, static);
+  inset: 0;
   align-items: center;
   justify-content: center;
+  pointer-events: none;
 }
 
 .messageText {

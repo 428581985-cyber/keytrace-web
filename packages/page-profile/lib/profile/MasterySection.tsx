@@ -1,10 +1,18 @@
+import { useIntlNumbers } from "@keybr/intl";
 import {
   getZhKeyLabelsForLayout,
+  isZhLanguage,
   layoutUsesSemicolon,
   useKeyboard,
 } from "@keybr/keyboard";
 import { lessonProps, Target } from "@keybr/lesson";
-import { type KeyStatsMap } from "@keybr/result";
+import { useFormatter } from "@keybr/lesson-ui";
+import {
+  computeKeyMastery,
+  type KeyStatsMap,
+  summarizeKeySamples,
+  timeToSpeed,
+} from "@keybr/result";
 import { useSettings } from "@keybr/settings";
 import { Explainer, Figure, Para } from "@keybr/widget";
 import { type CSSProperties, type ReactNode } from "react";
@@ -27,7 +35,7 @@ const COLORS = {
   none: "#3a3a37",
   weak: "#d4503a",
   mid: "#c98a3a",
-  good: "#a8b04a",
+  good: "#c4a23b",
   done: "#7fae8f",
   text: "#8a857c",
   textStrong: "#e8e6e3",
@@ -122,16 +130,20 @@ export function MasterySection({
   readonly keyStatsMap: KeyStatsMap;
 }): ReactNode {
   const { settings } = useSettings();
+  const { formatSpeed } = useFormatter();
+  const { formatInteger, formatPercents } = useIntlNumbers();
   const target = new Target(settings);
   const keyboard = useKeyboard();
   const zhKeyLabels = getZhKeyLabelsForLayout(keyboard.layout);
   const rows = layoutUsesSemicolon(keyboard.layout)
     ? SEMICOLON_ROWS
     : BASE_ROWS;
-  // 判定口径完全照 keybr 的 guided 算法：
-  // recoverKeys 关闭（默认）时看 bestConfidence（历史最好成绩），
-  // 打开时看 confidence（当前平滑速度）。不自己另发明一套标准。
+  // 与 GuidedLesson 保持同一判定口径：
+  // 中文布局或开启 recoverKeys 时看实时平滑速度（timeToType），
+  // 英文默认关闭 recoverKeys 时看 bestTimeToType，同时计入准确率与样本量门槛。
+  const isZh = isZhLanguage(keyboard.layout.language);
   const recoverKeys = settings.get(lessonProps.guided.recoverKeys);
+  const useRealTime = isZh || recoverKeys;
 
   return (
     <Figure>
@@ -153,14 +165,22 @@ export function MasterySection({
                 return null;
               }
               const stats = keyStatsMap.get(letter);
-              const confidence = target.confidence(
-                recoverKeys ? stats.timeToType : stats.bestTimeToType,
-              );
+              const confidence = computeKeyMastery(stats, target.targetSpeed, {
+                useRealTime,
+              });
+              const rawTime = useRealTime
+                ? stats.timeToType
+                : stats.bestTimeToType;
+              const { totalHits, accuracy } = summarizeKeySamples(stats);
+              const title =
+                rawTime != null && rawTime > 0
+                  ? `${ch.toUpperCase()} · ${formatSpeed(timeToSpeed(rawTime))} · ${formatPercents(accuracy)}${totalHits > 0 ? ` (${formatInteger(totalHits)})` : ""}`
+                  : ch.toUpperCase();
               const keyId =
                 ch === ";" ? "Semicolon" : `Key${ch.toUpperCase()}`;
               const sound = zhKeyLabels?.[keyId]?.join("/");
               return (
-                <div key={ch} style={styles.key}>
+                <div key={ch} style={styles.key} title={title}>
                   <div style={styles.letter}>{ch.toUpperCase()}</div>
                   {sound != null && <div style={styles.sound}>{sound}</div>}
                   <div style={styles.barTrack}>

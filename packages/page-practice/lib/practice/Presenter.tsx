@@ -14,7 +14,7 @@ import {
   ModifierState,
 } from "@keybr/textinput-events";
 import { TextArea } from "@keybr/textinput-ui";
-import { type Focusable, Zoomer } from "@keybr/widget";
+import { type Focusable, Zoomer, ZoomerSuspendedContext } from "@keybr/widget";
 import { createRef, PureComponent, type ReactNode } from "react";
 import { Controls } from "./Controls.tsx";
 import { Indicators } from "./Indicators.tsx";
@@ -59,8 +59,29 @@ function getNextView(view: View): View {
 
 const propView = enumProp("prefs.practice.view", View, View.Normal);
 
+function getWindowScroll(): { readonly x: number; readonly y: number } {
+  if (typeof window === "undefined") {
+    return { x: 0, y: 0 };
+  }
+  return {
+    x: window.scrollX ?? 0,
+    y: window.scrollY ?? 0,
+  };
+}
+
+function setWindowScroll(x: number, y: number): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (typeof window.scrollTo === "function") {
+    window.scrollTo(x, y);
+  }
+}
+
 export class Presenter extends PureComponent<Props, State> {
   readonly focusRef = createRef<Focusable>();
+  private savedView: View | null = null;
+  private savedScroll: { readonly x: number; readonly y: number } | null = null;
 
   override state: State = {
     view: Preferences.get(propView),
@@ -70,14 +91,19 @@ export class Presenter extends PureComponent<Props, State> {
 
   override componentDidMount() {
     if (this.props.state.settings.isNew) {
-      this.setState({
-        view: View.Normal,
-        tour: true,
-      });
+      this.openTour(false);
     }
   }
 
   override render() {
+    return (
+      <ZoomerSuspendedContext.Provider value={this.state.tour}>
+        {this.renderLayout()}
+      </ZoomerSuspendedContext.Provider>
+    );
+  }
+
+  private renderLayout() {
     const {
       props: { state, lines, depressedKeys },
       state: { view, tour, focus },
@@ -257,6 +283,9 @@ export class Presenter extends PureComponent<Props, State> {
   };
 
   handleChangeView = () => {
+    if (this.state.tour) {
+      return;
+    }
     this.setState(
       ({ view }) => {
         const nextView = getNextView(view);
@@ -270,28 +299,51 @@ export class Presenter extends PureComponent<Props, State> {
     );
   };
 
-  handleHelp = () => {
+  openTour = (resetLesson: boolean) => {
+    if (this.state.tour || this.savedView != null) {
+      return;
+    }
+    this.savedView = this.state.view;
+    this.savedScroll = getWindowScroll();
+    setWindowScroll(0, 0);
     this.setState(
       {
         view: View.Normal,
         tour: true,
       },
       () => {
-        this.props.onResetLesson();
-        this.focusRef.current?.blur();
+        setWindowScroll(0, 0);
+        if (resetLesson) {
+          this.props.onResetLesson();
+          this.focusRef.current?.blur();
+        }
       },
     );
   };
 
+  handleHelp = () => {
+    this.openTour(true);
+  };
+
   handleTourClose = () => {
+    if (!this.state.tour) {
+      return;
+    }
+    const view = this.savedView ?? View.Normal;
+    const scroll = this.savedScroll;
+    this.savedView = null;
+    this.savedScroll = null;
     this.setState(
       {
-        view: View.Normal,
+        view,
         tour: false,
       },
       () => {
         this.props.onResetLesson();
         this.focusRef.current?.focus();
+        if (scroll != null) {
+          setWindowScroll(scroll.x, scroll.y);
+        }
       },
     );
   };
@@ -325,6 +377,7 @@ function NormalLayout({
       <div id={names.keyboard} className={styles.keyboard}>
         <Zoomer id="Keyboard/Normal">
           <DeferredKeyboardPresenter
+            keyboard={state.lesson.keyboard}
             focus={focus}
             depressedKeys={depressedKeys}
             toggledKeys={toggledKeys}

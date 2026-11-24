@@ -108,14 +108,22 @@ export const Indicators = memo(function Indicators({
   );
 });
 
+type KeyTraceInfo = {
+  readonly active: boolean;
+  readonly todayKeys: number;
+  readonly lastEventTs: number | null;
+};
+
+let cachedKeyTraceInfo: KeyTraceInfo | null = null;
+
+export function resetKeyTraceInfoCache(): void {
+  cachedKeyTraceInfo = null;
+}
+
 function KeyTracePracticePill(): ReactNode {
   const { locale } = useIntl();
   const isZh = locale.startsWith("zh");
-  const [info, setInfo] = useState<{
-    readonly active: boolean;
-    readonly todayKeys: number;
-    readonly lastEventTs: number | null;
-  } | null>(null);
+  const [info, setInfo] = useState<KeyTraceInfo | null>(cachedKeyTraceInfo);
 
   useEffect(() => {
     let alive = true;
@@ -135,11 +143,13 @@ function KeyTracePracticePill(): ReactNode {
           readonly today?: { readonly totalKeys?: number };
         };
         if (alive) {
-          setInfo({
+          const nextInfo: KeyTraceInfo = {
             active: Boolean(json.status?.active),
             todayKeys: json.today?.totalKeys ?? 0,
             lastEventTs: json.status?.lastEventTs ?? null,
-          });
+          };
+          cachedKeyTraceInfo = nextInfo;
+          setInfo(nextInfo);
         }
       } catch {
         // Ignore in offline/test environments.
@@ -158,7 +168,7 @@ function KeyTracePracticePill(): ReactNode {
   }, []);
 
   if (info == null) {
-    return null;
+    return <div className={styles.keytracePill} aria-hidden={true} />;
   }
 
   const href = Pages.intlPath(Pages.keytrace.path, locale);
@@ -170,16 +180,7 @@ function KeyTracePracticePill(): ReactNode {
       : null;
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "0.45rem",
-        marginBlockStart: "0.25rem",
-        fontSize: "1rem",
-        color: "var(--Name-color)",
-      }}
-    >
+    <div className={styles.keytracePill}>
       <span
         style={{
           display: "inline-block",

@@ -3,8 +3,10 @@ import { mdiCursorMove } from "@mdi/js";
 import { clsx } from "clsx";
 import {
   cloneElement,
+  createContext,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -80,7 +82,21 @@ function savePositions(positions: ReadonlyMap<string, ZoomablePosition>): void {
   }
 }
 
-export function Zoomer({ children, id = null }: ZoomerProps): ReactNode {
+const DEFAULT_POSITION: ZoomablePosition = { x: 0, y: 0, zoom: 1 };
+
+export const ZoomerSuspendedContext = createContext(false);
+
+export function useZoomerSuspended(): boolean {
+  return useContext(ZoomerSuspendedContext);
+}
+
+export function Zoomer({
+  children,
+  id = null,
+  suspended = false,
+}: ZoomerProps): ReactNode {
+  const contextSuspended = useZoomerSuspended();
+  const isSuspended = suspended || contextSuspended;
   const rootRef = useRef<HTMLDivElement>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const setRoot = useCallback((node: HTMLDivElement | null) => {
@@ -90,14 +106,41 @@ export function Zoomer({ children, id = null }: ZoomerProps): ReactNode {
   const [hover, setHover] = useState(false);
   const [moving, setMoving] = useState(false);
   const [{ x, y, zoom }, setPosition] = useState(
-    (id && savedPositions.get(id)) || { x: 0, y: 0, zoom: 1 },
+    (id && savedPositions.get(id)) || DEFAULT_POSITION,
   );
+  const displayPosition = isSuspended ? DEFAULT_POSITION : { x, y, zoom };
+  const effectiveHover = isSuspended ? false : hover;
+  const effectiveMoving = isSuspended ? false : moving;
+
+  useEffect(() => {
+    if (!isSuspended) {
+      return;
+    }
+    if (globalMoving.current === rootRef.current) {
+      globalMoving.current = null;
+    }
+    const tasks = new Tasks();
+    tasks.delayed(0, () => {
+      setHover(false);
+      setMoving(false);
+    });
+    return () => {
+      tasks.cancelAll();
+    };
+  }, [isSuspended]);
+
   useMouseWheel(rootEl, (ev) => {
+    if (isSuspended) {
+      return;
+    }
     setPosition({ x, y, zoom: zoom - Math.sign(ev.deltaY) * 0.05 });
     setHover(true);
     ev.preventDefault();
   });
   useDocumentEvent("mousedown", (ev) => {
+    if (isSuspended) {
+      return;
+    }
     const root = rootRef.current;
     if (root != null && !moving && contains(root, ev.target)) {
       setMoving(true);
@@ -110,12 +153,15 @@ export function Zoomer({ children, id = null }: ZoomerProps): ReactNode {
     const root = rootRef.current;
     if (root != null && moving) {
       setMoving(false);
-      setHover(true);
+      setHover(!isSuspended);
       globalMoving.current = null;
       ev.preventDefault();
     }
   });
   useDocumentEvent("mousemove", (ev) => {
+    if (isSuspended) {
+      return;
+    }
     const root = rootRef.current;
     if (root != null && moving) {
       setPosition({ x: x + ev.movementX, y: y + ev.movementY, zoom });
@@ -123,23 +169,29 @@ export function Zoomer({ children, id = null }: ZoomerProps): ReactNode {
     }
   });
   useWindowEvent("resize", () => {
+    if (isSuspended) {
+      return;
+    }
     const root = rootRef.current;
     if (root != null) {
       setPosition(place(root).fitToScreen({ x, y, zoom }));
     }
   });
   useEffect(() => {
+    if (isSuspended) {
+      return;
+    }
     const root = rootRef.current;
     if (root != null) {
       setPosition(place(root).fitToScreen({ x, y, zoom }));
     }
-  }, [x, y, zoom]);
+  }, [x, y, zoom, isSuspended]);
   useEffect(() => {
-    if (id) {
+    if (id && !isSuspended) {
       savedPositions.set(id, { x, y, zoom });
       savePositions(savedPositions);
     }
-  }, [id, x, y, zoom]);
+  }, [id, x, y, zoom, isSuspended]);
   useEffect(() => {
     const tasks = new Tasks();
     if (hover) {
@@ -154,29 +206,37 @@ export function Zoomer({ children, id = null }: ZoomerProps): ReactNode {
   return (
     <div
       ref={setRoot}
-      className={clsx(styles.root, (hover || moving) && styles.hover)}
+      className={clsx(
+        styles.root,
+        (effectiveHover || effectiveMoving) && styles.hover,
+      )}
       style={{
         position: "relative",
-        left: x,
-        top: y,
-        transform: `scale(${zoom})`,
+        left: displayPosition.x,
+        top: displayPosition.y,
+        transform: `scale(${displayPosition.zoom})`,
       }}
       onMouseEnter={() => {
-        setHover(globalMoving.current == null);
+        if (!isSuspended) {
+          setHover(globalMoving.current == null);
+        }
       }}
       onMouseLeave={() => {
         setHover(false);
       }}
       onClick={(ev) => {
+        if (isSuspended) {
+          return;
+        }
         if (ev.altKey) {
           setHover(false);
           setMoving(false);
-          setPosition({ x: 0, y: 0, zoom: 1 });
+          setPosition(DEFAULT_POSITION);
         }
       }}
     >
-      {cloneElement(children, { ...children.props, moving })}
-      {(hover || moving) && (
+      {cloneElement(children, { ...children.props, moving: effectiveMoving })}
+      {(effectiveHover || effectiveMoving) && (
         <Icon className={styles.icon} shape={mdiCursorMove} />
       )}
     </div>

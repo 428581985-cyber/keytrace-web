@@ -46,6 +46,34 @@ type InputSnapshot = {
   readonly fuzzyState: QuanpinFuzzyState;
 };
 
+type GarbageEntry = Step & {
+  readonly char: Char;
+};
+
+type MatchOutcome =
+  | { readonly kind: "none" }
+  | {
+      readonly kind: "step";
+      readonly stepCodePoint: CodePoint;
+      readonly char: Char;
+      readonly nextPos: number;
+      readonly nextFuzzyState: QuanpinFuzzyState;
+    }
+  | {
+      readonly kind: "skipAndMatch";
+      readonly stepCodePoint: CodePoint;
+      readonly skippedChar: Char;
+      readonly matchedChar: Char;
+      readonly nextPos: number;
+      readonly nextFuzzyState: QuanpinFuzzyState;
+    }
+  | {
+      readonly kind: "consumeExtra";
+      readonly stepCodePoint: CodePoint;
+      readonly nextPos: number;
+      readonly nextFuzzyState: QuanpinFuzzyState;
+    };
+
 const recoverBufferLength = 3;
 const garbageBufferLength = 10;
 
@@ -63,7 +91,8 @@ export class TextInput {
   readonly #chars: readonly Char[];
   #committedChars: Char[] = [];
   #steps: Step[] = [];
-  #garbage: (Step & { readonly char: Char })[] = [];
+  #garbage: GarbageEntry[] = [];
+  #ignoredSpace: GarbageEntry | null = null;
   #fuzzyState: QuanpinFuzzyState = {};
   #snapshots: InputSnapshot[] = [];
   #typo!: boolean;
@@ -100,6 +129,7 @@ export class TextInput {
     this.#committedChars = [];
     this.#steps = [];
     this.#garbage = [];
+    this.#ignoredSpace = null;
     this.#fuzzyState = {};
     this.#snapshots = [];
     this.#typo = false;
@@ -164,13 +194,15 @@ export class TextInput {
 
   clearChar(): Feedback {
     this.#garbage.pop();
+    this.#ignoredSpace = null;
     this.#typo = true;
     return this.#return(Feedback.Succeeded);
   }
 
   clearWord(): Feedback {
     this.#garbage = [];
-    while (this.pos > 0 && this.at(this.pos - 1).codePoint !== 0x0020) {
+    this.#ignoredSpace = null;
+    while (this.pos > 0 && !this.#isBoundaryAfter(this.pos - 1)) {
       const snapshot = this.#snapshots.pop();
       if (snapshot == null) {
         break;
@@ -198,132 +230,78 @@ export class TextInput {
     // Evaluate Quanpin fuzzy match before space-skip/space-ignore handling so
     // omitting a trailing 'g' directly before a space (e.g. "fang " typed "fan ")
     // cleanly advances via skipAndMatch rather than triggering space-skip/ignore.
-    const quanpinAction: QuanpinFuzzyAction =
+    if (
       this.zhQuanpin &&
       canAdvance &&
       expected !== codePoint &&
       filterText.normalize(expected) !== codePoint
-        ? evalQuanpinFuzzy(
-            this.#chars,
-            this.pos,
-            codePoint,
-            this.fuzzy,
-            this.#fuzzyState,
-          )
-        : { kind: "none" };
-
-    if (quanpinAction.kind !== "none") {
-      const typo = this.#typo;
-      if (quanpinAction.kind === "substitute") {
-        this.#addStep(
-          {
-            timeStamp,
-            codePoint: expected,
-            timeToType,
-            typo,
-          },
-          this.at(this.pos),
-          quanpinAction.nextState,
-        );
-      } else if (quanpinAction.kind === "skipAndMatch") {
-        const skippedChar = this.at(this.pos);
-        const matchedChar = this.at(this.pos + 1);
-        const matchedCodePoint =
-          matchedChar.codePoint === codePoint ||
-          filterText.normalize(matchedChar.codePoint) === codePoint
-            ? codePoint
-            : matchedChar.codePoint;
-        this.#addSkipAndMatch(
-          {
-            timeStamp,
-            codePoint: matchedCodePoint,
-            timeToType,
-            typo,
-          },
-          skippedChar,
-          matchedChar,
-          quanpinAction.nextState,
-        );
-      } else {
-        this.#addConsumeExtra(
-          {
-            timeStamp,
-            codePoint,
-            timeToType,
-            typo,
-          },
-          quanpinAction.nextState,
-        );
-      }
-      this.#garbage = [];
-      this.#typo = false;
-      if (typo) {
-        return this.#return(Feedback.Recovered);
-      } else {
-        return this.#return(Feedback.Succeeded);
+    ) {
+      const quanpinOutcome = this.#evaluateQuanpinFuzzy(
+        this.pos,
+        codePoint,
+        this.#fuzzyState,
+      );
+      if (quanpinOutcome.kind !== "none") {
+        const typo = this.#typo;
+        this.#applyMatchOutcome(quanpinOutcome, timeStamp, timeToType, typo);
+        this.#garbage = [];
+        this.#ignoredSpace = null;
+        this.#typo = false;
+        if (typo) {
+          return this.#return(Feedback.Recovered);
+        } else {
+          return this.#return(Feedback.Succeeded);
+        }
       }
     }
 
     if (expected !== 0x0020 && codePoint === 0x0020) {
       if (
         this.spaceSkipsWords &&
-        ((this.pos > 0 && this.at(this.pos - 1).codePoint !== 0x0020) ||
-          this.#typo)
+        ((this.pos > 0 && !this.#isBoundaryAfter(this.pos - 1)) || this.#typo)
       ) {
         this.#skipWord(timeStamp);
         return this.#return(Feedback.Recovered);
       }
       if (this.#garbage.length === 0 && !this.#typo) {
+        if (
+          this.forgiveErrors &&
+          this.pos + 1 < this.length &&
+          this.at(this.pos + 1).codePoint === 0x0020
+        ) {
+          this.#ignoredSpace = {
+            char: {
+              codePoint,
+              attrs: Attr.Garbage,
+              cls: null,
+            },
+            timeStamp,
+            codePoint,
+            timeToType,
+            typo: false,
+          };
+        }
         return this.#return(Feedback.Succeeded);
       }
     }
 
-    const fuzzyScheme: ZhShuangpinSchemeId =
-      this.zhScheme != null && isZhShuangpinSchemeId(this.zhScheme)
-        ? this.zhScheme
-        : "zh-sp";
-    const fuzzyMatch =
-      this.zhShuangpin &&
-      matchesFuzzyShuangpin(
-        this.#chars,
+    if (canAdvance) {
+      const outcome = this.#evaluateMatch(
         this.pos,
-        expected,
         codePoint,
-        this.fuzzy,
-        fuzzyScheme,
+        this.#fuzzyState,
       );
-
-    if (
-      (expected === codePoint ||
-        filterText.normalize(expected) === codePoint ||
-        fuzzyMatch) &&
-      canAdvance
-    ) {
-      const typo = this.#typo;
-      const nextFuzzyState = this.zhQuanpin
-        ? nextQuanpinFuzzyStateOnExactMatch(
-            this.#chars,
-            this.pos,
-            this.fuzzy,
-            this.#fuzzyState,
-          )
-        : {};
-      this.#addStep(
-        {
-          timeStamp,
-          codePoint: fuzzyMatch ? expected : codePoint,
-          timeToType,
-          typo,
-        },
-        this.at(this.pos),
-        nextFuzzyState,
-      );
-      this.#garbage = [];
-      this.#typo = false;
-      if (typo) {
-        return this.#return(Feedback.Recovered);
-      } else {
-        return this.#return(Feedback.Succeeded);
+      if (outcome.kind !== "none") {
+        const typo = this.#typo;
+        this.#applyMatchOutcome(outcome, timeStamp, timeToType, typo);
+        this.#garbage = [];
+        this.#ignoredSpace = null;
+        this.#typo = false;
+        if (typo) {
+          return this.#return(Feedback.Recovered);
+        } else {
+          return this.#return(Feedback.Succeeded);
+        }
       }
     }
 
@@ -419,9 +397,206 @@ export class TextInput {
     this.onStep(step);
   }
 
+  #isZhMode(): boolean {
+    return this.zhShuangpin || this.zhQuanpin;
+  }
+
+  #isZhPunctuation(codePoint: CodePoint): boolean {
+    return (
+      codePoint === 0x002c ||
+      codePoint === 0x002e ||
+      codePoint === 0x003f ||
+      codePoint === 0x0021
+    );
+  }
+
+  #isSeparatorAt(index: number): boolean {
+    const codePoint = this.at(index).codePoint;
+    if (codePoint === 0x0020) {
+      return true;
+    }
+    return (
+      this.#isZhMode() &&
+      this.#isZhPunctuation(codePoint) &&
+      (index + 1 >= this.length || this.at(index + 1).codePoint !== 0x0020)
+    );
+  }
+
+  #isBoundaryAfter(index: number): boolean {
+    return this.#isSeparatorAt(index);
+  }
+
+  #evaluateQuanpinFuzzy(
+    pos: number,
+    codePoint: CodePoint,
+    fuzzyState: QuanpinFuzzyState,
+  ): MatchOutcome {
+    const char = this.at(pos);
+    const expected = char.codePoint;
+    const action: QuanpinFuzzyAction = evalQuanpinFuzzy(
+      this.#chars,
+      pos,
+      codePoint,
+      this.fuzzy,
+      fuzzyState,
+    );
+    switch (action.kind) {
+      case "none":
+        return { kind: "none" };
+      case "substitute":
+        return {
+          kind: "step",
+          stepCodePoint: expected,
+          char,
+          nextPos: pos + 1,
+          nextFuzzyState: action.nextState,
+        };
+      case "skipAndMatch": {
+        const matchedChar = this.at(pos + 1);
+        const matchedCodePoint =
+          matchedChar.codePoint === codePoint ||
+          filterText.normalize(matchedChar.codePoint) === codePoint
+            ? codePoint
+            : matchedChar.codePoint;
+        return {
+          kind: "skipAndMatch",
+          stepCodePoint: matchedCodePoint,
+          skippedChar: char,
+          matchedChar,
+          nextPos: pos + 2,
+          nextFuzzyState: action.nextState,
+        };
+      }
+      case "consumeExtra":
+        return {
+          kind: "consumeExtra",
+          stepCodePoint: codePoint,
+          nextPos: pos,
+          nextFuzzyState: action.nextState,
+        };
+    }
+  }
+
+  #evaluateMatch(
+    pos: number,
+    codePoint: CodePoint,
+    fuzzyState: QuanpinFuzzyState,
+  ): MatchOutcome {
+    if (pos < 0 || pos >= this.length) {
+      return { kind: "none" };
+    }
+    const char = this.at(pos);
+    const expected = char.codePoint;
+
+    if (
+      expected === codePoint ||
+      filterText.normalize(expected) === codePoint
+    ) {
+      const nextFuzzyState = this.zhQuanpin
+        ? nextQuanpinFuzzyStateOnExactMatch(
+            this.#chars,
+            pos,
+            this.fuzzy,
+            fuzzyState,
+          )
+        : {};
+      return {
+        kind: "step",
+        stepCodePoint: codePoint,
+        char,
+        nextPos: pos + 1,
+        nextFuzzyState,
+      };
+    }
+
+    if (this.zhQuanpin) {
+      const quanpinOutcome = this.#evaluateQuanpinFuzzy(
+        pos,
+        codePoint,
+        fuzzyState,
+      );
+      if (quanpinOutcome.kind !== "none") {
+        return quanpinOutcome;
+      }
+    }
+
+    if (this.zhShuangpin) {
+      const fuzzyScheme: ZhShuangpinSchemeId =
+        this.zhScheme != null && isZhShuangpinSchemeId(this.zhScheme)
+          ? this.zhScheme
+          : "zh-sp";
+      if (
+        matchesFuzzyShuangpin(
+          this.#chars,
+          pos,
+          expected,
+          codePoint,
+          this.fuzzy,
+          fuzzyScheme,
+        )
+      ) {
+        return {
+          kind: "step",
+          stepCodePoint: expected,
+          char,
+          nextPos: pos + 1,
+          nextFuzzyState: {},
+        };
+      }
+    }
+
+    return { kind: "none" };
+  }
+
+  #applyMatchOutcome(
+    outcome: Exclude<MatchOutcome, { readonly kind: "none" }>,
+    timeStamp: number,
+    timeToType: number,
+    typo: boolean,
+  ): void {
+    switch (outcome.kind) {
+      case "step":
+        this.#addStep(
+          {
+            timeStamp,
+            codePoint: outcome.stepCodePoint,
+            timeToType,
+            typo,
+          },
+          outcome.char,
+          outcome.nextFuzzyState,
+        );
+        break;
+      case "skipAndMatch":
+        this.#addSkipAndMatch(
+          {
+            timeStamp,
+            codePoint: outcome.stepCodePoint,
+            timeToType,
+            typo,
+          },
+          outcome.skippedChar,
+          outcome.matchedChar,
+          outcome.nextFuzzyState,
+        );
+        break;
+      case "consumeExtra":
+        this.#addConsumeExtra(
+          {
+            timeStamp,
+            codePoint: outcome.stepCodePoint,
+            timeToType,
+            typo,
+          },
+          outcome.nextFuzzyState,
+        );
+        break;
+    }
+  }
+
   #skipWord(timeStamp: number): void {
-    // Skip the remaining non-space characters inside the word.
-    while (this.pos < this.length && this.at(this.pos).codePoint !== 0x0020) {
+    // Skip the remaining characters inside the word before the separator.
+    while (this.pos < this.length && !this.#isSeparatorAt(this.pos)) {
       this.#addStep(
         {
           timeStamp,
@@ -432,20 +607,94 @@ export class TextInput {
         this.at(this.pos),
       );
     }
-    // Skip the space character to position at the beginning of the next word.
-    if (this.pos < this.length && this.at(this.pos).codePoint === 0x0020) {
-      this.#addStep(
-        {
-          timeStamp,
-          codePoint: this.at(this.pos).codePoint,
-          timeToType: 0,
-          typo: false,
-        },
-        this.at(this.pos),
-      );
+    // Skip the separator character to position at the beginning of the next word.
+    if (this.pos < this.length) {
+      const codePoint = this.at(this.pos).codePoint;
+      if (codePoint === 0x0020) {
+        this.#addStep(
+          {
+            timeStamp,
+            codePoint,
+            timeToType: 0,
+            typo: false,
+          },
+          this.at(this.pos),
+        );
+      } else if (this.#isZhMode() && this.#isZhPunctuation(codePoint)) {
+        this.#addStep(
+          {
+            timeStamp,
+            codePoint,
+            timeToType: 0,
+            typo: true,
+          },
+          this.at(this.pos),
+        );
+      }
     }
     this.#garbage = [];
+    this.#ignoredSpace = null;
     this.#typo = false;
+  }
+
+  #tryRecoverLookahead(
+    firstTimeStamp: number,
+    entries: readonly GarbageEntry[],
+  ): boolean {
+    if (
+      this.pos + 1 >= this.length ||
+      entries.length < recoverBufferLength
+    ) {
+      return false;
+    }
+
+    let simPos = this.pos + 1;
+    let simFuzzyState: QuanpinFuzzyState = {};
+    const matched: {
+      readonly entry: GarbageEntry;
+      readonly outcome: Exclude<MatchOutcome, { readonly kind: "none" }>;
+    }[] = [];
+
+    for (const entry of entries) {
+      const outcome = this.#evaluateMatch(
+        simPos,
+        entry.codePoint,
+        simFuzzyState,
+      );
+      if (outcome.kind === "none") {
+        return false;
+      }
+      matched.push({ entry, outcome });
+      simPos = outcome.nextPos;
+      simFuzzyState = outcome.nextFuzzyState;
+    }
+
+    // Append a step with an error for the replaced or skipped character.
+    this.#addStep(
+      {
+        timeStamp: firstTimeStamp,
+        codePoint: this.at(this.pos).codePoint,
+        timeToType: 0,
+        typo: true,
+      },
+      this.at(this.pos),
+      {},
+    );
+
+    // Replay the matched lookahead steps with canonical Char / fuzzyState.
+    for (const { entry, outcome } of matched) {
+      this.#applyMatchOutcome(
+        outcome,
+        entry.timeStamp,
+        entry.timeToType,
+        entry.typo,
+      );
+    }
+
+    this.#garbage = [];
+    this.#ignoredSpace = null;
+    this.#typo = false;
+    return true;
   }
 
   #handleReplacedCharacter(): boolean {
@@ -453,42 +702,14 @@ export class TextInput {
     // garbage: xbcd
     // offset:  0
 
-    // Check if the buffer size is right.
-    if (
-      this.pos + recoverBufferLength + 1 > this.length ||
-      this.#garbage.length < recoverBufferLength + 1
-    ) {
+    if (this.#garbage.length < recoverBufferLength + 1) {
       return false;
     }
 
-    // Check whether we can recover.
-    for (let i = 0; i < recoverBufferLength; i++) {
-      const char = this.at(this.pos + i + 1);
-      if (char.codePoint !== this.#garbage[i + 1].codePoint) {
-        return false;
-      }
-    }
-
-    // Append a step with an error.
-    this.#addStep(
-      {
-        timeStamp: this.#garbage[0].timeStamp,
-        codePoint: this.at(this.pos).codePoint,
-        timeToType: 0,
-        typo: true,
-      },
-      this.at(this.pos),
+    return this.#tryRecoverLookahead(
+      this.#garbage[0].timeStamp,
+      this.#garbage.slice(1),
     );
-
-    // Append successful steps.
-    for (let i = 1; i < this.#garbage.length; i++) {
-      const { timeStamp, codePoint, timeToType, typo, char } = this.#garbage[i];
-      this.#addStep({ timeStamp, codePoint, timeToType, typo }, char);
-    }
-
-    this.#garbage = [];
-    this.#typo = false;
-    return true;
   }
 
   #handleSkippedCharacter(): boolean {
@@ -496,41 +717,25 @@ export class TextInput {
     // garbage: bcd
     // offset:  0
 
-    // Check if the buffer size is right.
     if (
-      this.pos + recoverBufferLength + 1 > this.length ||
-      this.#garbage.length < recoverBufferLength
+      this.#garbage.length >= recoverBufferLength &&
+      this.#tryRecoverLookahead(this.#garbage[0].timeStamp, this.#garbage)
     ) {
-      return false;
+      return true;
     }
 
-    // Check whether we can recover.
-    for (let i = 0; i < recoverBufferLength; i++) {
-      const char = this.at(this.pos + i + 1);
-      if (char.codePoint !== this.#garbage[i].codePoint) {
-        return false;
-      }
+    if (
+      this.#ignoredSpace != null &&
+      this.pos + 1 < this.length &&
+      this.at(this.pos + 1).codePoint === 0x0020 &&
+      this.#garbage.length + 1 >= recoverBufferLength
+    ) {
+      return this.#tryRecoverLookahead(this.#ignoredSpace.timeStamp, [
+        this.#ignoredSpace,
+        ...this.#garbage,
+      ]);
     }
 
-    // Append a step with an error.
-    this.#addStep(
-      {
-        timeStamp: this.#garbage[0].timeStamp,
-        codePoint: this.at(this.pos).codePoint,
-        timeToType: 0,
-        typo: true,
-      },
-      this.at(this.pos),
-    );
-
-    // Append successful steps.
-    for (let i = 0; i < this.#garbage.length; i++) {
-      const { timeStamp, codePoint, timeToType, typo, char } = this.#garbage[i];
-      this.#addStep({ timeStamp, codePoint, timeToType, typo }, char);
-    }
-
-    this.#garbage = [];
-    this.#typo = false;
-    return true;
+    return false;
   }
 }

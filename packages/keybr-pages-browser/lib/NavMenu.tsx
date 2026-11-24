@@ -1,6 +1,6 @@
 import { type PageInfo, Pages } from "@keybr/pages-shared";
 import { Icon } from "@keybr/widget";
-import { mdiTranslate } from "@mdi/js";
+import { mdiGithub, mdiTranslate } from "@mdi/js";
 import { clsx } from "clsx";
 import { type ReactNode, useEffect, useState } from "react";
 import { useIntl } from "react-intl";
@@ -34,6 +34,10 @@ export function NavMenu({ currentPath }: { readonly currentPath: string }) {
 
       <MenuItem>
         <LanguageToggle currentPath={currentPath} />
+      </MenuItem>
+
+      <MenuItem>
+        <GitHubLink />
       </MenuItem>
     </div>
   );
@@ -106,6 +110,25 @@ function LanguageToggle({ currentPath }: { readonly currentPath: string }) {
     <a className={styles.link} href={Pages.intlPath(currentPath, targetLocale)}>
       <Icon className={styles.icon} shape={mdiTranslate} />
       <span className={styles.label}>{label}</span>
+    </a>
+  );
+}
+
+function GitHubLink() {
+  const { formatMessage } = useIntl();
+  return (
+    <a
+      className={styles.link}
+      href="https://github.com/428581985-cyber/keytrace"
+      target="_blank"
+      rel="noopener noreferrer"
+      title={formatMessage({
+        id: "nav.githubLink.description",
+        defaultMessage: "View source code on GitHub.",
+      })}
+    >
+      <Icon className={styles.icon} shape={mdiGithub} />
+      <span className={styles.label}>GitHub</span>
     </a>
   );
 }

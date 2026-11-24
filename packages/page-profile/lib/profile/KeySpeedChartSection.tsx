@@ -11,11 +11,14 @@ import { SmoothnessRange } from "./SmoothnessRange.tsx";
 
 export function KeySpeedChartSection({
   keyStatsMap,
+  summaryKeyStatsMap,
 }: {
   keyStatsMap: KeyStatsMap;
+  summaryKeyStatsMap?: KeyStatsMap;
 }) {
   const { settings } = useSettings();
   const { letters } = keyStatsMap;
+  const summaryMap = summaryKeyStatsMap ?? keyStatsMap;
   const [current, setCurrent] = useState(letters[0]);
   const [smoothness, setSmoothness] = useState(0.5);
   const target = new Target(settings);
@@ -26,6 +29,7 @@ export function KeySpeedChartSection({
   }
 
   const keyStats = keyStatsMap.get(current);
+  const summaryKeyStats = summaryMap.get(current);
   const { samples } = keyStats;
 
   return (
@@ -48,7 +52,7 @@ export function KeySpeedChartSection({
 
       <Para align="center">
         <KeySelector
-          keyStatsMap={keyStatsMap}
+          keyStatsMap={summaryMap}
           current={current}
           onSelect={(current) => {
             setCurrent(current);
@@ -57,7 +61,7 @@ export function KeySpeedChartSection({
       </Para>
 
       <Para align="center">
-        <KeyDetails lessonKey={LessonKey.from(keyStats, target)} />
+        <KeyDetails lessonKey={LessonKey.from(summaryKeyStats, target)} />
       </Para>
 
       <ChartWrapper>

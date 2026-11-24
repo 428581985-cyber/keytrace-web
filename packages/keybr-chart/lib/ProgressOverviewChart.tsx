@@ -2,7 +2,11 @@ import { useIntlNumbers } from "@keybr/intl";
 import { Target } from "@keybr/lesson";
 import { useKeyStyles } from "@keybr/lesson-ui";
 import { Range, resample, Vector } from "@keybr/math";
-import { type KeyStats, type KeyStatsMap } from "@keybr/result";
+import {
+  computeSampleMastery,
+  type KeyStats,
+  type KeyStatsMap,
+} from "@keybr/result";
 import { useSettings } from "@keybr/settings";
 import {
   Canvas,
@@ -118,9 +122,10 @@ function usePaint(styles: ChartStyles, keyStatsMap: KeyStatsMap) {
 
     function makeKeyData({ samples }: KeyStats): number[] {
       const data = new Array<number>(results.length).fill(NaN);
-      for (const { index, timeToType } of samples) {
-        if (timeToType != null) {
-          data[index] = target.confidence(timeToType);
+      for (const sample of samples) {
+        const mastery = computeSampleMastery(sample, target.targetSpeed);
+        if (mastery != null) {
+          data[sample.index] = mastery;
         }
       }
       return data;

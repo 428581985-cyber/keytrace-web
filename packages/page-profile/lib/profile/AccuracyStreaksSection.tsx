@@ -1,7 +1,7 @@
 import { useIntlNumbers } from "@keybr/intl";
 import { useFormatter } from "@keybr/lesson-ui";
 import {
-  makeSummaryStats,
+  makeWeightedSummaryStats,
   MutableStreakList,
   type Result,
   type Streak,
@@ -66,7 +66,7 @@ function StreakDetails({
   const { formatSpeed } = useFormatter();
   const { level, results } = streak;
   const characterCount = results.reduce((x, { length }) => length + x, 0);
-  const stats = makeSummaryStats(results);
+  const stats = makeWeightedSummaryStats(results);
 
   return (
     <>

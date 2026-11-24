@@ -4,6 +4,7 @@ import { catchError } from "@keybr/debug";
 import {
   isZhShuangpinSchemeId,
   KeyboardOptions,
+  type Language,
   useKeyboard,
 } from "@keybr/keyboard";
 import {
@@ -24,6 +25,42 @@ import { useSettings } from "@keybr/settings";
 import { getShuangpinWordList } from "@keybr/textinput";
 import { type ReactNode, useEffect, useState } from "react";
 
+const wordListCache = new Map<Language, ReturnType<typeof loadWordList>>();
+const contentCache = new Map<
+  Parameters<typeof loadContent>[0],
+  ReturnType<typeof loadContent>
+>();
+
+function cachedLoadWordList(
+  language: Language,
+): ReturnType<typeof loadWordList> {
+  const cached = wordListCache.get(language);
+  if (cached != null) {
+    return cached;
+  }
+  const promise = loadWordList(language).catch((err) => {
+    wordListCache.delete(language);
+    throw err;
+  });
+  wordListCache.set(language, promise);
+  return promise;
+}
+
+function cachedLoadContent(
+  book: Parameters<typeof loadContent>[0],
+): ReturnType<typeof loadContent> {
+  const cached = contentCache.get(book);
+  if (cached != null) {
+    return cached;
+  }
+  const promise = loadContent(book).catch((err) => {
+    contentCache.delete(book);
+    throw err;
+  });
+  contentCache.set(book, promise);
+  return promise;
+}
+
 export function LessonLoader({
   children,
   fallback = <LoadingProgress />,
@@ -32,14 +69,13 @@ export function LessonLoader({
   readonly fallback?: ReactNode;
 }): ReactNode {
   const { settings } = useSettings();
-  const lessonType = settings.get(lessonProps.type);
-  const { language, layout } = KeyboardOptions.from(settings);
+  const { language } = KeyboardOptions.from(settings);
   return (
-    <PhoneticModelLoader language={language}>
-      {(model) => (
+    <PhoneticModelLoader language={language} fallback={fallback}>
+      {(model, meta) => (
         <Loader
-          key={`${lessonType.id}:${layout.id}`}
           model={model}
+          isModelLoading={meta.isLoading}
           fallback={fallback}
         >
           {children}
@@ -51,14 +87,16 @@ export function LessonLoader({
 
 function Loader({
   model,
+  isModelLoading,
   children,
   fallback,
 }: {
   readonly model: PhoneticModel;
+  readonly isModelLoading: boolean;
   readonly children: (result: Lesson) => ReactNode;
   readonly fallback?: ReactNode;
 }): ReactNode {
-  const result = useLoader(model);
+  const result = useLoader(model, isModelLoading);
   if (result == null) {
     return fallback;
   } else {
@@ -66,12 +104,19 @@ function Loader({
   }
 }
 
-function useLoader(model: PhoneticModel): Lesson | null {
+function useLoader(
+  model: PhoneticModel,
+  isModelLoading: boolean,
+): Lesson | null {
   const { settings } = useSettings();
   const keyboard = useKeyboard();
   const [result, setResult] = useState<Lesson | null>(null);
 
   useEffect(() => {
+    if (isModelLoading) {
+      return;
+    }
+
     let didCancel = false;
 
     const load = async (): Promise<void> => {
@@ -81,7 +126,7 @@ function useLoader(model: PhoneticModel): Lesson | null {
           const wordList =
             isZhShuangpinSchemeId(layout.id) && layout.id !== "zh-sp"
               ? getShuangpinWordList(layout.id)
-              : await loadWordList(language);
+              : await cachedLoadWordList(language);
           if (!didCancel) {
             setResult(new GuidedLesson(settings, keyboard, model, wordList));
           }
@@ -92,7 +137,7 @@ function useLoader(model: PhoneticModel): Lesson | null {
           const wordList =
             isZhShuangpinSchemeId(layout.id) && layout.id !== "zh-sp"
               ? getShuangpinWordList(layout.id)
-              : await loadWordList(language);
+              : await cachedLoadWordList(language);
           if (!didCancel) {
             setResult(new WordListLesson(settings, keyboard, model, wordList));
           }
@@ -100,7 +145,7 @@ function useLoader(model: PhoneticModel): Lesson | null {
         }
         case LessonType.BOOKS: {
           const book = settings.get(lessonProps.books.book);
-          const content = await loadContent(book);
+          const content = await cachedLoadContent(book);
           if (!didCancel) {
             setResult(
               new BooksLesson(settings, keyboard, model, { book, content }),
@@ -136,7 +181,7 @@ function useLoader(model: PhoneticModel): Lesson | null {
     return () => {
       didCancel = true;
     };
-  }, [settings, keyboard, model]);
+  }, [settings, keyboard, model, isModelLoading]);
 
   return result;
 }

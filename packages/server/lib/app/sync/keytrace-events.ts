@@ -309,6 +309,7 @@ export async function readKeyTraceSyncData(options?: {
   }
 
   const buckets = new Map<string, DayBucket>();
+  const carryBySessionBucket = new Map<string, CommitCarryState>();
   const commitKeys = includeCommitKeys ? new Set<string>() : null;
   const imeTimeline: ImeTimelineEntry[] = [];
   let currentSessionKey: string | null = null;
@@ -395,10 +396,6 @@ export async function readKeyTraceSyncData(options?: {
         commitKeys.add(`${legacyLayout}:${Math.floor(event.ts / 1000)}`);
       }
 
-      if (event.ts <= sinceTs) {
-        continue;
-      }
-
       const zhLayoutId = resolveZhLayoutFromIme(
         findActiveIme(imeTimeline, event.ts, event.mono),
       );
@@ -407,7 +404,30 @@ export async function readKeyTraceSyncData(options?: {
         continue;
       }
 
-      accumulateCommit(buckets, date, layoutId, event.ts, slice);
+      if (event.ts <= sinceTs) {
+        const lastKd = slice[slice.length - 1];
+        if (lastKd != null) {
+          carryBySessionBucket.set(
+            `${currentSessionKey ?? ""}\0${date}:${layoutId}`,
+            {
+              lastMono: lastKd.mono,
+              endedWithBs: lastKd.vk === 8,
+            },
+          );
+        }
+        continue;
+      }
+
+      accumulateCommit(
+        buckets,
+        date,
+        layoutId,
+        event.ts,
+        slice,
+        undefined,
+        currentSessionKey,
+        carryBySessionBucket,
+      );
     }
   }
 
@@ -605,6 +625,11 @@ type WordEntry = {
   readonly isCorrected: boolean;
 };
 
+type CommitCarryState = {
+  readonly lastMono: number;
+  readonly endedWithBs: boolean;
+};
+
 function isLeakedPinyin(cleanText: string): boolean {
   if (CJK_RE.test(cleanText)) {
     return false;
@@ -675,8 +700,12 @@ function accumulateCommit(
   ts: number,
   slice: readonly KdEvent[],
   onCorrection?: (wrongCp: number | null, rightCp: number) => void,
+  sessionKey?: string | null,
+  carryBySessionBucket?: Map<string, CommitCarryState>,
 ): void {
   const bucketKey = `${day}:${layoutId}`;
+  const carryKey = `${sessionKey ?? ""}\0${bucketKey}`;
+  const prevCarry = carryBySessionBucket?.get(carryKey);
   let bucket = buckets.get(bucketKey);
   if (bucket == null) {
     bucket = {
@@ -694,13 +723,22 @@ function accumulateCommit(
   }
 
   let stack: WordEntry[] = [];
-  let lastMono: number | null = null;
+  let lastMono: number | null = prevCarry?.lastMono ?? null;
   let wordAnchorMono: number | null = null;
   let bsRun = 0;
   let corrActive = false;
   let corrAnchorMono: number | null = null;
   let lastPoppedCp: number | null = null;
-  let afterResetBs = false;
+  let afterResetBs = prevCarry?.endedWithBs ?? false;
+
+  const abortPendingCorrection = (): void => {
+    if (corrActive) {
+      bucket.errors += 1;
+      corrActive = false;
+    }
+    corrAnchorMono = null;
+    lastPoppedCp = null;
+  };
 
   const flushStack = (): void => {
     for (const entry of stack) {
@@ -727,9 +765,7 @@ function accumulateCommit(
         }
         flushStack();
         bsRun = 1;
-        corrActive = false;
-        corrAnchorMono = null;
-        lastPoppedCp = null;
+        abortPendingCorrection();
         wordAnchorMono = null;
         afterResetBs = true;
         lastMono = kd.mono;
@@ -738,9 +774,7 @@ function accumulateCommit(
 
       flushStack();
       bsRun = 0;
-      corrActive = false;
-      corrAnchorMono = null;
-      lastPoppedCp = null;
+      abortPendingCorrection();
       wordAnchorMono = null;
       afterResetBs = false;
       lastMono = kd.mono;
@@ -762,9 +796,7 @@ function accumulateCommit(
         if (stack.length > 0) {
           stack.pop();
         }
-        corrActive = false;
-        corrAnchorMono = null;
-        lastPoppedCp = null;
+        abortPendingCorrection();
         afterResetBs = true;
       } else if (stack.length > 0) {
         const popped = stack.pop()!;
@@ -776,12 +808,10 @@ function accumulateCommit(
         corrActive = true;
         afterResetBs = false;
       } else {
-        if (bsRun === 1 && lastMono != null) {
+        if (bsRun === 1 && !corrActive && lastMono != null) {
           bucket.errors += 1;
         }
-        corrActive = false;
-        corrAnchorMono = null;
-        lastPoppedCp = null;
+        abortPendingCorrection();
         afterResetBs = true;
       }
       lastMono = kd.mono;
@@ -793,9 +823,7 @@ function accumulateCommit(
       flushStack();
       wordAnchorMono = kd.mono;
       bsRun = 0;
-      corrActive = false;
-      corrAnchorMono = null;
-      lastPoppedCp = null;
+      abortPendingCorrection();
       afterResetBs = false;
       lastMono = kd.mono;
       continue;
@@ -825,6 +853,14 @@ function accumulateCommit(
   }
 
   flushStack();
+  abortPendingCorrection();
+  if (carryBySessionBucket != null && lastMono != null) {
+    const lastKd = slice[slice.length - 1];
+    carryBySessionBucket.set(carryKey, {
+      lastMono,
+      endedWithBs: lastKd != null ? lastKd.vk === 8 : afterResetBs,
+    });
+  }
 }
 
 function getOrCreateKeyStat(
@@ -1061,6 +1097,7 @@ export async function readKeyTraceDashboard(options?: {
   }
 
   const buckets = new Map<string, DayBucket>();
+  const carryBySessionBucket = new Map<string, CommitCarryState>();
   const commitsByDay = new Map<string, number>();
   const correctionsByDay = new Map<string, number>();
   const appMap = new Map<
@@ -1212,6 +1249,8 @@ export async function readKeyTraceDashboard(options?: {
             }
           }
         },
+        currentSessionKey,
+        carryBySessionBucket,
       );
 
       commitsByDay.set(date, (commitsByDay.get(date) ?? 0) + 1);

@@ -1,4 +1,4 @@
-import { keyboardProps, useKeyboard } from "@keybr/keyboard";
+import { type Keyboard, keyboardProps, useKeyboard } from "@keybr/keyboard";
 import {
   flatten,
   HeatmapLayer,
@@ -15,12 +15,14 @@ import { memo, type ReactNode } from "react";
 import { type LastLesson } from "./state/index.ts";
 
 export const KeyboardPresenter = memo(function KeyboardPresenter({
+  keyboard: keyboardProp,
   focus,
   depressedKeys,
   toggledKeys,
   suffix,
   lastLesson,
 }: {
+  readonly keyboard?: Keyboard;
   readonly focus: boolean;
   readonly depressedKeys: readonly string[];
   readonly toggledKeys: readonly string[];
@@ -28,7 +30,8 @@ export const KeyboardPresenter = memo(function KeyboardPresenter({
   readonly lastLesson: LastLesson | null;
 }): ReactNode {
   const { settings } = useSettings();
-  const keyboard = useKeyboard();
+  const contextKeyboard = useKeyboard();
+  const keyboard = keyboardProp ?? contextKeyboard;
   const colors = settings.get(keyboardProps.colors);
   const pointers = settings.get(keyboardProps.pointers);
   return (

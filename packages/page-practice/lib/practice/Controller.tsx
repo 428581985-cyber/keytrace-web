@@ -1,4 +1,4 @@
-import { type KeyId, useKeyboard } from "@keybr/keyboard";
+import { type KeyId } from "@keybr/keyboard";
 import { type Result } from "@keybr/result";
 import { type LineList } from "@keybr/textinput";
 import { addKey, deleteKey, emulateLayout } from "@keybr/textinput-events";
@@ -9,7 +9,7 @@ import {
   useTimeout,
   useWindowEvent,
 } from "@keybr/widget";
-import { memo, type ReactNode, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useMemo, useState } from "react";
 import { Presenter } from "./Presenter.tsx";
 import {
   type LastLesson,
@@ -59,26 +59,29 @@ function useLessonState(
   progress: Progress,
   onResult: (result: Result) => void,
 ) {
-  const keyboard = useKeyboard();
+  const keyboard = progress.lesson.keyboard;
   const timeout = useTimeout();
   const [key, setKey] = useState(0); // Creates new LessonState instances.
   const [, setLines] = useState<LineList>({ text: "", lines: [] }); // Forces UI update.
   const [, setDepressedKeys] = useState<readonly KeyId[]>([]); // Forces UI update.
-  const lastLessonRef = useRef<LastLesson | null>(null);
-
-  const onResultRef = useRef(onResult);
-  onResultRef.current = onResult;
+  const [lastLessonState, setLastLessonState] = useState<{
+    readonly progress: Progress;
+    readonly value: LastLesson | null;
+  }>({ progress, value: null });
+  const lastLesson =
+    lastLessonState.progress === progress ? lastLessonState.value : null;
 
   return useMemo(() => {
     // New lesson.
     const state = new LessonState(progress, (result, textInput) => {
       setKey(key + 1);
-      lastLessonRef.current = makeLastLesson(result, textInput.steps);
-      onResultRef.current(result);
+      setLastLessonState({
+        progress,
+        value: makeLastLesson(result, textInput.steps),
+      });
+      onResult(result);
     });
-    state.lastLesson = lastLessonRef.current;
-    setLines(state.lines);
-    setDepressedKeys(state.depressedKeys);
+    state.lastLesson = lastLesson;
     const handleResetLesson = () => {
       state.resetLesson();
       setLines(state.lines);
@@ -123,5 +126,5 @@ function useLessonState(
       handleKeyUp: onKeyUp,
       handleInput: onInput,
     };
-  }, [progress, keyboard, timeout, key]);
+  }, [progress, keyboard, timeout, key, lastLesson, onResult]);
 }

@@ -834,6 +834,389 @@ test("zh quanpin fuzzy: extra permissive keys, cross-syllable boundaries, and sp
   equal(makeStats(spaceNoSkip.steps).errors, 0);
 });
 
+test("zh mode: spaceSkipsWords and clearWord treat Chinese comma/period/question/exclamation as word boundaries without breaking semicolon", () => {
+  const spText = "dage,ykgo uiwu.glxi";
+  const sp = new TextInput(spText, {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: true,
+    zhShuangpin: true,
+  });
+
+  // Type "da" (pos 2 inside "dage"), then Space -> skips "ge," (g,e,!,) to 'y' of "ykgo".
+  equal(sp.appendChar(100, "d".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(sp.appendChar(200, "a".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(sp.appendChar(300, Space, 100), Feedback.Recovered);
+  equal(sp.pos, 5);
+  equal(showChars(sp), "d|a|!g|!e|!,|[y]|k|g|o| |u|i|w|u|.|g|l|x|i");
+  equal(
+    showSteps(sp),
+    "d,100,100|a,200,100|!g,300,0|!e,300,0|!,,300,0",
+  );
+
+  // Space at start of word right after ',' with no typo is ignored (does NOT skip "ykgo").
+  equal(sp.appendChar(400, Space, 100), Feedback.Succeeded);
+  equal(sp.pos, 5);
+
+  // After a typo at word start right after ',', Space skips only "ykgo " to 'u'.
+  equal(sp.appendChar(500, X, 100), Feedback.Failed);
+  equal(sp.appendChar(600, Space, 100), Feedback.Recovered);
+  equal(sp.pos, 10);
+  equal(
+    showChars(sp),
+    "d|a|!g|!e|!,|!y|!k|!g|!o| |[u]|i|w|u|.|g|l|x|i",
+  );
+
+  // Type "ui", then clearWord() stops at ' ' (pos 10), then clearWord() again stays at pos 10.
+  equal(sp.appendChar(700, "u".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(sp.appendChar(800, "i".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(sp.pos, 12);
+  equal(sp.clearWord(), Feedback.Succeeded);
+  equal(sp.pos, 10);
+  equal(sp.clearWord(), Feedback.Succeeded);
+  equal(sp.pos, 10);
+
+  // Recover and type "uiwu", then press Space ON '.' -> consumes '.' with typo: true, lands on 'g' (pos 15).
+  equal(sp.appendChar(900, "u".codePointAt(0)!, 100), Feedback.Recovered);
+  for (const ch of "iwu") {
+    equal(sp.appendChar(1000, ch.codePointAt(0)!, 100), Feedback.Succeeded);
+  }
+  equal(sp.pos, 14);
+  equal(sp.appendChar(1100, Space, 100), Feedback.Recovered);
+  equal(sp.pos, 15);
+  equal(sp.steps[sp.steps.length - 1].typo, true);
+  equal(sp.steps[sp.steps.length - 1].codePoint, ".".codePointAt(0));
+
+  // clearWord() right after '.' stays at pos 15; typing "gl" then clearWord() rolls back to pos 15.
+  equal(sp.clearWord(), Feedback.Succeeded);
+  equal(sp.pos, 15);
+  equal(sp.appendChar(1200, "g".codePointAt(0)!, 100), Feedback.Recovered);
+  equal(sp.appendChar(1300, "l".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(sp.pos, 17);
+  equal(sp.clearWord(), Feedback.Succeeded);
+  equal(sp.pos, 15);
+
+  // Finish "glxi" with Space at EOF? No EOF punctuation here, type "glxi".
+  equal(sp.appendChar(1400, "g".codePointAt(0)!, 100), Feedback.Recovered);
+  for (const ch of "lxi") {
+    equal(sp.appendChar(1500, ch.codePointAt(0)!, 100), Feedback.Succeeded);
+  }
+  isTrue(sp.completed);
+
+  // EOF trailing period with spaceSkipsWords: true skips '.' with typo: true and completes.
+  const eofPunct = new TextInput("dage.", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: true,
+    zhShuangpin: true,
+  });
+  equal(eofPunct.appendChar(100, "d".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(eofPunct.appendChar(200, Space, 100), Feedback.Recovered);
+  isTrue(eofPunct.completed);
+  equal(
+    showSteps(eofPunct),
+    "d,100,100|!a,200,0|!g,200,0|!e,200,0|!.,200,0",
+  );
+
+  // Microsoft Shuangpin (zh-sp-ms): ';' is a syllable letter, NOT a boundary!
+  const ms = new TextInput("jnx;,mztm.", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: true,
+    zhShuangpin: true,
+    zhScheme: "zh-sp-ms",
+  });
+  equal(ms.appendChar(100, "j".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(ms.appendChar(200, "n".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(ms.appendChar(300, "x".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(ms.appendChar(400, ";".codePointAt(0)!, 100), Feedback.Succeeded);
+  // Cursor is on ',' (pos 4); clearWord() rolls back ALL of "jnx;" (including ';') to pos 0.
+  equal(ms.clearWord(), Feedback.Succeeded);
+  equal(ms.pos, 0);
+
+  // Retype 'j' (Recovers), then Space skips "nx;," across ';' up to ',' and lands on 'm' (pos 5).
+  equal(ms.appendChar(500, "j".codePointAt(0)!, 100), Feedback.Recovered);
+  equal(ms.appendChar(600, Space, 100), Feedback.Recovered);
+  equal(ms.pos, 5);
+  equal(showChars(ms), "!j|!n|!x|!;|!,|[m]|z|t|m|.");
+
+  // English mode preserves comma/period inside words as non-boundaries.
+  const en = new TextInput("word, next", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: true,
+  });
+  equal(en.appendChar(100, "w".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(en.appendChar(200, Space, 100), Feedback.Recovered);
+  equal(en.pos, 6); // skipped "ord, " to 'n'
+  equal(en.steps[4].typo, true); // ','
+  equal(en.steps[5].typo, false); // ' '
+});
+
+test("zh quanpin: spaceSkipsWords, stopOnError=false, and forgiveErrors combinations", () => {
+  const fuzzy = {
+    enEng: false,
+    anAng: true,
+    inIng: false,
+    ianIang: false,
+    uanUang: false,
+    zhZ: true,
+    chC: false,
+    shS: false,
+    lN: true,
+    fH: false,
+    rL: false,
+    veUe: false,
+  };
+
+  // stopOnError=false + spaceSkipsWords=true + forgiveErrors=false on Quanpin with ',' and '.'
+  const qp = new TextInput("fangan,meitian jianchi.shuru", {
+    stopOnError: false,
+    forgiveErrors: false,
+    spaceSkipsWords: true,
+    zhQuanpin: true,
+  });
+  for (const ch of "fang") {
+    equal(qp.appendChar(100, ch.codePointAt(0)!, 100), Feedback.Succeeded);
+  }
+  // Garbage then Space clears garbage and skips only "an," to 'm' of "meitian".
+  equal(qp.appendChar(200, X, 100), Feedback.Failed);
+  equal(showChars(qp), "f|a|n|g|*x|[a]|n|,|m|e|i|t|i|a|n| |j|i|a|n|c|h|i|.|s|h|u|r|u");
+  equal(qp.appendChar(300, Space, 100), Feedback.Recovered);
+  equal(qp.pos, 7); // 'm'
+  // clearWord() right after ',' stays at pos 7.
+  equal(qp.clearWord(), Feedback.Succeeded);
+  equal(qp.pos, 7);
+
+  // Space at word start after clearWord() (#typo === true, garbage empty) skips "meitian ".
+  equal(qp.appendChar(400, Space, 100), Feedback.Recovered);
+  equal(qp.pos, 15); // 'j' of "jianchi"
+
+  // Quanpin fuzzy skipAndMatch ("fang " typed "fan ") still beats spaceSkipsWords!
+  const qpFuzzySkip = new TextInput("fang de,fan", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: true,
+    zhQuanpin: true,
+    fuzzy,
+  });
+  for (const ch of "fan de,fan") {
+    equal(
+      qpFuzzySkip.appendChar(100, ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  isTrue(qpFuzzySkip.completed);
+  equal(makeStats(qpFuzzySkip.steps).errors, 0);
+});
+
+test("zh forgiveErrors=true: Quanpin (-n/-ng)+g- boundaries, fuzzy lookahead, and non-double-skip", () => {
+  const fuzzy = {
+    enEng: false,
+    anAng: true,
+    inIng: false,
+    ianIang: false,
+    uanUang: false,
+    zhZ: true,
+    chC: false,
+    shS: false,
+    lN: true,
+    fH: false,
+    rL: false,
+    veUe: false,
+  };
+
+  // 1. "fanggang" typed "vangang": typo 'v' at pos 0, "ang" recovers and preserves pendingBoundaryG (skipG)!
+  const fang = new TextInput("fanggang", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhQuanpin: true,
+    fuzzy,
+  });
+  equal(fang.appendChar(100, "v".codePointAt(0)!, 100), Feedback.Failed);
+  equal(fang.appendChar(200, "a".codePointAt(0)!, 100), Feedback.Failed);
+  equal(fang.appendChar(300, "n".codePointAt(0)!, 100), Feedback.Failed);
+  equal(fang.appendChar(400, "g".codePointAt(0)!, 100), Feedback.Recovered);
+  equal(fang.pos, 4);
+  for (const ch of "ang") {
+    equal(fang.appendChar(500, ch.codePointAt(0)!, 100), Feedback.Succeeded);
+  }
+  isTrue(fang.completed);
+  equal(makeStats(fang.steps).errors, 1);
+  isTrue(makeStats(fang.steps).histogram.validate());
+
+  // 2. "canguan" typed "xangguan": typo 'x' at pos 0, "ang" recovers and preserves pendingBoundaryG (extraG)!
+  const cang = new TextInput("canguan", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhQuanpin: true,
+    fuzzy,
+  });
+  equal(cang.appendChar(100, "x".codePointAt(0)!, 100), Feedback.Failed);
+  equal(cang.appendChar(200, "a".codePointAt(0)!, 100), Feedback.Failed);
+  equal(cang.appendChar(300, "n".codePointAt(0)!, 100), Feedback.Failed);
+  equal(cang.appendChar(400, "g".codePointAt(0)!, 100), Feedback.Recovered);
+  for (const ch of "guan") {
+    equal(cang.appendChar(500, ch.codePointAt(0)!, 100), Feedback.Succeeded);
+  }
+  isTrue(cang.completed);
+  equal(makeStats(cang.steps).errors, 1);
+
+  // 3. "fanggang" typed "fanana" MUST NOT double-skip both 'g's via forgiveErrors + pendingBoundaryG!
+  const noDoubleSkip = new TextInput("fanggang", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhQuanpin: true,
+    fuzzy,
+  });
+  for (const ch of "fan") {
+    equal(
+      noDoubleSkip.appendChar(100, ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  equal(noDoubleSkip.appendChar(200, "a".codePointAt(0)!, 100), Feedback.Failed);
+  equal(noDoubleSkip.appendChar(300, "n".codePointAt(0)!, 100), Feedback.Failed);
+  equal(noDoubleSkip.appendChar(400, "a".codePointAt(0)!, 100), Feedback.Failed);
+  isFalse(noDoubleSkip.completed);
+  equal(noDoubleSkip.pos, 3);
+  // Typing 'g' matches pos=3 ('g') -> pos=4 (second 'g'), NOT skipping both 'g's to completion!
+  equal(
+    noDoubleSkip.appendChar(500, "g".codePointAt(0)!, 100),
+    Feedback.Recovered,
+  );
+  isFalse(noDoubleSkip.completed);
+  equal(noDoubleSkip.pos, 4);
+
+  // 4. Quanpin fuzzy lookahead: substitute (lN), skipAndMatch (zhZ), consumeExtra (zhZ), and clearWord rollback.
+  const qpLookahead = new TextInput("a liang b zhong c ziji", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhQuanpin: true,
+    fuzzy,
+  });
+  // Skip 'a', type " ni" (Space, l->n substitute, 'i') -> recovers!
+  equal(qpLookahead.appendChar(100, Space, 100), Feedback.Succeeded);
+  equal(qpLookahead.appendChar(200, "n".codePointAt(0)!, 100), Feedback.Failed);
+  equal(
+    qpLookahead.appendChar(300, "i".codePointAt(0)!, 100),
+    Feedback.Recovered,
+  );
+  equal(qpLookahead.pos, 4); // "a li"
+  for (const ch of "ang ") {
+    equal(
+      qpLookahead.appendChar(400, ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  // Skip 'b', type " zo" (Space, z->zh skipAndMatch with 'o') -> recovers to pos 13 ("a liang b zho")!
+  equal(qpLookahead.appendChar(500, Space, 100), Feedback.Succeeded);
+  equal(qpLookahead.appendChar(600, "z".codePointAt(0)!, 100), Feedback.Failed);
+  equal(
+    qpLookahead.appendChar(700, "o".codePointAt(0)!, 100),
+    Feedback.Recovered,
+  );
+  equal(qpLookahead.pos, 13);
+  for (const ch of "ng ") {
+    equal(
+      qpLookahead.appendChar(800, ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  // Skip 'c', type " zh" (Space, 'z', consumeExtra 'h') -> recovers to pos 19 ("a liang b zhong c z")!
+  equal(qpLookahead.appendChar(900, Space, 100), Feedback.Succeeded);
+  equal(qpLookahead.appendChar(1000, "z".codePointAt(0)!, 100), Feedback.Failed);
+  equal(
+    qpLookahead.appendChar(1100, "h".codePointAt(0)!, 100),
+    Feedback.Recovered,
+  );
+  equal(qpLookahead.pos, 19);
+  for (const ch of "iji") {
+    equal(
+      qpLookahead.appendChar(1200, ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  isTrue(qpLookahead.completed);
+  // clearWord() after fuzzy recovery rolls back cleanly to before "ziji".
+  equal(qpLookahead.clearWord(), Feedback.Succeeded);
+  equal(qpLookahead.pos, 18);
+
+  // 5. Shuangpin fuzzy lookahead & canonical committedChars + Space-before-recovery + StyledTextSpan cls.
+  const spLookahead = new TextInput("dage vuge", {
+    stopOnError: false,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhShuangpin: true,
+    fuzzy,
+  });
+  for (const ch of "dag") {
+    equal(
+      spLookahead.appendChar(100, ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  // Skip 'e' at pos 3 by typing " zu" (Space -> #ignoredSpace, 'z' -> zhZ fuzzy for 'v', 'u')!
+  equal(spLookahead.appendChar(200, Space, 100), Feedback.Succeeded);
+  equal(spLookahead.appendChar(300, "z".codePointAt(0)!, 100), Feedback.Failed);
+  equal(
+    spLookahead.appendChar(400, "u".codePointAt(0)!, 100),
+    Feedback.Recovered,
+  );
+  equal(spLookahead.pos, 7); // "dage vu"
+  // Committed chars hold canonical 'v' (not 'z') so ZhLines resolves Hanzi properly!
+  equal(showChars(spLookahead), "d|a|g|!e| |v|u|[g]|e");
+  equal(spLookahead.steps[5].codePoint, "v".codePointAt(0));
+  for (const ch of "ge") {
+    equal(
+      spLookahead.appendChar(500, ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  isTrue(spLookahead.completed);
+
+  // Bumping Space at pos 3 then typing 'e' still preserves 0 errors ("ignore the whitespace key").
+  const spBump = new TextInput("dage ykgo", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+    zhShuangpin: true,
+  });
+  for (const ch of "dag") {
+    equal(spBump.appendChar(100, ch.codePointAt(0)!, 100), Feedback.Succeeded);
+  }
+  equal(spBump.appendChar(200, Space, 100), Feedback.Succeeded);
+  equal(spBump.appendChar(300, "e".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(spBump.pos, 4);
+  equal(makeStats(spBump.steps).errors, 0);
+
+  // StyledTextSpan cls + filterText.normalize lookahead preservation.
+  const styled = new TextInput(
+    [
+      { text: "a", cls: "c1" },
+      { text: "‘bc’", cls: "c2" },
+    ],
+    {
+      stopOnError: true,
+      forgiveErrors: true,
+      spaceSkipsWords: false,
+    },
+  );
+  equal(styled.appendChar(100, X, 100), Feedback.Failed);
+  equal(styled.appendChar(200, "'".codePointAt(0)!, 100), Feedback.Failed);
+  equal(styled.appendChar(300, B, 100), Feedback.Failed);
+  equal(styled.appendChar(400, C, 100), Feedback.Recovered);
+  equal(styled.chars[0].cls, "c1");
+  equal(styled.chars[1].codePoint, "‘".codePointAt(0));
+  equal(styled.chars[1].cls, "c2");
+  equal(styled.chars[2].cls, "c2");
+  equal(styled.chars[3].cls, "c2");
+});
+
 test("zh quanpin fuzzy: clearWord snapshot rollback after skip, extra, and boundary state", () => {
   const fuzzy = {
     enEng: false,

@@ -3,6 +3,7 @@ import { type ReactElement } from "react";
 export type ZoomerProps = {
   readonly children: ReactElement<ZoomableProps>;
   readonly id?: string | null;
+  readonly suspended?: boolean;
 };
 
 export type ZoomableProps = {
