@@ -1,4 +1,10 @@
-import { isZhLanguage, isZhQuanpin, type ZhInputScheme } from "@keybr/keyboard";
+import {
+  getZhSchemeFromLayout,
+  isZhLanguage,
+  isZhLayout,
+  isZhQuanpin,
+  type ZhInputScheme,
+} from "@keybr/keyboard";
 import { type LineList, type TextDisplaySettings } from "@keybr/textinput";
 import { type ReactNode } from "react";
 import { TextLines, type TextLineSize } from "./TextLines.tsx";
@@ -24,10 +30,16 @@ export function StaticText({
   readonly scheme?: ZhInputScheme;
 }): ReactNode {
   const isZh =
-    zh ?? (settings?.language != null && isZhLanguage(settings.language));
+    zh ??
+    (settings?.layout != null
+      ? isZhLayout(settings.layout)
+      : settings?.language != null && isZhLanguage(settings.language));
   if (isZh) {
     const resolvedScheme: ZhInputScheme | undefined =
       scheme ??
+      (settings?.layout != null
+        ? getZhSchemeFromLayout(settings.layout)
+        : null) ??
       (settings?.language != null
         ? isZhQuanpin(settings.language)
           ? "zh-qp"

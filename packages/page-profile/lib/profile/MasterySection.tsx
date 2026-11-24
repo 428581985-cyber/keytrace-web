@@ -1,4 +1,8 @@
-import { isZhShuangpin, useKeyboard, ZH_KEY_LABELS } from "@keybr/keyboard";
+import {
+  getZhKeyLabelsForLayout,
+  layoutUsesSemicolon,
+  useKeyboard,
+} from "@keybr/keyboard";
 import { lessonProps, Target } from "@keybr/lesson";
 import { type KeyStatsMap } from "@keybr/result";
 import { useSettings } from "@keybr/settings";
@@ -16,7 +20,8 @@ import { FormattedMessage } from "react-intl";
 // 具体取 bestTimeToType 还是 timeToType，跟随 lesson.guided.recoverKeys 设置，
 // 与练习页选键的判定保持同一口径——否则两处会给出互相矛盾的「掌握」结论。
 
-const ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"] as const;
+const BASE_ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"] as const;
+const SEMICOLON_ROWS = ["qwertyuiop", "asdfghjkl;", "zxcvbnm"] as const;
 
 const COLORS = {
   none: "#3a3a37",
@@ -119,7 +124,10 @@ export function MasterySection({
   const { settings } = useSettings();
   const target = new Target(settings);
   const keyboard = useKeyboard();
-  const showShuangpinLabels = isZhShuangpin(keyboard.layout.language);
+  const zhKeyLabels = getZhKeyLabelsForLayout(keyboard.layout);
+  const rows = layoutUsesSemicolon(keyboard.layout)
+    ? SEMICOLON_ROWS
+    : BASE_ROWS;
   // 判定口径完全照 keybr 的 guided 算法：
   // recoverKeys 关闭（默认）时看 bestConfidence（历史最好成绩），
   // 打开时看 confidence（当前平滑速度）。不自己另发明一套标准。
@@ -135,7 +143,7 @@ export function MasterySection({
       </Figure.Caption>
 
       <div style={styles.root}>
-        {ROWS.map((row) => (
+        {rows.map((row) => (
           <div key={row} style={styles.row}>
             {[...row].map((ch) => {
               const letter = keyStatsMap.letters.find(
@@ -148,9 +156,9 @@ export function MasterySection({
               const confidence = target.confidence(
                 recoverKeys ? stats.timeToType : stats.bestTimeToType,
               );
-              const sound = showShuangpinLabels
-                ? ZH_KEY_LABELS[`Key${ch.toUpperCase()}`]?.join("/")
-                : undefined;
+              const keyId =
+                ch === ";" ? "Semicolon" : `Key${ch.toUpperCase()}`;
+              const sound = zhKeyLabels?.[keyId]?.join("/");
               return (
                 <div key={ch} style={styles.key}>
                   <div style={styles.letter}>{ch.toUpperCase()}</div>

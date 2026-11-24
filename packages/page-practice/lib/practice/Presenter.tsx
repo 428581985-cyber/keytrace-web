@@ -1,6 +1,6 @@
 import {
-  isZhLanguage,
-  isZhQuanpin,
+  getZhSchemeFromLayout,
+  isZhLayout,
   keyboardProps,
   type KeyId,
 } from "@keybr/keyboard";
@@ -93,10 +93,10 @@ export class Presenter extends PureComponent<Props, State> {
       handleTourClose,
     } = this;
 
-    // 中文拼音（小鹤双拼 / 全拼）：交给 ZhLines 按词渲染成汉字
-    const language = state.settings.get(keyboardProps.language);
-    const zh = isZhLanguage(language);
-    const scheme = isZhQuanpin(language) ? "zh-qp" : "zh-sp";
+    // 中文拼音（各双拼方案 / 全拼）：交给 ZhLines 按词渲染成汉字
+    const layout = state.settings.get(keyboardProps.layout);
+    const zh = isZhLayout(layout);
+    const scheme = getZhSchemeFromLayout(layout) ?? "zh-sp";
 
     switch (view) {
       case View.Normal:

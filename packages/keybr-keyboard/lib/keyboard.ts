@@ -5,7 +5,7 @@ import { KeyCombo } from "./keycombo.ts";
 import { KeyModifier } from "./keymodifier.ts";
 import { KeyShape } from "./keyshape.ts";
 import { getExampleLetters, getExampleText } from "./language.ts";
-import { type Layout } from "./layout.ts";
+import { getZhSchemeFromLayout, type Layout } from "./layout.ts";
 import {
   type CharacterDict,
   type DeadCharacter,
@@ -15,6 +15,7 @@ import {
   type ZoneFilter,
   type ZoneId,
 } from "./types.ts";
+import { getZhSchemeExampleText } from "./zhPinyinSchemes.ts";
 
 export class Keyboard {
   readonly characters: ReadonlyMap<KeyId, KeyCharacters>;
@@ -148,6 +149,10 @@ export class Keyboard {
   }
 
   getExampleText(): string {
+    const zhScheme = getZhSchemeFromLayout(this.layout);
+    if (zhScheme != null) {
+      return getZhSchemeExampleText(zhScheme);
+    }
     return getExampleText(this.layout.language);
   }
 

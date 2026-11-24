@@ -1,4 +1,4 @@
-import { isZhLanguage, isZhQuanpin } from "@keybr/keyboard";
+import { getZhSchemeFromLayout, isZhLanguage } from "@keybr/keyboard";
 import { type GuidedLesson } from "@keybr/lesson";
 import { Description, Explainer, FieldSet } from "@keybr/widget";
 import { type ReactNode } from "react";
@@ -24,7 +24,7 @@ export function GuidedLessonSettings({
   // 在这里既不生效也没意义，相关开关全部隐藏，免得看着像一个能调的选项。
   const { language } = lesson.model;
   const isZh = isZhLanguage(language);
-  const zhScheme = isZhQuanpin(language) ? "zh-qp" : "zh-sp";
+  const zhScheme = getZhSchemeFromLayout(lesson.keyboard.layout) ?? "zh-sp";
   return (
     <>
       <Explainer>

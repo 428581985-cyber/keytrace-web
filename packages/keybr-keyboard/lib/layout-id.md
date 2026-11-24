@@ -236,14 +236,14 @@
 - `0xf7`:
 - `0xf8`:
 - `0xf9`:
-- `0xfa`:
-- `0xfb`:
-- `0xfc`:
+- `0xfa`: Chinese (SP)/China (Sogou)
+- `0xfb`: Chinese (SP)/China (Microsoft)
+- `0xfc`: Chinese (SP)/China (Ziranma)
 - `0xfd`: Chinese (QP)/China
 - `0xfe`: Chinese (SP)/China
 - `0xff`:
 
-100 allocated identifiers
+103 allocated identifiers
 
-140 free identifiers
+137 free identifiers
 

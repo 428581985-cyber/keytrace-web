@@ -92,7 +92,15 @@ export type KeyTraceWeakKey = {
   readonly samples: number;
 };
 
-export type KeyTraceLayoutId = "zh-sp" | "zh-qp" | "en-us";
+export type KeyTraceLayoutId =
+  | "zh-sp"
+  | "zh-sp-zrm"
+  | "zh-sp-ms"
+  | "zh-sp-sg"
+  | "zh-qp"
+  | "en-us";
+
+export type ZhKeyTraceLayoutId = Exclude<KeyTraceLayoutId, "en-us">;
 
 export type KeyTraceCorrectionItem = {
   readonly ts: number;
@@ -126,6 +134,9 @@ export type KeyTraceDashboardData = {
   readonly apps: readonly KeyTraceAppEntry[];
   readonly weakKeys: {
     readonly "zh-sp": readonly KeyTraceWeakKey[];
+    readonly "zh-sp-zrm": readonly KeyTraceWeakKey[];
+    readonly "zh-sp-ms": readonly KeyTraceWeakKey[];
+    readonly "zh-sp-sg": readonly KeyTraceWeakKey[];
     readonly "zh-qp": readonly KeyTraceWeakKey[];
     readonly "en-us": readonly KeyTraceWeakKey[];
   };
@@ -184,7 +195,7 @@ type DayFileEntry = {
 
 export function resolveZhLayoutFromIme(
   ime: string | null | undefined,
-): "zh-sp" | "zh-qp" {
+): ZhKeyTraceLayoutId {
   if (typeof ime !== "string") {
     return "zh-sp";
   }
@@ -196,11 +207,28 @@ export function resolveZhLayoutFromIme(
   ) {
     return "zh-qp";
   }
+  if (
+    normalized.includes("ziranma") ||
+    normalized.includes("zrm") ||
+    normalized === "shuangpin/scheme-3"
+  ) {
+    return "zh-sp-zrm";
+  }
+  if (
+    normalized.includes("microsoft") ||
+    normalized.includes("mspy") ||
+    normalized === "shuangpin/scheme-0"
+  ) {
+    return "zh-sp-ms";
+  }
+  if (normalized.includes("sogou")) {
+    return "zh-sp-sg";
+  }
   return "zh-sp";
 }
 
 function isZhKeyTraceLayout(layoutId: KeyTraceLayoutId): boolean {
-  return layoutId === "zh-sp" || layoutId === "zh-qp";
+  return layoutId !== "en-us";
 }
 
 function extractImeFromMeta(event: RawEvent): string | null {
@@ -610,7 +638,7 @@ function detectLegacyLayoutId(cleanText: string): "zh-sp" | "en-us" | null {
 
 function detectLayoutId(
   cleanText: string,
-  zhLayoutId: "zh-sp" | "zh-qp",
+  zhLayoutId: ZhKeyTraceLayoutId,
 ): KeyTraceLayoutId | null {
   if (CJK_RE.test(cleanText)) {
     return zhLayoutId;
@@ -627,6 +655,12 @@ function toEligibleCodePoint(
 ): number | null {
   if (vk >= 65 && vk <= 90) {
     return 97 + (vk - 65);
+  }
+  if (
+    (layoutId === "zh-sp-ms" || layoutId === "zh-sp-sg") &&
+    vk === 186
+  ) {
+    return 0x003b;
   }
   if (layoutId === "en-us" && vk >= 48 && vk <= 57) {
     return vk;
@@ -1000,7 +1034,14 @@ export async function readKeyTraceDashboard(options?: {
       overall: emptySummaryBucket(),
       daily: [],
       apps: [],
-      weakKeys: { "zh-sp": [], "zh-qp": [], "en-us": [] },
+      weakKeys: {
+        "zh-sp": [],
+        "zh-sp-zrm": [],
+        "zh-sp-ms": [],
+        "zh-sp-sg": [],
+        "zh-qp": [],
+        "en-us": [],
+      },
       recentCorrections: [],
       recentCommits: [],
     };
@@ -1295,6 +1336,9 @@ export async function readKeyTraceDashboard(options?: {
     apps,
     weakKeys: {
       "zh-sp": buildWeakKeys(allBuckets, "zh-sp"),
+      "zh-sp-zrm": buildWeakKeys(allBuckets, "zh-sp-zrm"),
+      "zh-sp-ms": buildWeakKeys(allBuckets, "zh-sp-ms"),
+      "zh-sp-sg": buildWeakKeys(allBuckets, "zh-sp-sg"),
       "zh-qp": buildWeakKeys(allBuckets, "zh-qp"),
       "en-us": buildWeakKeys(allBuckets, "en-us"),
     },

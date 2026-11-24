@@ -1,4 +1,9 @@
-import { filterText } from "@keybr/keyboard";
+import {
+  filterText,
+  isZhShuangpinSchemeId,
+  type ZhInputScheme,
+  type ZhShuangpinSchemeId,
+} from "@keybr/keyboard";
 import { type CodePoint } from "@keybr/unicode";
 import {
   Attr,
@@ -51,6 +56,7 @@ export class TextInput {
   readonly spaceSkipsWords: boolean;
   readonly zhShuangpin: boolean;
   readonly zhQuanpin: boolean;
+  readonly zhScheme?: ZhInputScheme;
   readonly fuzzy?: FuzzyPinyinSettings;
   readonly onStep: StepListener;
   readonly #text: string;
@@ -71,6 +77,7 @@ export class TextInput {
       spaceSkipsWords,
       zhShuangpin = false,
       zhQuanpin = false,
+      zhScheme,
       fuzzy,
     }: TextInputSettings,
     onStep: StepListener = () => {},
@@ -81,6 +88,7 @@ export class TextInput {
     this.spaceSkipsWords = spaceSkipsWords;
     this.zhShuangpin = zhShuangpin;
     this.zhQuanpin = zhQuanpin;
+    this.zhScheme = zhScheme;
     this.fuzzy = fuzzy;
     this.onStep = onStep;
     this.#text = flattenStyledText(text);
@@ -270,6 +278,10 @@ export class TextInput {
       }
     }
 
+    const fuzzyScheme: ZhShuangpinSchemeId =
+      this.zhScheme != null && isZhShuangpinSchemeId(this.zhScheme)
+        ? this.zhScheme
+        : "zh-sp";
     const fuzzyMatch =
       this.zhShuangpin &&
       matchesFuzzyShuangpin(
@@ -278,6 +290,7 @@ export class TextInput {
         expected,
         codePoint,
         this.fuzzy,
+        fuzzyScheme,
       );
 
     if (

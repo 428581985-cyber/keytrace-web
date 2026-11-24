@@ -1,4 +1,8 @@
-import { type ZhInputScheme } from "@keybr/keyboard";
+import {
+  getShuangpinScheme,
+  ZH_SHUANGPIN_SCHEMES,
+  type ZhInputScheme,
+} from "@keybr/keyboard";
 import { type BooleanProp, useSettings } from "@keybr/settings";
 import { textInputProps } from "@keybr/textinput";
 import {
@@ -18,19 +22,55 @@ type FuzzyOption = {
   readonly title?: string;
 };
 
-const SHUANGPIN_FINALS_OPTIONS: readonly FuzzyOption[] = [
-  { prop: textInputProps.fuzzy.enEng, label: "en ↔ eng" },
-  { prop: textInputProps.fuzzy.anAng, label: "an ↔ ang" },
-  { prop: textInputProps.fuzzy.inIng, label: "in ↔ ing" },
-  { prop: textInputProps.fuzzy.ianIang, label: "ian ↔ iang" },
-];
+function getShuangpinFinalOptions(scheme: ZhInputScheme): readonly FuzzyOption[] {
+  const def = getShuangpinScheme(scheme) ?? ZH_SHUANGPIN_SCHEMES["zh-sp"];
+  return [
+    {
+      prop: textInputProps.fuzzy.enEng,
+      label: "en ↔ eng",
+      title: `${def.finals.en} ↔ ${def.finals.eng}`,
+    },
+    {
+      prop: textInputProps.fuzzy.anAng,
+      label: "an ↔ ang",
+      title: `${def.finals.an} ↔ ${def.finals.ang}`,
+    },
+    {
+      prop: textInputProps.fuzzy.inIng,
+      label: "in ↔ ing",
+      title: `${def.finals.in} ↔ ${def.finals.ing}`,
+    },
+    {
+      prop: textInputProps.fuzzy.ianIang,
+      label: "ian ↔ iang",
+      title: `${def.finals.ian} ↔ ${def.finals.iang}`,
+    },
+  ];
+}
 
-const SHUANGPIN_INITIALS_OPTIONS: readonly FuzzyOption[] = [
-  { prop: textInputProps.fuzzy.zhZ, label: "zh ↔ z" },
-  { prop: textInputProps.fuzzy.chC, label: "ch ↔ c" },
-  { prop: textInputProps.fuzzy.shS, label: "sh ↔ s" },
-  { prop: textInputProps.fuzzy.lN, label: "l ↔ n" },
-];
+function getShuangpinInitialOptions(
+  scheme: ZhInputScheme,
+): readonly FuzzyOption[] {
+  const def = getShuangpinScheme(scheme) ?? ZH_SHUANGPIN_SCHEMES["zh-sp"];
+  return [
+    {
+      prop: textInputProps.fuzzy.zhZ,
+      label: "zh ↔ z",
+      title: `${def.initials.zh} ↔ z`,
+    },
+    {
+      prop: textInputProps.fuzzy.chC,
+      label: "ch ↔ c",
+      title: `${def.initials.ch} ↔ c`,
+    },
+    {
+      prop: textInputProps.fuzzy.shS,
+      label: "sh ↔ s",
+      title: `${def.initials.sh} ↔ s`,
+    },
+    { prop: textInputProps.fuzzy.lN, label: "l ↔ n", title: "l ↔ n" },
+  ];
+}
 
 const QUANPIN_RETROFLEX_OPTIONS: readonly FuzzyOption[] = [
   { prop: textInputProps.fuzzy.zhZ, label: "zh ↔ z" },
@@ -179,9 +219,9 @@ export function FuzzyPinyinProp({
             defaultMessage="Fuzzy pinyin:"
           />
         }
-        options={SHUANGPIN_FINALS_OPTIONS}
+        options={getShuangpinFinalOptions(scheme)}
       />
-      <FuzzyOptionRow options={SHUANGPIN_INITIALS_OPTIONS} />
+      <FuzzyOptionRow options={getShuangpinInitialOptions(scheme)} />
       <Explainer>
         <Description>
           <FormattedMessage

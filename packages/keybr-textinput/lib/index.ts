@@ -7,3 +7,4 @@ export * from "./settings.ts";
 export * from "./stats.ts";
 export * from "./textinput.ts";
 export * from "./zh-quanpin-lexicon.ts";
+export * from "./zh-shuangpin-lexicon.ts";

@@ -6,6 +6,7 @@ import {
   loadKeyboard,
   useFormattedNames,
 } from "@keybr/keyboard";
+import { getLayoutLetters } from "@keybr/lesson";
 import { Letter } from "@keybr/phonetic-model";
 import { PhoneticModelLoader } from "@keybr/phonetic-model-loader";
 import {
@@ -111,7 +112,10 @@ export function ResultGrouper({
               case "letters":
                 return children(
                   makeKeyStatsMap(
-                    Letter.restrict(letters, keyboard.getCodePoints()),
+                    Letter.restrict(
+                      getLayoutLetters(selectedLayout, letters),
+                      keyboard.getCodePoints(),
+                    ),
                     group,
                   ),
                 );

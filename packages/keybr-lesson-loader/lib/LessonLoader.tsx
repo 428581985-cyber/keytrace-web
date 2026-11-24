@@ -1,7 +1,11 @@
 import { loadContent } from "@keybr/content-books";
 import { loadWordList } from "@keybr/content-words";
 import { catchError } from "@keybr/debug";
-import { KeyboardOptions, useKeyboard } from "@keybr/keyboard";
+import {
+  isZhShuangpinSchemeId,
+  KeyboardOptions,
+  useKeyboard,
+} from "@keybr/keyboard";
 import {
   BooksLesson,
   CodeLesson,
@@ -17,6 +21,7 @@ import { LoadingProgress } from "@keybr/pages-shared";
 import { type PhoneticModel } from "@keybr/phonetic-model";
 import { PhoneticModelLoader } from "@keybr/phonetic-model-loader";
 import { useSettings } from "@keybr/settings";
+import { getShuangpinWordList } from "@keybr/textinput";
 import { type ReactNode, useEffect, useState } from "react";
 
 export function LessonLoader({
@@ -28,11 +33,15 @@ export function LessonLoader({
 }): ReactNode {
   const { settings } = useSettings();
   const lessonType = settings.get(lessonProps.type);
-  const { language } = KeyboardOptions.from(settings);
+  const { language, layout } = KeyboardOptions.from(settings);
   return (
     <PhoneticModelLoader language={language}>
       {(model) => (
-        <Loader key={lessonType.id} model={model} fallback={fallback}>
+        <Loader
+          key={`${lessonType.id}:${layout.id}`}
+          model={model}
+          fallback={fallback}
+        >
           {children}
         </Loader>
       )}
@@ -68,16 +77,22 @@ function useLoader(model: PhoneticModel): Lesson | null {
     const load = async (): Promise<void> => {
       switch (settings.get(lessonProps.type)) {
         case LessonType.GUIDED: {
-          const { language } = KeyboardOptions.from(settings);
-          const wordList = await loadWordList(language);
+          const { language, layout } = KeyboardOptions.from(settings);
+          const wordList =
+            isZhShuangpinSchemeId(layout.id) && layout.id !== "zh-sp"
+              ? getShuangpinWordList(layout.id)
+              : await loadWordList(language);
           if (!didCancel) {
             setResult(new GuidedLesson(settings, keyboard, model, wordList));
           }
           break;
         }
         case LessonType.WORDLIST: {
-          const { language } = KeyboardOptions.from(settings);
-          const wordList = await loadWordList(language);
+          const { language, layout } = KeyboardOptions.from(settings);
+          const wordList =
+            isZhShuangpinSchemeId(layout.id) && layout.id !== "zh-sp"
+              ? getShuangpinWordList(layout.id)
+              : await loadWordList(language);
           if (!didCancel) {
             setResult(new WordListLesson(settings, keyboard, model, wordList));
           }

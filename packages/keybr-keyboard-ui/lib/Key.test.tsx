@@ -1,7 +1,7 @@
 import { test } from "node:test";
-import { KeyShape, Language } from "@keybr/keyboard";
+import { KeyShape, Language, Layout } from "@keybr/keyboard";
 import { render } from "@testing-library/react";
-import { equal } from "rich-assert";
+import { equal, isTrue } from "rich-assert";
 import { makeKeyComponent } from "./Key.tsx";
 
 test("static labels", () => {
@@ -195,4 +195,27 @@ test("space", () => {
   equal(r.container.querySelectorAll('[data-key="my-key"]').length, 1);
 
   r.unmount();
+});
+
+test("zh Shuangpin layout labels including Microsoft Semicolon and Quanpin exclusion", () => {
+  const semicolonShape = new KeyShape(
+    "Semicolon",
+    { x: 0, y: 0, w: 1, h: 1 },
+    [0x003b, 0x003a],
+  );
+  const MsSemiKey = makeKeyComponent(Layout.ZH_SP_MS, semicolonShape);
+  const rMs = render(<MsSemiKey />);
+  equal(rMs.container.textContent, ";ing");
+  rMs.unmount();
+
+  const XiaoheSemiKey = makeKeyComponent(Layout.ZH_SP, semicolonShape);
+  const rSp = render(<XiaoheSemiKey />);
+  equal(rSp.container.textContent, ";:");
+  rSp.unmount();
+
+  const kShape = new KeyShape("KeyK", { x: 0, y: 0, w: 1, h: 1 }, [0x006b, 0x004b]);
+  const QpKKey = makeKeyComponent(Layout.ZH_QP, kShape);
+  const rQp = render(<QpKKey />);
+  isTrue(!rQp.container.textContent?.includes("ing"));
+  rQp.unmount();
 });

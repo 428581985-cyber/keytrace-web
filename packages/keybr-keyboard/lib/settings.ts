@@ -6,8 +6,8 @@ import {
   xitemProp,
 } from "@keybr/settings";
 import { Geometry, ZoneMod } from "./geometry.ts";
-import { Language } from "./language.ts";
-import { Layout } from "./layout.ts";
+import { isZhLanguage, isZhQuanpin, Language } from "./language.ts";
+import { isZhLayout, Layout, ZH_SCHEME_LAYOUTS } from "./layout.ts";
 import { nullMod } from "./mod.ts";
 
 export enum Emulation {
@@ -31,6 +31,7 @@ export enum Emulation {
 export const keyboardProps = {
   language: itemProp("keyboard.language", Language.ALL, Language.EN),
   layout: xitemProp("keyboard.layout", Layout.ALL, Layout.EN_US),
+  zhScheme: xitemProp("keyboard.zhScheme", ZH_SCHEME_LAYOUTS, Layout.ZH_SP),
   geometry: itemProp("keyboard.geometry", Geometry.ALL, Geometry.ANSI_101),
   zones: itemProp("keyboard.zones", ZoneMod.ALL, ZoneMod.STANDARD),
   emulation: enumProp("keyboard.emulation", Emulation, Emulation.Forward),
@@ -176,4 +177,52 @@ export class KeyboardOptions {
       .set(keyboardProps.geometry, this.#geometry)
       .set(keyboardProps.zones, this.#zones);
   }
+}
+
+export function resolveZhScheme(settings: Settings): Layout {
+  const current = KeyboardOptions.from(settings);
+  const fallback = isZhLayout(current.layout)
+    ? current.layout
+    : isZhQuanpin(current.language)
+      ? Layout.ZH_QP
+      : Layout.ZH_SP;
+  return settings.get(keyboardProps.zhScheme, fallback);
+}
+
+export function switchPracticeLanguage(
+  settings: Settings,
+  target: "zh" | "en",
+): Settings {
+  const current = KeyboardOptions.from(settings);
+  const zhLayout = resolveZhScheme(settings);
+  const next = settings.set(keyboardProps.zhScheme, zhLayout);
+  if (target === "zh") {
+    return current
+      .withLanguage(zhLayout.language)
+      .withLayout(zhLayout)
+      .withGeometry(current.geometry)
+      .withZones(current.zones)
+      .save(next);
+  }
+  return current
+    .withLanguage(Language.EN)
+    .withLayout(Layout.EN_US)
+    .withGeometry(current.geometry)
+    .withZones(current.zones)
+    .save(next);
+}
+
+export function setZhScheme(settings: Settings, schemeLayout: Layout): Settings {
+  const targetLayout = ZH_SCHEME_LAYOUTS.get(schemeLayout.id, Layout.ZH_SP);
+  const next = settings.set(keyboardProps.zhScheme, targetLayout);
+  const current = KeyboardOptions.from(next);
+  if (isZhLanguage(current.language) || isZhLayout(current.layout)) {
+    return current
+      .withLanguage(targetLayout.language)
+      .withLayout(targetLayout)
+      .withGeometry(current.geometry)
+      .withZones(current.zones)
+      .save(next);
+  }
+  return next;
 }

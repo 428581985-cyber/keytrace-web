@@ -2,6 +2,7 @@ import { Enum, XEnum, type XEnumItem } from "@keybr/lang";
 import { Geometry } from "./geometry.ts";
 import { Language } from "./language.ts";
 import { angleMod, angleWideMod, type Mod, nullMod } from "./mod.ts";
+import { getShuangpinScheme, type ZhSchemeId } from "./zhPinyinSchemes.ts";
 
 export class Layout implements XEnumItem {
   static custom(language: Language) {
@@ -35,7 +36,52 @@ export class Layout implements XEnumItem {
     /* id= */ "zh-sp",
     /* xid= */ 0xfe,
     /* name= */ "{CN}",
-    /* family= */ "qwerty",
+    /* family= */ "zh-sp",
+    /* language= */ Language.ZH_SP,
+    /* emulate= */ false,
+    /* geometries= */ new Enum(
+      Geometry.ANSI_101,
+      Geometry.ANSI_101_FULL,
+      Geometry.ISO_102,
+      Geometry.ISO_102_FULL,
+      Geometry.MATRIX,
+    ),
+  );
+  static readonly ZH_SP_ZRM = new Layout(
+    /* id= */ "zh-sp-zrm",
+    /* xid= */ 0xfc,
+    /* name= */ "{CN} (Ziranma)",
+    /* family= */ "zh-sp-zrm",
+    /* language= */ Language.ZH_SP,
+    /* emulate= */ false,
+    /* geometries= */ new Enum(
+      Geometry.ANSI_101,
+      Geometry.ANSI_101_FULL,
+      Geometry.ISO_102,
+      Geometry.ISO_102_FULL,
+      Geometry.MATRIX,
+    ),
+  );
+  static readonly ZH_SP_MS = new Layout(
+    /* id= */ "zh-sp-ms",
+    /* xid= */ 0xfb,
+    /* name= */ "{CN} (Microsoft)",
+    /* family= */ "zh-sp-ms",
+    /* language= */ Language.ZH_SP,
+    /* emulate= */ false,
+    /* geometries= */ new Enum(
+      Geometry.ANSI_101,
+      Geometry.ANSI_101_FULL,
+      Geometry.ISO_102,
+      Geometry.ISO_102_FULL,
+      Geometry.MATRIX,
+    ),
+  );
+  static readonly ZH_SP_SG = new Layout(
+    /* id= */ "zh-sp-sg",
+    /* xid= */ 0xfa,
+    /* name= */ "{CN} (Sogou)",
+    /* family= */ "zh-sp-sg",
     /* language= */ Language.ZH_SP,
     /* emulate= */ false,
     /* geometries= */ new Enum(
@@ -50,7 +96,7 @@ export class Layout implements XEnumItem {
     /* id= */ "zh-qp",
     /* xid= */ 0xfd,
     /* name= */ "{CN}",
-    /* family= */ "qwerty",
+    /* family= */ "zh-qp",
     /* language= */ Language.ZH_QP,
     /* emulate= */ false,
     /* geometries= */ new Enum(
@@ -1441,6 +1487,9 @@ export class Layout implements XEnumItem {
 
   static readonly ALL = new XEnum<Layout>(
     Layout.ZH_SP,
+    Layout.ZH_SP_ZRM,
+    Layout.ZH_SP_MS,
+    Layout.ZH_SP_SG,
     Layout.ZH_QP,
     Layout.EN_US,
     Layout.EN_DVORAK,
@@ -1609,4 +1658,49 @@ export class Layout implements XEnumItem {
   toJSON() {
     return this.id;
   }
+}
+
+export const ZH_SCHEME_LAYOUTS = new XEnum<Layout>(
+  Layout.ZH_SP,
+  Layout.ZH_SP_ZRM,
+  Layout.ZH_SP_MS,
+  Layout.ZH_SP_SG,
+  Layout.ZH_QP,
+);
+
+export function getZhSchemeFromLayout(layout: Layout): ZhSchemeId | null {
+  switch (layout.id) {
+    case "zh-sp":
+    case "zh-sp-zrm":
+    case "zh-sp-ms":
+    case "zh-sp-sg":
+    case "zh-qp":
+      return layout.id;
+    default:
+      if (layout.language.id === "zh-sp") {
+        return "zh-sp";
+      }
+      if (layout.language.id === "zh-qp") {
+        return "zh-qp";
+      }
+      return null;
+  }
+}
+
+export function isZhLayout(layout: Layout): boolean {
+  return getZhSchemeFromLayout(layout) != null;
+}
+
+export function isZhShuangpinLayout(layout: Layout): boolean {
+  const scheme = getZhSchemeFromLayout(layout);
+  return scheme != null && scheme !== "zh-qp";
+}
+
+export function isZhQuanpinLayout(layout: Layout): boolean {
+  return getZhSchemeFromLayout(layout) === "zh-qp";
+}
+
+export function layoutUsesSemicolon(layout: Layout): boolean {
+  const scheme = getShuangpinScheme(layout.id);
+  return scheme?.usesSemicolon === true;
 }

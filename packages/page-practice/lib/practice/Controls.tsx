@@ -1,4 +1,11 @@
 import { Dir } from "@keybr/intl";
+import {
+  isZhLanguage,
+  KeyboardOptions,
+  resolveZhScheme,
+  switchPracticeLanguage,
+  useFormattedNames,
+} from "@keybr/keyboard";
 import { names } from "@keybr/lesson-ui";
 import { useSettings } from "@keybr/settings";
 import { Button, Icon, IconButton, useView } from "@keybr/widget";
@@ -9,6 +16,7 @@ import {
   mdiRedo,
   mdiUndo,
 } from "@mdi/js";
+import { clsx } from "clsx";
 import { memo, type ReactNode } from "react";
 import { useIntl } from "react-intl";
 import { views } from "../views.tsx";
@@ -26,10 +34,70 @@ export const Controls = memo(function Controls({
   readonly onHelp: () => void;
 }): ReactNode {
   const { formatMessage } = useIntl();
-  const { settings } = useSettings();
+  const { settings, updateSettings } = useSettings();
   const { setView } = useView(views);
+  const { formatZhSchemeName } = useFormattedNames();
+  const isZh = isZhLanguage(KeyboardOptions.from(settings).language);
+  const zhScheme = resolveZhScheme(settings);
+  const zhSchemeName = formatZhSchemeName(zhScheme);
+
   return (
     <div id={names.controls} className={styles.controls}>
+      <div className={styles.langToggle} role="group">
+        <button
+          type="button"
+          className={clsx(
+            styles.langButton,
+            isZh && styles.langButtonActive,
+          )}
+          aria-pressed={isZh}
+          title={formatMessage(
+            {
+              id: "practice.controls.lang.switchToZh",
+              defaultMessage: "Switch to Chinese ({scheme})",
+            },
+            { scheme: zhSchemeName },
+          )}
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          onClick={() => {
+            if (!isZh) {
+              updateSettings(switchPracticeLanguage(settings, "zh"));
+            }
+          }}
+        >
+          {formatMessage({
+            id: "practice.controls.lang.zh",
+            defaultMessage: "ZH",
+          })}
+        </button>
+        <button
+          type="button"
+          className={clsx(
+            styles.langButton,
+            !isZh && styles.langButtonActive,
+          )}
+          aria-pressed={!isZh}
+          title={formatMessage({
+            id: "practice.controls.lang.switchToEn",
+            defaultMessage: "Switch to English",
+          })}
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          onClick={() => {
+            if (isZh) {
+              updateSettings(switchPracticeLanguage(settings, "en"));
+            }
+          }}
+        >
+          {formatMessage({
+            id: "practice.controls.lang.en",
+            defaultMessage: "EN",
+          })}
+        </button>
+      </div>
       <IconButton
         icon={<Icon shape={mdiHelpCircleOutline} />}
         title={formatMessage({

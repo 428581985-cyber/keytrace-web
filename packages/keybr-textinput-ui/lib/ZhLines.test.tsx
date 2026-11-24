@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { FakeIntlProvider } from "@keybr/intl";
-import { Language } from "@keybr/keyboard";
+import { Language, Layout } from "@keybr/keyboard";
 import { Settings } from "@keybr/settings";
 import {
   CaretMovementStyle,
@@ -624,6 +624,57 @@ test("TextArea with zh and zh-qp keeps Show Pinyin checkbox synced with rendered
       window.localStorage.removeItem("keytrace.zh-qp.showCode");
     } else {
       window.localStorage.setItem("keytrace.zh-qp.showCode", prevQp);
+    }
+  }
+});
+
+test("ZhLines renders Microsoft Shuangpin (; = ing) words without splitting on semicolon", () => {
+  const prevMs = window.localStorage.getItem("keytrace.zh-sp-ms.showCode");
+  window.localStorage.removeItem("keytrace.zh-sp-ms.showCode");
+  try {
+    const ti = new TextInput(
+      "jnx; mztm.",
+      toTextInputSettings(new Settings()),
+    );
+    const r = render(
+      <FakeIntlProvider>
+        <ZhLines
+          settings={{
+            ...textDisplaySettings,
+            language: Language.ZH_SP,
+            layout: Layout.ZH_SP_MS,
+          }}
+          lines={ti.lines}
+          focus={true}
+          showToggle={true}
+          cursor={false}
+        />
+      </FakeIntlProvider>,
+    );
+
+    const root = r.container.querySelector<HTMLElement>("[data-scheme]");
+    isNotNull(root);
+    equal(root.dataset.scheme, "zh-sp-ms");
+
+    const hanziText = [
+      ...r.container.querySelectorAll<HTMLElement>("[data-hanzi='1']"),
+    ]
+      .map((el) => el.textContent ?? "")
+      .join("");
+    equal(hanziText, "进行每天。");
+
+    const codes = [
+      ...r.container.querySelectorAll<HTMLElement>("[data-code='1']"),
+    ].map((el) => el.textContent ?? "");
+    equal(codes[0], "jn");
+    equal(codes[1], "x;");
+
+    r.unmount();
+  } finally {
+    if (prevMs == null) {
+      window.localStorage.removeItem("keytrace.zh-sp-ms.showCode");
+    } else {
+      window.localStorage.setItem("keytrace.zh-sp-ms.showCode", prevMs);
     }
   }
 });

@@ -1,13 +1,15 @@
 import {
   Geometry,
   isZhLanguage,
-  isZhQuanpin,
   KeyboardOptions,
   keyboardProps,
   Language,
+  Layout,
+  resolveZhScheme,
+  setZhScheme,
+  switchPracticeLanguage,
   useFormattedNames,
   useKeyboard,
-  type ZhInputScheme,
   ZoneMod,
 } from "@keybr/keyboard";
 import { KeyLayer, PointersLayer, VirtualKeyboard } from "@keybr/keyboard-ui";
@@ -23,14 +25,7 @@ import {
   FieldSet,
   OptionList,
 } from "@keybr/widget";
-import {
-  memo,
-  type ReactNode,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, type ReactNode, useEffect, useMemo, useState } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 
 export function KeyboardSettings(): ReactNode {
@@ -64,17 +59,7 @@ function LayoutProp(): ReactNode {
   const { settings, updateSettings } = useSettings();
   const options = KeyboardOptions.from(settings);
   const isZh = isZhLanguage(options.language);
-  const lastZhSchemeRef = useRef<ZhInputScheme>(
-    isZhQuanpin(options.language) ? "zh-qp" : "zh-sp",
-  );
-
-  useEffect(() => {
-    if (isZh) {
-      lastZhSchemeRef.current = isZhQuanpin(options.language)
-        ? "zh-qp"
-        : "zh-sp";
-    }
-  }, [isZh, options.language]);
+  const zhScheme = resolveZhScheme(settings);
 
   const languageOptions = [
     {
@@ -101,14 +86,35 @@ function LayoutProp(): ReactNode {
 
   const schemeOptions = [
     {
-      value: Language.ZH_SP.id,
+      value: Layout.ZH_SP.id,
       name: formatMessage({
         id: "settings.keyboard.scheme.shuangpin",
         defaultMessage: "Xiaohe Shuangpin",
       }),
     },
     {
-      value: Language.ZH_QP.id,
+      value: Layout.ZH_SP_ZRM.id,
+      name: formatMessage({
+        id: "settings.keyboard.scheme.ziranma",
+        defaultMessage: "Ziranma Shuangpin",
+      }),
+    },
+    {
+      value: Layout.ZH_SP_MS.id,
+      name: formatMessage({
+        id: "settings.keyboard.scheme.microsoft",
+        defaultMessage: "Microsoft Shuangpin",
+      }),
+    },
+    {
+      value: Layout.ZH_SP_SG.id,
+      name: formatMessage({
+        id: "settings.keyboard.scheme.sogou",
+        defaultMessage: "Sogou Shuangpin",
+      }),
+    },
+    {
+      value: Layout.ZH_QP.id,
       name: formatMessage({
         id: "settings.keyboard.scheme.quanpin",
         defaultMessage: "Full Pinyin",
@@ -116,63 +122,60 @@ function LayoutProp(): ReactNode {
     },
   ];
 
-  const selectLanguage = (language: Language) => {
-    updateSettings(
-      options
-        .withLanguage(language)
-        .withGeometry(options.geometry)
-        .withZones(options.zones)
-        .save(settings),
-    );
-  };
-
   return (
-    <FieldList>
-      <Field>
-        <FormattedMessage id="t_Language:" defaultMessage="Language:" />
-      </Field>
-      <Field>
-        <OptionList
-          options={languageOptions}
-          value={isZh ? "zh" : options.language.id}
-          onSelect={(value) => {
-            if (value === "zh") {
-              selectLanguage(
-                lastZhSchemeRef.current === "zh-qp"
-                  ? Language.ZH_QP
-                  : Language.ZH_SP,
-              );
-            } else {
-              selectLanguage(Language.ALL.get(value));
-            }
-          }}
-        />
-      </Field>
-      {isZh ? (
-        <>
-          <Field>
-            <FormattedMessage
-              id="settings.keyboard.scheme.label"
-              defaultMessage="Input scheme:"
-            />
-          </Field>
-          <Field>
-            <OptionList
-              options={schemeOptions}
-              value={options.language.id}
-              onSelect={(value) => {
-                const nextScheme: ZhInputScheme =
-                  value === Language.ZH_QP.id ? "zh-qp" : "zh-sp";
-                lastZhSchemeRef.current = nextScheme;
-                selectLanguage(
-                  nextScheme === "zh-qp" ? Language.ZH_QP : Language.ZH_SP,
+    <>
+      <FieldList>
+        <Field>
+          <FormattedMessage id="t_Language:" defaultMessage="Language:" />
+        </Field>
+        <Field>
+          <OptionList
+            options={languageOptions}
+            value={isZh ? "zh" : options.language.id}
+            onSelect={(value) => {
+              if (value === "zh") {
+                updateSettings(switchPracticeLanguage(settings, "zh"));
+              } else if (value === Language.EN.id) {
+                updateSettings(switchPracticeLanguage(settings, "en"));
+              } else {
+                updateSettings(
+                  options
+                    .withLanguage(Language.ALL.get(value))
+                    .withGeometry(options.geometry)
+                    .withZones(options.zones)
+                    .save(settings),
                 );
-              }}
+              }
+            }}
+          />
+        </Field>
+        <Field>
+          <FormattedMessage
+            id="settings.keyboard.scheme.label"
+            defaultMessage="Chinese input scheme:"
+          />
+        </Field>
+        <Field>
+          <OptionList
+            options={schemeOptions}
+            value={zhScheme.id}
+            onSelect={(value) => {
+              updateSettings(setZhScheme(settings, Layout.ALL.get(value)));
+            }}
+          />
+        </Field>
+      </FieldList>
+      {!isZh ? (
+        <Explainer>
+          <Description>
+            <FormattedMessage
+              id="settings.keyboard.scheme.hintWhenEn"
+              defaultMessage="Currently practicing English; this scheme will be used when switching to Chinese."
             />
-          </Field>
-        </>
+          </Description>
+        </Explainer>
       ) : null}
-    </FieldList>
+    </>
   );
 }
 

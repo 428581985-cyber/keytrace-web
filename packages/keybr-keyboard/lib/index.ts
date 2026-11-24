@@ -16,3 +16,4 @@ export * from "./stats.ts";
 export * from "./types.ts";
 export * from "./use-formatted-names.ts";
 export * from "./zhKeyLabels.ts";
+export * from "./zhPinyinSchemes.ts";

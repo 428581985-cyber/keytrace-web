@@ -1,8 +1,11 @@
 import {
+  getZhSchemeFromLayout,
   isZhQuanpin,
   isZhShuangpin,
   KeyboardOptions,
   Language,
+  type Layout,
+  type ZhInputScheme,
 } from "@keybr/keyboard";
 import {
   booleanProp,
@@ -63,6 +66,10 @@ export type TextInputSettings = {
    * Whether Chinese Quanpin (Full Pinyin) mode is active.
    */
   readonly zhQuanpin?: boolean;
+  /**
+   * Active Chinese input scheme layout id.
+   */
+  readonly zhScheme?: ZhInputScheme;
 };
 
 export const textInputSettings = {
@@ -92,13 +99,14 @@ export const textInputProps = {
 } as const;
 
 export function toTextInputSettings(settings: Settings): TextInputSettings {
-  const { language } = KeyboardOptions.from(settings);
+  const { language, layout } = KeyboardOptions.from(settings);
   return {
     stopOnError: settings.get(textInputProps.stopOnError),
     forgiveErrors: settings.get(textInputProps.forgiveErrors),
     spaceSkipsWords: settings.get(textInputProps.spaceSkipsWords),
     zhShuangpin: isZhShuangpin(language),
     zhQuanpin: isZhQuanpin(language),
+    zhScheme: getZhSchemeFromLayout(layout) ?? undefined,
     fuzzy: {
       enEng: settings.get(textInputProps.fuzzy.enEng),
       anAng: settings.get(textInputProps.fuzzy.anAng),
@@ -122,6 +130,7 @@ export type TextDisplaySettings = {
   readonly caretMovementStyle: CaretMovementStyle;
   readonly whitespaceStyle: WhitespaceStyle;
   readonly language: Language;
+  readonly layout?: Layout;
 };
 
 export enum CaretShapeStyle {
@@ -173,7 +182,7 @@ export function toTextDisplaySettings(settings: Settings): TextDisplaySettings {
   const caretShapeStyle = settings.get(textDisplayProps.caretShapeStyle);
   const caretMovementStyle = settings.get(textDisplayProps.caretMovementStyle);
   const whitespaceStyle = settings.get(textDisplayProps.whitespaceStyle);
-  const { language } = KeyboardOptions.from(settings);
+  const { language, layout } = KeyboardOptions.from(settings);
   const fonts = Font.select(language);
   const font = Font.find(fonts, settings.get(textDisplayProps.font));
   return {
@@ -182,5 +191,6 @@ export function toTextDisplaySettings(settings: Settings): TextDisplaySettings {
     caretMovementStyle,
     whitespaceStyle,
     language,
+    layout,
   };
 }

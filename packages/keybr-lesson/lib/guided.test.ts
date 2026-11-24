@@ -1067,3 +1067,35 @@ describe("zh-qp guided lesson", () => {
     equal(/ /.test(textHalf), true);
   });
 });
+
+describe("zh-sp-ms semicolon key integration", () => {
+  it("includes semicolon in letters, targets it as weakest key, and isolates localStorage", () => {
+    withMockLocalStorage((store) => {
+      const keyboard = loadKeyboard(Layout.ZH_SP_MS);
+      const model = makeFullAlphabetZhModel(keyboard.layout.language);
+      const words = ["jnx;", "mztm", "tiug", "dax;"];
+      const settings = new Settings().set(lessonProps.guided.recoverKeys, false);
+      const lesson = new GuidedLesson(settings, keyboard, model, words);
+
+      const hasSemicolon = lesson.letters.some((l) => l.codePoint === 0x003b);
+      equal(hasSemicolon, true);
+
+      const stats = fakeKeyStatsMap(
+        settings,
+        lesson.letters.map((letter) => {
+          const isSemi = letter.codePoint === 0x003b;
+          return [letter, isSemi ? 0.25 : 1.2, isSemi ? 0.25 : 1.2];
+        }),
+      );
+      const keys = lesson.update(stats);
+      equal(keys.findFocusedKey()?.letter.codePoint, 0x003b);
+      equal(store.get("keybr.zh-sp-ms.lockedFocusKey"), ";");
+      equal(store.get("keybr.zh.lockedFocusKey"), undefined);
+
+      const generated = lesson.generate(keys, LCG(7));
+      const drawn = generated.split(/[ ,.]+/).filter(Boolean);
+      equal(drawn.length > 0, true);
+      equal(drawn.every((w) => w.includes(";")), true);
+    });
+  });
+});

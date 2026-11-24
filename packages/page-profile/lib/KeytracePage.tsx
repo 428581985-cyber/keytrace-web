@@ -1,9 +1,14 @@
 import {
+  isZhLanguage,
   KeyboardOptions,
   keyboardProps,
-  Language,
   Layout,
+  resolveZhScheme,
+  setZhScheme,
+  switchPracticeLanguage,
+  useFormattedNames,
 } from "@keybr/keyboard";
+import { getZhFocusStorageKeys } from "@keybr/lesson";
 import { useFormatter } from "@keybr/lesson-ui";
 import { Pages, Screen } from "@keybr/pages-shared";
 import { useResults } from "@keybr/result";
@@ -76,7 +81,24 @@ type KeyTraceWeakKey = {
   readonly samples: number;
 };
 
-type KeyTraceLayoutId = "zh-sp" | "zh-qp" | "en-us";
+type KeyTraceLayoutId =
+  | "zh-sp"
+  | "zh-sp-zrm"
+  | "zh-sp-ms"
+  | "zh-sp-sg"
+  | "zh-qp"
+  | "en-us";
+
+type ZhKeyTraceLayoutId = Exclude<KeyTraceLayoutId, "en-us">;
+type WeakKeyLangTab = "zh" | "en";
+
+const ZH_LAYOUT_IDS: readonly ZhKeyTraceLayoutId[] = [
+  "zh-sp",
+  "zh-sp-zrm",
+  "zh-sp-ms",
+  "zh-sp-sg",
+  "zh-qp",
+];
 
 type KeyTraceCorrectionItem = {
   readonly ts: number;
@@ -110,6 +132,9 @@ type KeyTraceDashboardData = {
   readonly apps: readonly KeyTraceAppEntry[];
   readonly weakKeys: {
     readonly "zh-sp": readonly KeyTraceWeakKey[];
+    readonly "zh-sp-zrm": readonly KeyTraceWeakKey[];
+    readonly "zh-sp-ms": readonly KeyTraceWeakKey[];
+    readonly "zh-sp-sg": readonly KeyTraceWeakKey[];
     readonly "zh-qp": readonly KeyTraceWeakKey[];
     readonly "en-us": readonly KeyTraceWeakKey[];
   };
@@ -117,35 +142,32 @@ type KeyTraceDashboardData = {
   readonly recentCommits: readonly KeyTraceCommitItem[];
 };
 
-const ZH_SP_LOCKED_FOCUS_KEY = "keybr.zh.lockedFocusKey";
-const ZH_SP_DRILL_OVERRIDE_KEY = "keybr.zh.drillFocusKey";
-const ZH_QP_LOCKED_FOCUS_KEY = "keybr.zh-qp.lockedFocusKey";
-const ZH_QP_DRILL_OVERRIDE_KEY = "keybr.zh-qp.drillFocusKey";
+function hasAnyZhWeakKeys(
+  weakKeys: KeyTraceDashboardData["weakKeys"],
+): boolean {
+  return ZH_LAYOUT_IDS.some((id) => (weakKeys[id]?.length ?? 0) > 0);
+}
 
 function pickAutoKeyTab(
-  current: KeyTraceLayoutId,
+  current: WeakKeyLangTab,
+  zhLayoutId: ZhKeyTraceLayoutId,
   dashboard: KeyTraceDashboardData,
-): KeyTraceLayoutId {
-  if ((dashboard.weakKeys[current]?.length ?? 0) > 0) {
+): WeakKeyLangTab {
+  const hasCurrent =
+    current === "zh"
+      ? (dashboard.weakKeys[zhLayoutId]?.length ?? 0) > 0 ||
+        hasAnyZhWeakKeys(dashboard.weakKeys)
+      : (dashboard.weakKeys["en-us"]?.length ?? 0) > 0;
+  if (hasCurrent) {
     return current;
   }
-  const ime = dashboard.status.imeName?.trim().toLowerCase() ?? "";
-  const imePreferred: KeyTraceLayoutId | null =
-    ime === "full-pinyin" ||
-    ime.startsWith("full-pinyin/") ||
-    ime.includes("quanpin")
-      ? "zh-qp"
-      : ime.length > 0
-        ? "zh-sp"
-        : null;
-  const order: KeyTraceLayoutId[] =
-    imePreferred != null
-      ? [imePreferred, "zh-sp", "zh-qp", "en-us"]
-      : ["zh-sp", "zh-qp", "en-us"];
-  for (const candidate of order) {
-    if ((dashboard.weakKeys[candidate]?.length ?? 0) > 0) {
-      return candidate;
-    }
+  const hasZh = hasAnyZhWeakKeys(dashboard.weakKeys);
+  const hasEn = (dashboard.weakKeys["en-us"]?.length ?? 0) > 0;
+  if (hasZh) {
+    return "zh";
+  }
+  if (hasEn) {
+    return "en";
   }
   return current;
 }
@@ -156,7 +178,13 @@ function formatLayoutBadge(
 ): string {
   switch (layoutId) {
     case "zh-sp":
-      return isZhLocale ? "双拼" : "ZH-SP";
+      return isZhLocale ? "双拼·小鹤" : "ZH-SP";
+    case "zh-sp-zrm":
+      return isZhLocale ? "双拼·自然码" : "ZH-ZRM";
+    case "zh-sp-ms":
+      return isZhLocale ? "双拼·微软" : "ZH-MS";
+    case "zh-sp-sg":
+      return isZhLocale ? "双拼·搜狗" : "ZH-SG";
     case "zh-qp":
       return isZhLocale ? "全拼" : "ZH-QP";
     case "en-us":
@@ -211,25 +239,30 @@ export function KeytracePage({
   const { settings, updateSettings } = useSettings();
   const { results, appendResults, replaceResults } = useResults();
   const { formatSpeed } = useFormatter();
+  const { formatZhSchemeName } = useFormattedNames();
+  const activeZhLayout = resolveZhScheme(settings);
+  const activeZhLayoutId = (ZH_LAYOUT_IDS.includes(
+    activeZhLayout.id as ZhKeyTraceLayoutId,
+  )
+    ? activeZhLayout.id
+    : "zh-sp") as ZhKeyTraceLayoutId;
 
   const [data, setData] = useState<KeyTraceDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [keyTab, setKeyTab] = useState<KeyTraceLayoutId>(() => {
-    const langId = settings.get(keyboardProps.language).id;
-    if (langId === "zh-qp") {
-      return "zh-qp";
-    }
-    if (langId === "zh-sp") {
-      return "zh-sp";
-    }
-    return "en-us";
-  });
+  const [keyTab, setKeyTab] = useState<WeakKeyLangTab>(() =>
+    isZhLanguage(settings.get(keyboardProps.language)) ? "zh" : "en",
+  );
   const userSelectedTabRef = useRef(false);
+  const activeZhLayoutIdRef = useRef(activeZhLayoutId);
 
-  const handleTabChange = useCallback((tab: KeyTraceLayoutId) => {
+  useEffect(() => {
+    activeZhLayoutIdRef.current = activeZhLayoutId;
+  }, [activeZhLayoutId]);
+
+  const handleTabChange = useCallback((tab: WeakKeyLangTab) => {
     userSelectedTabRef.current = true;
     setKeyTab(tab);
   }, []);
@@ -240,7 +273,9 @@ export function KeytracePage({
       .then((json) => {
         setData(json);
         if (!userSelectedTabRef.current) {
-          setKeyTab((prev) => pickAutoKeyTab(prev, json));
+          setKeyTab((prev) =>
+            pickAutoKeyTab(prev, activeZhLayoutIdRef.current, json),
+          );
         }
         setError(null);
       })
@@ -260,7 +295,9 @@ export function KeytracePage({
           if (alive) {
             setData(json);
             if (!userSelectedTabRef.current) {
-              setKeyTab((prev) => pickAutoKeyTab(prev, json));
+              setKeyTab((prev) =>
+                pickAutoKeyTab(prev, activeZhLayoutIdRef.current, json),
+              );
             }
             setError(null);
           }
@@ -307,7 +344,7 @@ export function KeytracePage({
       const json = await requestKeyTraceSummary();
       setData(json);
       if (!userSelectedTabRef.current) {
-        setKeyTab((prev) => pickAutoKeyTab(prev, json));
+        setKeyTab((prev) => pickAutoKeyTab(prev, activeZhLayoutId, json));
       }
       setError(null);
     } catch {
@@ -318,39 +355,25 @@ export function KeytracePage({
   };
 
   const handlePracticeKey = (letter: string, layoutId: KeyTraceLayoutId) => {
-    const targetLang =
-      layoutId === "zh-sp"
-        ? Language.ZH_SP
-        : layoutId === "zh-qp"
-          ? Language.ZH_QP
-          : Language.EN;
-    const targetLayout =
-      layoutId === "zh-sp"
-        ? Layout.ZH_SP
-        : layoutId === "zh-qp"
-          ? Layout.ZH_QP
-          : Layout.EN_US;
     const currentOptions = KeyboardOptions.from(settings);
-    if (
-      currentOptions.language.id !== targetLang.id ||
-      currentOptions.layout.id !== targetLayout.id
-    ) {
-      updateSettings(
-        currentOptions
-          .withLanguage(targetLang)
-          .withLayout(targetLayout)
-          .withGeometry(currentOptions.geometry)
-          .withZones(currentOptions.zones)
-          .save(settings),
-      );
-    }
-    if (layoutId === "zh-sp" || layoutId === "zh-qp") {
-      const lockedKey =
-        layoutId === "zh-qp" ? ZH_QP_LOCKED_FOCUS_KEY : ZH_SP_LOCKED_FOCUS_KEY;
-      const drillKey =
-        layoutId === "zh-qp"
-          ? ZH_QP_DRILL_OVERRIDE_KEY
-          : ZH_SP_DRILL_OVERRIDE_KEY;
+    if (layoutId === "en-us") {
+      if (currentOptions.layout.id !== "en-us") {
+        updateSettings(switchPracticeLanguage(settings, "en"));
+      }
+    } else {
+      const targetLayout = Layout.ALL.get(layoutId, activeZhLayout);
+      let next = setZhScheme(settings, targetLayout);
+      if (!isZhLanguage(KeyboardOptions.from(next).language)) {
+        next = switchPracticeLanguage(next, "zh");
+      }
+      if (
+        next !== settings &&
+        (currentOptions.language.id !== targetLayout.language.id ||
+          currentOptions.layout.id !== targetLayout.id)
+      ) {
+        updateSettings(next);
+      }
+      const { lockedKey, drillKey } = getZhFocusStorageKeys(targetLayout.id);
       try {
         window.localStorage.setItem(lockedKey, letter.toLowerCase());
         window.localStorage.setItem(drillKey, letter.toLowerCase());
@@ -461,6 +484,9 @@ export function KeytracePage({
           <WeakKeysSection
             weakKeys={data.weakKeys}
             keyTab={keyTab}
+            activeZhLayoutId={activeZhLayoutId}
+            activeZhSchemeName={formatZhSchemeName(activeZhLayout)}
+            formatZhSchemeName={formatZhSchemeName}
             onTabChange={handleTabChange}
             onPractice={handlePracticeKey}
             isZhLocale={isZhLocale}
@@ -655,18 +681,34 @@ function DailyChartSection({
 function WeakKeysSection({
   weakKeys,
   keyTab,
+  activeZhLayoutId,
+  activeZhSchemeName,
+  formatZhSchemeName,
   onTabChange,
   onPractice,
   isZhLocale,
 }: {
   readonly weakKeys: KeyTraceDashboardData["weakKeys"];
-  readonly keyTab: KeyTraceLayoutId;
-  readonly onTabChange: (tab: KeyTraceLayoutId) => void;
+  readonly keyTab: WeakKeyLangTab;
+  readonly activeZhLayoutId: ZhKeyTraceLayoutId;
+  readonly activeZhSchemeName: string;
+  readonly formatZhSchemeName: (layout: Layout) => string;
+  readonly onTabChange: (tab: WeakKeyLangTab) => void;
   readonly onPractice: (letter: string, layoutId: KeyTraceLayoutId) => void;
   readonly isZhLocale: boolean;
 }): ReactNode {
   const t = (zh: string, en: string) => (isZhLocale ? zh : en);
-  const list = (weakKeys[keyTab] ?? []).slice(0, 12);
+  const activeLayoutId: KeyTraceLayoutId =
+    keyTab === "en" ? "en-us" : activeZhLayoutId;
+  const list = (weakKeys[activeLayoutId] ?? []).slice(0, 12);
+  const fallbackZhEntry =
+    keyTab === "zh" && list.length === 0
+      ? ZH_LAYOUT_IDS.map((id) => ({
+          id,
+          name: formatZhSchemeName(Layout.ALL.get(id)),
+          count: weakKeys[id]?.length ?? 0,
+        })).find((entry) => entry.count > 0) ?? null
+      : null;
 
   return (
     <FieldSet
@@ -680,37 +722,40 @@ function WeakKeysSection({
           type="button"
           className={clsx(
             styles.tabButton,
-            keyTab === "zh-sp" && styles.tabButtonActive,
+            keyTab === "zh" && styles.tabButtonActive,
           )}
-          onClick={() => onTabChange("zh-sp")}
+          onClick={() => onTabChange("zh")}
         >
-          {t("小鹤双拼", "Xiaohe Shuangpin")}
+          {t("中文", "Chinese")}
         </button>
         <button
           type="button"
           className={clsx(
             styles.tabButton,
-            keyTab === "zh-qp" && styles.tabButtonActive,
+            keyTab === "en" && styles.tabButtonActive,
           )}
-          onClick={() => onTabChange("zh-qp")}
-        >
-          {t("全拼", "Full Pinyin")}
-        </button>
-        <button
-          type="button"
-          className={clsx(
-            styles.tabButton,
-            keyTab === "en-us" && styles.tabButtonActive,
-          )}
-          onClick={() => onTabChange("en-us")}
+          onClick={() => onTabChange("en")}
         >
           {t("英文", "English")}
         </button>
+        {keyTab === "zh" && (
+          <span className={styles.schemeHint}>
+            {t(
+              `当前方案：${activeZhSchemeName}`,
+              `Scheme: ${activeZhSchemeName}`,
+            )}
+          </span>
+        )}
       </div>
 
       {list.length === 0 ? (
         <Para className={styles.emptyNote}>
-          {t("当前语言暂无足够键位样本。", "No key samples yet.")}
+          {fallbackZhEntry != null
+            ? t(
+                `当前方案（${activeZhSchemeName}）暂无足够键位样本；日志中检测到「${fallbackZhEntry.name}」有 ${fallbackZhEntry.count} 个键位样本（可在设置 → 键盘中切换方案）。`,
+                `No samples for ${activeZhSchemeName} yet; found ${fallbackZhEntry.count} keys logged under ${fallbackZhEntry.name} (switch scheme in Settings).`,
+              )
+            : t("当前语言暂无足够键位样本。", "No key samples yet.")}
         </Para>
       ) : (
         <div className={styles.keyGrid}>
@@ -742,7 +787,7 @@ function WeakKeysSection({
                       `跳转到练习页专注练习 ${k.letter} 键`,
                       `Practice key ${k.letter}`,
                     )}
-                    onClick={() => onPractice(k.letter, keyTab)}
+                    onClick={() => onPractice(k.letter, activeLayoutId)}
                   >
                     <Icon shape={mdiKeyboardOutline} />
                     <span>{t("去练习", "Drill")}</span>

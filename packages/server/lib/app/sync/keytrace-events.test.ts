@@ -685,12 +685,16 @@ test("GET /_/keytrace/summary returns human-readable dashboard stats, apps, weak
   }
 });
 
-test("resolveZhLayoutFromIme routes full-pinyin/quanpin to zh-qp and defaults others to zh-sp", () => {
+test("resolveZhLayoutFromIme routes all Chinese schemes accurately and defaults others to zh-sp", () => {
   equal(resolveZhLayoutFromIme(null), "zh-sp");
   equal(resolveZhLayoutFromIme(undefined), "zh-sp");
   equal(resolveZhLayoutFromIme(""), "zh-sp");
   equal(resolveZhLayoutFromIme("shuangpin/xiaohe"), "zh-sp");
-  equal(resolveZhLayoutFromIme("shuangpin/ziranma"), "zh-sp");
+  equal(resolveZhLayoutFromIme("shuangpin/ziranma"), "zh-sp-zrm");
+  equal(resolveZhLayoutFromIme("shuangpin/scheme-3"), "zh-sp-zrm");
+  equal(resolveZhLayoutFromIme("shuangpin/microsoft"), "zh-sp-ms");
+  equal(resolveZhLayoutFromIme("shuangpin/scheme-0"), "zh-sp-ms");
+  equal(resolveZhLayoutFromIme("shuangpin/sogou"), "zh-sp-sg");
   equal(resolveZhLayoutFromIme("full-pinyin"), "zh-qp");
   equal(resolveZhLayoutFromIme("full-pinyin/ms"), "zh-qp");
   equal(resolveZhLayoutFromIme("FULL-PINYIN/rime"), "zh-qp");
@@ -857,7 +861,14 @@ test("readKeyTraceDashboard aggregates zh-sp + zh-qp into zhKeys and isolates we
   const dir = await mkdtemp(join(tmpdir(), "keytrace-dash-qp-"));
   try {
     const empty = await readKeyTraceDashboard({ eventsDir: dir });
-    deepEqual(empty.weakKeys, { "zh-sp": [], "zh-qp": [], "en-us": [] });
+    deepEqual(empty.weakKeys, {
+      "zh-sp": [],
+      "zh-sp-zrm": [],
+      "zh-sp-ms": [],
+      "zh-sp-sg": [],
+      "zh-qp": [],
+      "en-us": [],
+    });
 
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -943,6 +954,56 @@ test("readKeyTraceDashboard aggregates zh-sp + zh-qp into zhKeys and isolates we
     isTrue(dash.recentCommits.some((c) => c.layoutId === "zh-qp" && c.text === "绿"));
     isTrue(dash.recentCommits.some((c) => c.layoutId === "zh-sp" && c.text === "好"));
     isTrue(dash.recentCommits.some((c) => c.layoutId === "en-us" && c.text === "abd"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("captures VK 186 (;) as 0x003b only for Microsoft/Sogou Shuangpin and ignores it for Xiaohe/Quanpin", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-semi-"));
+  try {
+    const lines: Record<string, unknown>[] = [
+      { v: 1, ts: 1700000000100, mono: 10, ev: "meta", exe: "keytrace", text: "ime=shuangpin/microsoft" },
+      kd(74, 100, 1700000001000, { sid: "ms" }), // j
+      kd(78, 250, 1700000001150, { sid: "ms" }), // n
+      kd(88, 400, 1700000001300, { sid: "ms" }), // x
+      kd(186, 550, 1700000001450, { sid: "ms" }), // ; (ing)
+      kd(77, 700, 1700000001600, { sid: "ms" }), // m
+      kd(90, 850, 1700000001750, { sid: "ms" }), // z
+      kd(84, 1000, 1700000001900, { sid: "ms" }), // t
+      kd(77, 1150, 1700000002050, { sid: "ms" }), // m
+      kd(89, 1300, 1700000002200, { sid: "ms" }), // y
+      kd(84, 1450, 1700000002350, { sid: "ms" }), // t
+      commit("进行每天一同", 10, 1500, 1700000002400, { sid: "ms" }),
+
+      { v: 1, ts: 1700000010100, mono: 10, ev: "meta", exe: "keytrace", text: "ime=shuangpin/xiaohe" },
+      kd(74, 2000, 1700000011000, { sid: "xh" }), // j
+      kd(66, 2150, 1700000011150, { sid: "xh" }), // b
+      kd(88, 2300, 1700000011300, { sid: "xh" }), // x
+      kd(186, 2450, 1700000011450, { sid: "xh" }), // ; -> ignored punctuation in Xiaohe
+      kd(75, 2600, 1700000011600, { sid: "xh" }), // k
+      kd(77, 2750, 1700000011750, { sid: "xh" }), // m
+      kd(87, 2900, 1700000011900, { sid: "xh" }), // w
+      kd(84, 3050, 1700000012050, { sid: "xh" }), // t
+      kd(77, 3200, 1700000012200, { sid: "xh" }), // m
+      kd(89, 3350, 1700000012350, { sid: "xh" }), // y
+      kd(84, 3500, 1700000012500, { sid: "xh" }), // t
+      commit("进行；每天一", 11, 3550, 1700000013000, { sid: "xh" }),
+    ];
+
+    await writeFile(join(dir, "2026-11-24.jsonl"), jsonl(lines), "utf8");
+
+    const sync = await readKeyTraceSyncData({ eventsDir: dir });
+    const msRec = sync.records.find((r) => r.l === "zh-sp-ms");
+    const xhRec = sync.records.find((r) => r.l === "zh-sp");
+    isNotNull(msRec ?? null);
+    isNotNull(xhRec ?? null);
+    equal(msRec!.h[0x003b]?.h, 1);
+    equal(xhRec!.h[0x003b], undefined);
+
+    const dash = await readKeyTraceDashboard({ eventsDir: dir, days: 7 });
+    equal(dash.weakKeys["zh-sp-ms"].find((k) => k.codePoint === 0x003b)?.letter, ";");
+    equal(dash.weakKeys["zh-sp"].find((k) => k.codePoint === 0x003b), undefined);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

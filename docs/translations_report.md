@@ -1,12 +1,12 @@
 # English
 
-Translated: 363 messages, 4822 words
+Translated: 371 messages, 4850 words
 
 Untranslated: 0 messages, 0 words
 
 # Simplified Chinese
 
-Translated: 361 messages, 4811 words
+Translated: 369 messages, 4839 words
 
 Untranslated: 2 messages, 11 words
 

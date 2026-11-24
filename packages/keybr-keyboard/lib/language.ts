@@ -1,5 +1,9 @@
 import { Enum, type EnumItem } from "@keybr/lang";
 import { type CodePoint, toCodePoints } from "@keybr/unicode";
+import {
+  getZhSchemeExampleText,
+  type ZhSchemeId,
+} from "./zhPinyinSchemes.ts";
 
 export class Language implements EnumItem {
   static readonly AR = new Language(
@@ -422,7 +426,7 @@ export class Language implements EnumItem {
   }
 }
 
-export type ZhInputScheme = "zh-sp" | "zh-qp";
+export type ZhInputScheme = ZhSchemeId;
 
 export function isZhLanguage(language: Language): boolean {
   return language.id === "zh-sp" || language.id === "zh-qp";
@@ -438,10 +442,10 @@ export function isZhQuanpin(language: Language): boolean {
 
 export function getExampleText(language: Language): string {
   if (language.id === "zh-sp") {
-    return "mwtm jmii tiug uuru sudu.";
+    return getZhSchemeExampleText("zh-sp");
   }
   if (language.id === "zh-qp") {
-    return "meitian jianchi tisheng shuru sudu.";
+    return getZhSchemeExampleText("zh-qp");
   }
   switch (language.script) {
     case "arabic":

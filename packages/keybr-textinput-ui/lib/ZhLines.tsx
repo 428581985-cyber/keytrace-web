@@ -1,4 +1,10 @@
-import { isZhQuanpin, Language, type ZhInputScheme } from "@keybr/keyboard";
+import {
+  getZhSchemeFromLayout,
+  isZhQuanpin,
+  isZhShuangpinSchemeId,
+  Language,
+  type ZhInputScheme,
+} from "@keybr/keyboard";
 import {
   Attr,
   CaretMovementStyle,
@@ -8,6 +14,8 @@ import {
   type Line,
   type LineList,
   resolveQuanpinWord,
+  resolveShuangpinChar,
+  resolveShuangpinWord,
   splitQuanpinFallback,
   type TextDisplaySettings,
   textDisplaySettings,
@@ -41,6 +49,16 @@ import { ZH_CODE_TO_WORD } from "./zhWords.ts";
 
 const STORAGE_KEY_SP = "keytrace.zh.showCode";
 const STORAGE_KEY_QP = "keytrace.zh-qp.showCode";
+
+function getShowCodeStorageKey(scheme: ZhInputScheme): string {
+  if (scheme === "zh-sp") {
+    return STORAGE_KEY_SP;
+  }
+  if (scheme === "zh-qp") {
+    return STORAGE_KEY_QP;
+  }
+  return `keytrace.${scheme}.showCode`;
+}
 const DEFAULT_ZH_FONT_CSS: CSSProperties = Font.select(Language.ZH_SP).at(
   0,
 ).cssProperties;
@@ -479,10 +497,13 @@ function toGroups(chars: readonly Char[], scheme: ZhInputScheme): Group[] {
   return scheme === "zh-qp" ? toGroupsQuanpin(chars) : toGroupsShuangpin(chars);
 }
 
-function pickCharShuangpin(code: string): string {
+function pickCharShuangpin(code: string, scheme: ZhInputScheme): string {
   const punct = mapPunctuation(code);
   if (punct != null) {
     return punct;
+  }
+  if (scheme !== "zh-sp" && isZhShuangpinSchemeId(scheme)) {
+    return resolveShuangpinChar(code, scheme) ?? code;
   }
   const chars = ZH_CODE_TO_CHARS[code];
   if (chars == null || chars.length === 0) {
@@ -504,8 +525,14 @@ function pickCharQuanpin(code: string): string {
 // 整词取汉字（双拼）：把一个 group 里的音节码拼回完整的词码，查表拿到真词。
 // 词尾可能跟着一个 ASCII 标点（, . ? !），它也是独立的一个 unit，要先剥掉。
 // 返回与 units 等长的数组，值是空串表示"这个词没查到，调用方自己退回 pickCharShuangpin"。
-function resolveWordCharsShuangpin(units: readonly Unit[]): readonly string[] {
-  const isCode = (u: Unit) => /^[a-z]{2}$/.test(u.code);
+function resolveWordCharsShuangpin(
+  units: readonly Unit[],
+  scheme: ZhInputScheme,
+): readonly string[] {
+  const usesSemicolon = scheme === "zh-sp-ms" || scheme === "zh-sp-sg";
+  const isCode = usesSemicolon
+    ? (u: Unit) => /^[a-z][a-z;]$/.test(u.code)
+    : (u: Unit) => /^[a-z]{2}$/.test(u.code);
   let end = units.length;
   while (end > 0 && !isCode(units[end - 1])) {
     end--;
@@ -514,7 +541,10 @@ function resolveWordCharsShuangpin(units: readonly Unit[]): readonly string[] {
     .slice(0, end)
     .map((u) => u.code)
     .join("");
-  const word = ZH_CODE_TO_WORD[code];
+  const word =
+    scheme !== "zh-sp" && isZhShuangpinSchemeId(scheme)
+      ? resolveShuangpinWord(code, scheme)
+      : ZH_CODE_TO_WORD[code];
   const empty = units.map(() => "");
   // 用 Array.from 而不是 word[i]：生僻字是代理对，按下标取会被拆成半个字符
   const chars = word == null ? [] : Array.from(word);
@@ -755,6 +785,9 @@ export function ZhLines({
   const effectiveSettings = settings ?? textDisplaySettings;
   const resolvedScheme: ZhInputScheme =
     scheme ??
+    (settings?.layout != null
+      ? getZhSchemeFromLayout(settings.layout)
+      : null) ??
     (settings?.language != null && isZhQuanpin(settings.language)
       ? "zh-qp"
       : "zh-sp");
@@ -767,20 +800,20 @@ export function ZhLines({
     : DEFAULT_ZH_FONT_CSS;
 
   const [showCodeByScheme, setShowCodeByScheme] = useState<
-    Record<ZhInputScheme, boolean>
+    Record<string, boolean>
   >(() => ({
-    "zh-sp": readShowCode(STORAGE_KEY_SP),
-    "zh-qp": readShowCode(STORAGE_KEY_QP),
+    "zh-sp": readShowCode(getShowCodeStorageKey("zh-sp")),
+    "zh-sp-zrm": readShowCode(getShowCodeStorageKey("zh-sp-zrm")),
+    "zh-sp-ms": readShowCode(getShowCodeStorageKey("zh-sp-ms")),
+    "zh-sp-sg": readShowCode(getShowCodeStorageKey("zh-sp-sg")),
+    "zh-qp": readShowCode(getShowCodeStorageKey("zh-qp")),
   }));
-  const showCode = showCodeByScheme[resolvedScheme];
+  const showCode = showCodeByScheme[resolvedScheme] ?? true;
 
   const handleToggle = useCallback(() => {
     setShowCodeByScheme((prev) => {
-      const next = !prev[resolvedScheme];
-      writeShowCode(
-        resolvedScheme === "zh-qp" ? STORAGE_KEY_QP : STORAGE_KEY_SP,
-        next,
-      );
+      const next = !(prev[resolvedScheme] ?? true);
+      writeShowCode(getShowCodeStorageKey(resolvedScheme), next);
       return { ...prev, [resolvedScheme]: next };
     });
   }, [resolvedScheme]);
@@ -940,7 +973,7 @@ export function ZhLines({
                 }
                 const chars = isQuanpin
                   ? group.units.map((u) => u.hanzi ?? "")
-                  : resolveWordCharsShuangpin(group.units);
+                  : resolveWordCharsShuangpin(group.units, resolvedScheme);
                 return (
                   <span key={groupIndex} data-word="1" style={styles.word}>
                     {group.units.map((unit, i) => (
@@ -948,6 +981,7 @@ export function ZhLines({
                         key={i}
                         unit={unit}
                         char={chars[i]}
+                        scheme={resolvedScheme}
                         isQuanpin={isQuanpin}
                         hanziFontCss={hanziFontCss}
                         showCode={showCode}
@@ -1060,6 +1094,7 @@ function SpaceView({
 function UnitView({
   unit,
   char,
+  scheme,
   isQuanpin,
   hanziFontCss,
   showCode,
@@ -1068,6 +1103,7 @@ function UnitView({
   readonly unit: Unit;
   /** 整词查表得到的汉字；空串表示查不到，退回按音节取字 */
   readonly char: string;
+  readonly scheme: ZhInputScheme;
   readonly isQuanpin: boolean;
   readonly hanziFontCss: CSSProperties;
   readonly showCode: boolean;
@@ -1115,7 +1151,7 @@ function UnitView({
       ? char
       : isQuanpin
         ? pickCharQuanpin(unit.code)
-        : pickCharShuangpin(unit.code);
+        : pickCharShuangpin(unit.code, scheme);
 
   return (
     <span

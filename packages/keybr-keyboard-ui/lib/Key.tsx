@@ -1,10 +1,12 @@
 import {
   type DeadCharacter,
+  getZhKeyLabelsForLayout,
   isZhShuangpin,
   KeyCharacters,
   type KeyShape,
   type LabelShape,
   type Language,
+  Layout,
   type LigatureCharacter,
   ZH_KEY_LABELS,
 } from "@keybr/keyboard";
@@ -22,15 +24,24 @@ export type KeyProps = {
 } & MouseProps;
 
 export function makeKeyComponent(
-  language: Language,
+  languageOrLayout: Language | Layout,
   shape: KeyShape,
 ): FunctionComponent<KeyProps> {
+  const layout = languageOrLayout instanceof Layout ? languageOrLayout : null;
+  const language =
+    layout != null ? layout.language : (languageOrLayout as Language);
   const { letterName } = language;
   const { isCodePoint, isDead, isLigature } = KeyCharacters;
   const { id, a, b, c, d } = shape;
 
-  // 仅中文小鹤双拼在键帽上显示声母/韵母标注；全拼（zh-qp）保持纯字母 A–Z 与 F/J 定位点
-  const zh = isZhShuangpin(language) ? ZH_KEY_LABELS[id] : undefined;
+  // 仅中文双拼在键帽上显示声母/韵母标注；全拼（zh-qp）保持纯字母 A–Z 与 F/J 定位点
+  const zhLabels =
+    layout != null
+      ? getZhKeyLabelsForLayout(layout)
+      : isZhShuangpin(language)
+        ? ZH_KEY_LABELS
+        : null;
+  const zh = zhLabels?.[id];
   const x = shape.x * keySize;
   const y = shape.y * keySize;
   const w = shape.w * keySize - keyGap;

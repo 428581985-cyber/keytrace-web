@@ -1,4 +1,10 @@
-import { isZhLanguage, isZhQuanpin, type ZhInputScheme } from "@keybr/keyboard";
+import {
+  getZhSchemeFromLayout,
+  isZhLanguage,
+  isZhLayout,
+  isZhQuanpin,
+  type ZhInputScheme,
+} from "@keybr/keyboard";
 import { type LineList, type TextDisplaySettings } from "@keybr/textinput";
 import {
   type IInputEvent,
@@ -106,9 +112,15 @@ export function TextArea({
     innerRef.current?.focus();
     event.preventDefault();
   };
-  const isZh = zh ?? isZhLanguage(settings.language);
+  const isZh =
+    zh ??
+    (settings.layout != null
+      ? isZhLayout(settings.layout)
+      : isZhLanguage(settings.language));
   const zhScheme: ZhInputScheme =
-    scheme ?? (isZhQuanpin(settings.language) ? "zh-qp" : "zh-sp");
+    scheme ??
+    (settings.layout != null ? getZhSchemeFromLayout(settings.layout) : null) ??
+    (isZhQuanpin(settings.language) ? "zh-qp" : "zh-sp");
   return (
     <div ref={ref} className={styles.root} onClick={handleClick}>
       <TextEvents

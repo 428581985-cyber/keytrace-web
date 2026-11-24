@@ -3,7 +3,8 @@ import {
   isZhLanguage,
   isZhQuanpin,
   type Keyboard,
-  type Language,
+  type Layout,
+  layoutUsesSemicolon,
 } from "@keybr/keyboard";
 import { Filter, Letter, type PhoneticModel } from "@keybr/phonetic-model";
 import { randomSample, type RNGStream } from "@keybr/rand";
@@ -34,22 +35,33 @@ const ZH_COOLDOWN_WINDOW = 16;
 
 const ZH_SP_LOCKED_FOCUS_KEY = "keybr.zh.lockedFocusKey";
 const ZH_SP_DRILL_OVERRIDE_KEY = "keybr.zh.drillFocusKey";
-const ZH_QP_LOCKED_FOCUS_KEY = "keybr.zh-qp.lockedFocusKey";
-const ZH_QP_DRILL_OVERRIDE_KEY = "keybr.zh-qp.drillFocusKey";
 
-function zhStorageKeys(language: Language): {
+export function getLayoutLetters(
+  layout: Layout,
+  modelLetters: readonly Letter[],
+): readonly Letter[] {
+  if (
+    layoutUsesSemicolon(layout) &&
+    !modelLetters.some((letter) => letter.codePoint === 0x003b)
+  ) {
+    return [...modelLetters, new Letter(0x003b, 0.025)];
+  }
+  return modelLetters;
+}
+
+export function getZhFocusStorageKeys(layoutId: string): {
   readonly lockedKey: string;
   readonly drillKey: string;
 } {
-  if (isZhQuanpin(language)) {
+  if (layoutId === "zh-sp") {
     return {
-      lockedKey: ZH_QP_LOCKED_FOCUS_KEY,
-      drillKey: ZH_QP_DRILL_OVERRIDE_KEY,
+      lockedKey: ZH_SP_LOCKED_FOCUS_KEY,
+      drillKey: ZH_SP_DRILL_OVERRIDE_KEY,
     };
   }
   return {
-    lockedKey: ZH_SP_LOCKED_FOCUS_KEY,
-    drillKey: ZH_SP_DRILL_OVERRIDE_KEY,
+    lockedKey: `keybr.${layoutId}.lockedFocusKey`,
+    drillKey: `keybr.${layoutId}.drillFocusKey`,
   };
 }
 
@@ -210,6 +222,7 @@ function pickWithCooldown(
 export class GuidedLesson extends Lesson {
   readonly dictionary: Dictionary;
   readonly idioms: Dictionary;
+  readonly #letters: readonly Letter[];
   // 每个字符的抽样权重：1 表示中性，越大越常出现。
   // update() 根据打字统计算出来，generate() 抽词时用。
   // 空表 = 没有数据 = 均匀抽样（与原先行为一致）。
@@ -219,7 +232,7 @@ export class GuidedLesson extends Lesson {
 
   #readZhLockedFocus(): number | null {
     if (typeof localStorage !== "undefined") {
-      const { lockedKey } = zhStorageKeys(this.model.language);
+      const { lockedKey } = getZhFocusStorageKeys(this.keyboard.layout.id);
       return readStorageCodePoint(lockedKey);
     }
     return this.#zhLockedFocusCodePoint;
@@ -227,7 +240,7 @@ export class GuidedLesson extends Lesson {
 
   #writeZhLockedFocus(codePoint: number | null): void {
     this.#zhLockedFocusCodePoint = codePoint;
-    const { lockedKey } = zhStorageKeys(this.model.language);
+    const { lockedKey } = getZhFocusStorageKeys(this.keyboard.layout.id);
     writeLockedFocusStorage(lockedKey, codePoint);
   }
 
@@ -238,6 +251,7 @@ export class GuidedLesson extends Lesson {
     wordList: WordList,
   ) {
     super(settings, keyboard, model);
+    this.#letters = getLayoutLetters(keyboard.layout, this.model.letters);
     // 上游这里是 > 2，因为英文太短的词练不到几个键。
     // 但中文双拼一个音节正好两键，按上游规则词表会被滤空，练习区就成了白板。
     // 这里放宽到 >= 2。
@@ -259,7 +273,7 @@ export class GuidedLesson extends Lesson {
   }
 
   override get letters() {
-    return this.model.letters;
+    return this.#letters;
   }
 
   override update(
@@ -337,7 +351,7 @@ export class GuidedLesson extends Lesson {
       .sort((a, b) => confidenceOf(a) - confidenceOf(b));
     const persistFocus = options?.persistFocus ?? true;
     if (isZh) {
-      const { drillKey } = zhStorageKeys(this.model.language);
+      const { drillKey } = getZhFocusStorageKeys(this.keyboard.layout.id);
       const overrideCp = persistFocus
         ? consumeDrillOverrideStorage(drillKey)
         : readStorageCodePoint(drillKey);
@@ -479,7 +493,7 @@ export class GuidedLesson extends Lesson {
   }
 
   #getLetters() {
-    const { letters } = this.model;
+    const letters = this.#letters;
     const { codePoints } = this;
     if (this.settings.get(lessonProps.guided.keyboardOrder)) {
       return Letter.weightedFrequencyOrder(letters, ({ codePoint }) =>

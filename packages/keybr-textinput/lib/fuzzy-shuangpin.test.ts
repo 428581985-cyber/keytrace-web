@@ -1,7 +1,13 @@
 import { test } from "node:test";
-import { keyboardProps, Language } from "@keybr/keyboard";
+import {
+  keyboardProps,
+  Language,
+  Layout,
+  setZhScheme,
+  type ZhShuangpinSchemeId,
+} from "@keybr/keyboard";
 import { Settings } from "@keybr/settings";
-import { deepEqual, isFalse, isTrue } from "rich-assert";
+import { deepEqual, equal, isFalse, isTrue } from "rich-assert";
 import { splitStyledText } from "./chars.ts";
 import { matchesFuzzyShuangpin } from "./fuzzy-shuangpin.ts";
 import {
@@ -9,6 +15,7 @@ import {
   textInputProps,
   toTextInputSettings,
 } from "./settings.ts";
+import { Feedback, TextInput } from "./textinput.ts";
 
 const ALL_OFF: FuzzyPinyinSettings = {
   enEng: false,
@@ -47,10 +54,18 @@ function matchAt(
   pos: number,
   actual: string,
   fuzzy: FuzzyPinyinSettings | undefined = ALL_ON,
+  schemeId: ZhShuangpinSchemeId = "zh-sp",
 ): boolean {
   const chars = splitStyledText(text);
   const expected = chars[pos]?.codePoint ?? 0;
-  return matchesFuzzyShuangpin(chars, pos, expected, cp(actual), fuzzy);
+  return matchesFuzzyShuangpin(
+    chars,
+    pos,
+    expected,
+    cp(actual),
+    fuzzy,
+    schemeId,
+  );
 }
 
 test("fuzzy initial pairs (zh/z, ch/c, sh/s, l/n)", () => {
@@ -185,4 +200,39 @@ test("settings defaults and toTextInputSettings", () => {
     rL: true,
     veUe: true,
   });
+});
+
+test("multi-scheme Shuangpin fuzzy matching including semicolon key (; = ing)", () => {
+  const inOnly = { ...ALL_OFF, inIng: true };
+  // Ziranma: in='n', ing='y'
+  isTrue(matchAt("bnyu", 1, "y", inOnly, "zh-sp-zrm"));
+  isTrue(matchAt("bybn", 1, "n", inOnly, "zh-sp-zrm"));
+  isFalse(matchAt("gk", 1, "n", inOnly, "zh-sp-zrm"));
+
+  const ianOnly = { ...ALL_OFF, ianIang: true };
+  // Ziranma / Microsoft / Sogou: ian='m', iang='d'
+  isTrue(matchAt("jmdm", 1, "d", ianOnly, "zh-sp-zrm"));
+  isTrue(matchAt("jdx;", 1, "m", ianOnly, "zh-sp-ms"));
+  isFalse(matchAt("ud", 1, "m", ianOnly, "zh-sp-ms")); // sh+uang ('ud') is not iang
+
+  // Microsoft & Sogou: in='n', ing=';' (must keep word unbroken across ';')
+  for (const scheme of ["zh-sp-ms", "zh-sp-sg"] as const) {
+    isTrue(matchAt("jnx;", 1, ";", inOnly, scheme));
+    isTrue(matchAt("jnx;", 3, "n", inOnly, scheme));
+    // Zero-initial 'o': en='of', eng='og'; an='oj', ang='oh'
+    isTrue(matchAt("of", 1, "g", { ...ALL_OFF, enEng: true }, scheme));
+    isTrue(matchAt("oj", 1, "h", { ...ALL_OFF, anAng: true }, scheme));
+  }
+
+  // End-to-end TextInput with Microsoft Shuangpin semicolon + fuzzy in/ing
+  const msSettings = setZhScheme(
+    new Settings().set(keyboardProps.language, Language.ZH_SP),
+    Layout.ZH_SP_MS,
+  ).set(textInputProps.fuzzy.inIng, true);
+  const input = new TextInput("jnx;", toTextInputSettings(msSettings));
+  equal(input.appendChar(10, cp("j"), 100), Feedback.Succeeded);
+  equal(input.appendChar(20, cp(";"), 100), Feedback.Succeeded); // fuzzy in('n') -> ';'
+  equal(input.appendChar(30, cp("x"), 100), Feedback.Succeeded);
+  equal(input.appendChar(40, cp("n"), 100), Feedback.Succeeded); // fuzzy ing(';') -> 'n'
+  isTrue(input.completed);
 });
