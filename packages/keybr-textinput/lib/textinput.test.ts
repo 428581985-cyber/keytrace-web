@@ -1317,6 +1317,26 @@ test("zh quanpin fuzzy: clearWord snapshot rollback after skip, extra, and bound
   equal(textInput.pos, "ziji zhongguo canguan".length);
 });
 
+test("zh shuangpin/quanpin with stopOnError=false and forgiveErrors=false recovers on correct key without trapping garbage", () => {
+  const sp = new TextInput("igvf", {
+    stopOnError: false,
+    forgiveErrors: false,
+    spaceSkipsWords: false,
+    zhShuangpin: true,
+  });
+
+  // Two wrong keys accumulate garbage count (shown as badge 1 -> 2), then correct 'i' recovers and clears garbage.
+  equal(sp.appendChar(100, "a".codePointAt(0)!, 100), Feedback.Failed);
+  equal(sp.appendChar(200, "b".codePointAt(0)!, 100), Feedback.Failed);
+  equal(showChars(sp), "*a|*b|[i]|g|v|f");
+
+  equal(sp.appendChar(300, "i".codePointAt(0)!, 100), Feedback.Recovered);
+  equal(showChars(sp), "!i|[g]|v|f");
+  equal(sp.appendChar(400, "g".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(showChars(sp), "!i|g|[v]|f");
+  equal(sp.pos, 2);
+});
+
 function showSteps({ steps }: TextInput) {
   return steps
     .map(({ codePoint, timeStamp, timeToType, typo }) => {

@@ -225,7 +225,8 @@ export class TextInput {
     }
 
     const { codePoint: expected } = this.at(this.pos);
-    const canAdvance = this.forgiveErrors || this.#garbage.length === 0;
+    const canAdvance =
+      this.forgiveErrors || this.#isZhMode() || this.#garbage.length === 0;
 
     // Evaluate Quanpin fuzzy match before space-skip/space-ignore handling so
     // omitting a trailing 'g' directly before a space (e.g. "fang " typed "fan ")
