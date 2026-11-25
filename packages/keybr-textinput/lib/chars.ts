@@ -16,6 +16,7 @@ export type Char = {
   readonly codePoint: CodePoint;
   readonly attrs: number;
   readonly cls?: string | null;
+  readonly errorCount?: number;
 };
 
 export type Line = {
@@ -88,6 +89,9 @@ export function charsAreEqual(a: Char, b: Char): boolean {
       return false;
     }
     if (a.cls !== b.cls) {
+      return false;
+    }
+    if ((a.errorCount ?? 0) !== (b.errorCount ?? 0)) {
       return false;
     }
   }

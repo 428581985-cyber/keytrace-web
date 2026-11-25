@@ -2,6 +2,7 @@ import { test } from "node:test";
 import { deepEqual, equal, isFalse, isTrue } from "rich-assert";
 import {
   Attr,
+  charArraysAreEqual,
   charsAreEqual,
   flattenStyledText,
   splitStyledText,
@@ -63,6 +64,36 @@ test("equal chars", () => {
     charsAreEqual(
       { codePoint: 0x0061, attrs: Attr.Normal, cls: "c1" },
       { codePoint: 0x0061, attrs: Attr.Normal, cls: "c2" },
+    ),
+  );
+  isTrue(
+    charsAreEqual(
+      { codePoint: 0x0061, attrs: Attr.Cursor, cls: null },
+      { codePoint: 0x0061, attrs: Attr.Cursor, cls: null, errorCount: 0 },
+    ),
+  );
+  isTrue(
+    charsAreEqual(
+      { codePoint: 0x0061, attrs: Attr.Cursor, cls: null, errorCount: 2 },
+      { codePoint: 0x0061, attrs: Attr.Cursor, cls: null, errorCount: 2 },
+    ),
+  );
+  isFalse(
+    charsAreEqual(
+      { codePoint: 0x0061, attrs: Attr.Cursor, cls: null },
+      { codePoint: 0x0061, attrs: Attr.Cursor, cls: null, errorCount: 1 },
+    ),
+  );
+  isFalse(
+    charsAreEqual(
+      { codePoint: 0x0061, attrs: Attr.Cursor, cls: null, errorCount: 1 },
+      { codePoint: 0x0061, attrs: Attr.Cursor, cls: null, errorCount: 2 },
+    ),
+  );
+  isFalse(
+    charArraysAreEqual(
+      [{ codePoint: 0x0061, attrs: Attr.Cursor, cls: null, errorCount: 1 }],
+      [{ codePoint: 0x0061, attrs: Attr.Cursor, cls: null, errorCount: 2 }],
     ),
   );
 });

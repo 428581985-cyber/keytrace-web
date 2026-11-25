@@ -1008,9 +1008,28 @@ test("ZhLines renders EOF pure garbage without hallucinating Hanzi and integrate
     spaceSkipsWords: true,
     zhShuangpin: true,
   });
-  // Type 'd' hit, 'x' garbage (shows badge=1), then Space skips only "dage," to 'y'.
+  // Type 'd' hit, 1st wrong key 'x' (red highlight, NO badge), 2nd wrong key 'z' (badge="2"), then Space skips only "dage," to 'y'.
   ti.appendChar(100, "d".codePointAt(0)!, 100);
   ti.appendChar(200, "x".codePointAt(0)!, 100);
+  const rOneMiss = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{ ...textDisplaySettings, language: Language.ZH_SP }}
+        lines={ti.lines}
+        focus={true}
+        showToggle={false}
+      />
+    </FakeIntlProvider>,
+  );
+  isNull(rOneMiss.container.querySelector("[data-garbage-badge='1']"));
+  equal(
+    rOneMiss.container.querySelector<HTMLElement>("[data-caret-shape]")?.dataset
+      .cursorError,
+    "1",
+  );
+  rOneMiss.unmount();
+
+  ti.appendChar(250, "z".codePointAt(0)!, 100);
   const rBeforeSkip = render(
     <FakeIntlProvider>
       <ZhLines
@@ -1023,7 +1042,7 @@ test("ZhLines renders EOF pure garbage without hallucinating Hanzi and integrate
   );
   equal(
     rBeforeSkip.container.querySelector("[data-garbage-badge='1']")?.textContent,
-    "1",
+    "2",
   );
   rBeforeSkip.unmount();
 
@@ -1051,4 +1070,268 @@ test("ZhLines renders EOF pure garbage without hallucinating Hanzi and integrate
   isNotNull(cursorUnit);
   equal(cursorUnit.querySelector("[data-hanzi='1']")?.textContent, "英");
   rAfterSkip.unmount();
+});
+
+test("ZhLines shows consecutive error badge (2..10, hidden on 1) for both stopOnError=true and stopOnError=false across Shuangpin, Quanpin, Space, and Punctuation", () => {
+  // 1. Shuangpin: both stopOnError=true and stopOnError=false
+  for (const stopOnError of [true, false]) {
+    const ti = new TextInput("dage,ykgo uiwu", {
+      stopOnError,
+      forgiveErrors: false,
+      spaceSkipsWords: false,
+      zhShuangpin: true,
+    });
+    ti.appendChar(100, "d".codePointAt(0)!, 100);
+
+    const renderSp = () =>
+      render(
+        <FakeIntlProvider>
+          <ZhLines
+            settings={{ ...textDisplaySettings, language: Language.ZH_SP }}
+            lines={ti.lines}
+            focus={true}
+            showToggle={false}
+          />
+        </FakeIntlProvider>,
+      );
+
+    // 1st error on 'a': red highlight + cursor error, NO badge!
+    ti.appendChar(200, "x".codePointAt(0)!, 100);
+    const r1 = renderSp();
+    const u1 = r1.container.querySelector<HTMLElement>("[data-unit='1']");
+    isNotNull(u1);
+    equal(u1.dataset.errorCount, "1");
+    isNull(u1.querySelector("[data-garbage-badge='1']"));
+    equal(
+      r1.container.querySelector<HTMLElement>("[data-caret-shape]")?.dataset
+        .cursorError,
+      "1",
+    );
+    r1.unmount();
+
+    // 2nd..10th errors: badge "2".."10"
+    for (let n = 2; n <= 10; n++) {
+      ti.appendChar(200 + n * 10, "x".codePointAt(0)!, 100);
+      const rn = renderSp();
+      const un = rn.container.querySelector<HTMLElement>("[data-unit='1']");
+      isNotNull(un);
+      equal(un.dataset.errorCount, String(n));
+      equal(un.querySelector("[data-garbage-badge='1']")?.textContent, String(n));
+      rn.unmount();
+    }
+
+    // 11th error stays capped at "10"
+    ti.appendChar(400, "x".codePointAt(0)!, 100);
+    const r11 = renderSp();
+    equal(
+      r11.container.querySelector("[data-garbage-badge='1']")?.textContent,
+      "10",
+    );
+    r11.unmount();
+
+    // Backspace down to 1 hides badge while keeping red error highlight
+    for (let i = 0; i < 9; i++) {
+      ti.clearChar();
+    }
+    const rBack1 = renderSp();
+    isNull(rBack1.container.querySelector("[data-garbage-badge='1']"));
+    equal(
+      rBack1.container.querySelector<HTMLElement>("[data-caret-shape]")?.dataset
+        .cursorError,
+      "1",
+    );
+    rBack1.unmount();
+
+    // Recover with right key 'a': badge gone, cursor advances to 'g' cleanly
+    ti.appendChar(500, "a".codePointAt(0)!, 100);
+    const rRec = renderSp();
+    isNull(rRec.container.querySelector("[data-garbage-badge='1']"));
+    equal(
+      rRec.container.querySelector<HTMLElement>("[data-caret-shape]")?.dataset
+        .cursorError,
+      undefined,
+    );
+    rRec.unmount();
+  }
+
+  // 2. Quanpin (stopOnError=true): 6-key syllable "zhuang" + space + punctuation
+  const qp = new TextInput("zhuang,fangan meitian", {
+    stopOnError: true,
+    forgiveErrors: false,
+    spaceSkipsWords: false,
+    zhQuanpin: true,
+  });
+  qp.appendChar(100, "z".codePointAt(0)!, 100);
+  qp.appendChar(200, "h".codePointAt(0)!, 100);
+  // 1st error on 'u' (index 2 of 6): red segment & cursor, NO badge
+  qp.appendChar(300, "x".codePointAt(0)!, 100);
+  const rQp1 = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{ ...textDisplaySettings, language: Language.ZH_QP }}
+        lines={qp.lines}
+        focus={true}
+        showToggle={false}
+      />
+    </FakeIntlProvider>,
+  );
+  isNull(rQp1.container.querySelector("[data-garbage-badge='1']"));
+  const qpCursor1 = rQp1.container.querySelector<HTMLElement>("[data-caret-shape]");
+  isNotNull(qpCursor1);
+  equal(qpCursor1.dataset.cursorError, "1");
+  const seg2 = qpCursor1.querySelector<HTMLElement>("[data-cursor-segment='2']");
+  isNotNull(seg2);
+  isTrue(
+    seg2.style.background === "#d4503a" ||
+      seg2.style.background === "rgb(212, 80, 58)",
+  );
+  rQp1.unmount();
+
+  // 2nd error on 'u' -> badge "2"
+  qp.appendChar(400, "y".codePointAt(0)!, 100);
+  const rQp2 = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{ ...textDisplaySettings, language: Language.ZH_QP }}
+        lines={qp.lines}
+        focus={true}
+        showToggle={false}
+      />
+    </FakeIntlProvider>,
+  );
+  equal(
+    rQp2.container.querySelector("[data-garbage-badge='1']")?.textContent,
+    "2",
+  );
+  rQp2.unmount();
+
+  // Finish "uang" -> cursor now at ',' (punctuation)
+  for (const ch of "uang") {
+    qp.appendChar(500, ch.codePointAt(0)!, 100);
+  }
+  qp.appendChar(600, "x".codePointAt(0)!, 100);
+  const rPunct1 = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{ ...textDisplaySettings, language: Language.ZH_QP }}
+        lines={qp.lines}
+        focus={true}
+        showToggle={false}
+      />
+    </FakeIntlProvider>,
+  );
+  const qpPunctUnits1 = [
+    ...rPunct1.container.querySelectorAll<HTMLElement>("[data-unit='1']"),
+  ];
+  // Punctuation at index 1 is red on 1st miss, NO badge
+  isNull(qpPunctUnits1[1].querySelector("[data-garbage-badge='1']"));
+  const punctHanzi1 =
+    qpPunctUnits1[1].querySelector<HTMLElement>("[data-hanzi='1']");
+  isNotNull(punctHanzi1);
+  isTrue(
+    punctHanzi1.style.color === "#d4503a" ||
+      punctHanzi1.style.color === "rgb(212, 80, 58)",
+  );
+  rPunct1.unmount();
+
+  qp.appendChar(700, "y".codePointAt(0)!, 100);
+  const rPunct2 = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{ ...textDisplaySettings, language: Language.ZH_QP }}
+        lines={qp.lines}
+        focus={true}
+        showToggle={false}
+      />
+    </FakeIntlProvider>,
+  );
+  const qpPunctUnits2 = [
+    ...rPunct2.container.querySelectorAll<HTMLElement>("[data-unit='1']"),
+  ];
+  equal(
+    qpPunctUnits2[1].querySelector("[data-garbage-badge='1']")?.textContent,
+    "2",
+  );
+  rPunct2.unmount();
+
+  // Advance past ",fangan" to space ' '
+  for (const ch of ",fangan") {
+    qp.appendChar(800, ch.codePointAt(0)!, 100);
+  }
+  qp.appendChar(900, "x".codePointAt(0)!, 100);
+  const rSpace1 = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{
+          ...textDisplaySettings,
+          language: Language.ZH_QP,
+          whitespaceStyle: WhitespaceStyle.Bullet,
+          caretShapeStyle: CaretShapeStyle.Box,
+        }}
+        lines={qp.lines}
+        focus={true}
+        showToggle={false}
+      />
+    </FakeIntlProvider>,
+  );
+  const spaceEl1 = rSpace1.container.querySelector<HTMLElement>("[data-space='1']");
+  isNotNull(spaceEl1);
+  isNull(spaceEl1.querySelector("[data-garbage-badge='1']"));
+  isTrue(
+    spaceEl1.style.color === "#d4503a" ||
+      spaceEl1.style.color === "rgb(212, 80, 58)",
+  );
+  equal(
+    rSpace1.container.querySelector<HTMLElement>("[data-caret-shape]")?.dataset
+      .cursorError,
+    "1",
+  );
+  rSpace1.unmount();
+
+  qp.appendChar(1000, "y".codePointAt(0)!, 100);
+  qp.appendChar(1100, "z".codePointAt(0)!, 100);
+  const rSpace3 = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{
+          ...textDisplaySettings,
+          language: Language.ZH_QP,
+          whitespaceStyle: WhitespaceStyle.Space,
+          caretShapeStyle: CaretShapeStyle.Line,
+        }}
+        lines={qp.lines}
+        focus={true}
+        showToggle={false}
+      />
+    </FakeIntlProvider>,
+  );
+  const spaceEl3 = rSpace3.container.querySelector<HTMLElement>("[data-space='1']");
+  isNotNull(spaceEl3);
+  equal(spaceEl3.querySelector("[data-garbage-badge='1']")?.textContent, "3");
+  equal(
+    rSpace3.container.querySelector<HTMLElement>("[data-caret-shape]")?.dataset
+      .cursorError,
+    "1",
+  );
+  rSpace3.unmount();
+
+  // Recover space -> badge disappears
+  qp.appendChar(1200, " ".codePointAt(0)!, 100);
+  const rSpaceDone = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{ ...textDisplaySettings, language: Language.ZH_QP }}
+        lines={qp.lines}
+        focus={true}
+        showToggle={false}
+      />
+    </FakeIntlProvider>,
+  );
+  isNull(rSpaceDone.container.querySelector("[data-garbage-badge='1']"));
+  equal(
+    rSpaceDone.container.querySelector<HTMLElement>("[data-caret-shape]")?.dataset
+      .cursorError,
+    undefined,
+  );
+  rSpaceDone.unmount();
 });

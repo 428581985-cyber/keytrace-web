@@ -66,6 +66,23 @@ export class Cursor extends Component<{
     style.fontKerning = from.fontKerning;
     style.lineHeight = from.lineHeight;
 
+    const hasError = Number(char.dataset.errorCount ?? "0") >= 1;
+    if (hasError) {
+      cursor.dataset.cursorError = "1";
+    } else {
+      delete cursor.dataset.cursorError;
+    }
+    const caretColor = hasError
+      ? "var(--textinput--miss__color)"
+      : "var(--textinput-cursor__background-color)";
+    if (caretShapeStyle === CaretShapeStyle.Box) {
+      style.borderColor = caretColor;
+      style.backgroundColor = "";
+    } else {
+      style.backgroundColor = caretColor;
+      style.borderColor = "";
+    }
+
     const x = char.offsetLeft;
     const y = char.parentElement!.offsetTop;
     const w = char.offsetWidth;
@@ -76,7 +93,7 @@ export class Cursor extends Component<{
 
     switch (caretShapeStyle) {
       case CaretShapeStyle.Block:
-        cursor.textContent = char.textContent;
+        cursor.textContent = getCharText(char);
         style.display = "block";
         style.borderWidth = "";
         style.width = "";
@@ -172,6 +189,7 @@ export class Cursor extends Component<{
     const { style } = cursor;
 
     cursor.textContent = "";
+    delete cursor.dataset.cursorError;
 
     style.display = "none";
     style.left = "";
@@ -201,16 +219,29 @@ export class Cursor extends Component<{
 const containerStyle = {
   display: "block",
   position: "relative",
+  isolation: "isolate",
 } satisfies CSSProperties;
 
 const cursorStyle = {
   display: "block",
   position: "absolute",
+  zIndex: 1,
   left: 0,
   top: 0,
   width: 0,
   height: 0,
+  pointerEvents: "none",
 } satisfies CSSProperties;
+
+function getCharText(char: HTMLElement): string {
+  let text = "";
+  for (const node of char.childNodes) {
+    if (node.nodeType === node.TEXT_NODE) {
+      text += node.nodeValue ?? "";
+    }
+  }
+  return text;
+}
 
 function wpmToDuration(wpm: number): number {
   return Math.round(1000 / ((wpm * 5) / 60));

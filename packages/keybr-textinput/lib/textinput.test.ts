@@ -1337,6 +1337,127 @@ test("zh shuangpin/quanpin with stopOnError=false and forgiveErrors=false recove
   equal(sp.pos, 2);
 });
 
+test("tracks consecutive errorCount (0..10) on cursor char for both stopOnError=true and stopOnError=false", () => {
+  const getCursor = (ti: TextInput) =>
+    ti.chars.find((c) => (c.attrs & Attr.Cursor) !== 0);
+
+  // 1. stopOnError = true, forgiveErrors = false: no Attr.Garbage emitted, errorCount increments 1..10 & caps at 10
+  const stopNoForgive = new TextInput("ab cd", {
+    stopOnError: true,
+    forgiveErrors: false,
+    spaceSkipsWords: true,
+  });
+  equal(getCursor(stopNoForgive)?.errorCount, undefined);
+
+  for (let i = 1; i <= 12; i++) {
+    equal(stopNoForgive.appendChar(i * 100, X, 100), Feedback.Failed);
+    equal(
+      stopNoForgive.chars.some((c) => (c.attrs & Attr.Garbage) !== 0),
+      false,
+    );
+    equal(getCursor(stopNoForgive)?.errorCount, Math.min(10, i));
+  }
+  // Backspace decrements from 10 -> 9, and correct key resets errorCount to 0.
+  equal(stopNoForgive.clearChar(), Feedback.Succeeded);
+  equal(getCursor(stopNoForgive)?.errorCount, 9);
+  equal(stopNoForgive.appendChar(1300, A, 100), Feedback.Recovered);
+  equal(stopNoForgive.pos, 1);
+  equal(getCursor(stopNoForgive)?.codePoint, B);
+  equal(getCursor(stopNoForgive)?.errorCount, undefined);
+
+  // Space skip resets errorCount.
+  equal(stopNoForgive.appendChar(1400, X, 100), Feedback.Failed);
+  equal(stopNoForgive.appendChar(1500, X, 100), Feedback.Failed);
+  equal(getCursor(stopNoForgive)?.errorCount, 2);
+  equal(stopNoForgive.appendChar(1600, Space, 100), Feedback.Recovered);
+  equal(stopNoForgive.pos, 3);
+  equal(getCursor(stopNoForgive)?.codePoint, C);
+  equal(getCursor(stopNoForgive)?.errorCount, undefined);
+
+  // clearWord resets errorCount when rolling back to word start.
+  equal(stopNoForgive.appendChar(1700, C, 100), Feedback.Succeeded);
+  equal(stopNoForgive.appendChar(1800, X, 100), Feedback.Failed);
+  equal(stopNoForgive.appendChar(1900, X, 100), Feedback.Failed);
+  equal(getCursor(stopNoForgive)?.errorCount, 2);
+  equal(stopNoForgive.clearWord(), Feedback.Succeeded);
+  equal(stopNoForgive.pos, 3);
+  equal(getCursor(stopNoForgive)?.codePoint, C);
+  equal(getCursor(stopNoForgive)?.errorCount, undefined);
+
+  // reset() clears errorCount.
+  equal(stopNoForgive.appendChar(2000, X, 100), Feedback.Failed);
+  equal(getCursor(stopNoForgive)?.errorCount, 1);
+  stopNoForgive.reset();
+  equal(stopNoForgive.pos, 0);
+  equal(getCursor(stopNoForgive)?.errorCount, undefined);
+
+  // 2. stopOnError = true, forgiveErrors = true: lookahead recovery resets errorCount on next cursor char.
+  const stopForgive = new TextInput("abcde", {
+    stopOnError: true,
+    forgiveErrors: true,
+    spaceSkipsWords: false,
+  });
+  equal(stopForgive.appendChar(100, X, 100), Feedback.Failed);
+  equal(getCursor(stopForgive)?.errorCount, 1);
+  equal(stopForgive.appendChar(200, B, 100), Feedback.Failed);
+  equal(getCursor(stopForgive)?.errorCount, 2);
+  equal(stopForgive.appendChar(300, C, 100), Feedback.Failed);
+  equal(getCursor(stopForgive)?.errorCount, 3);
+  equal(stopForgive.appendChar(400, D, 100), Feedback.Recovered);
+  equal(stopForgive.pos, 4);
+  equal(getCursor(stopForgive)?.codePoint, "e".codePointAt(0));
+  equal(getCursor(stopForgive)?.errorCount, undefined);
+
+  // 3. stopOnError = false, forgiveErrors = false: errorCount tracks garbage count 1..10 and decrements on Backspace.
+  const noStop = new TextInput("abc", {
+    stopOnError: false,
+    forgiveErrors: false,
+    spaceSkipsWords: false,
+  });
+  for (let i = 1; i <= 12; i++) {
+    equal(noStop.appendChar(i * 100, X, 100), Feedback.Failed);
+    equal(getCursor(noStop)?.errorCount, Math.min(10, i));
+  }
+  for (let expected = 9; expected >= 1; expected--) {
+    equal(noStop.clearChar(), Feedback.Succeeded);
+    equal(getCursor(noStop)?.errorCount, expected);
+  }
+  equal(noStop.clearChar(), Feedback.Succeeded);
+  equal(getCursor(noStop)?.errorCount, undefined);
+  // Extra Backspace at 0 stays at 0.
+  equal(noStop.clearChar(), Feedback.Succeeded);
+  equal(getCursor(noStop)?.errorCount, undefined);
+
+  // 4. stopOnError = true in Chinese Shuangpin & Quanpin (including space & fuzzy recovery).
+  const zhQp = new TextInput("fangan meitian", {
+    stopOnError: true,
+    forgiveErrors: false,
+    spaceSkipsWords: false,
+    zhQuanpin: true,
+    fuzzy: {
+      enEng: false,
+      anAng: true,
+      inIng: false,
+      ianIang: false,
+      zhZ: false,
+      chC: false,
+      shS: false,
+      lN: false,
+    },
+  });
+  for (const ch of "fan") {
+    equal(zhQp.appendChar(100, ch.codePointAt(0)!, 100), Feedback.Succeeded);
+  }
+  // At 'g' (pos 3), miss twice then fuzzy-skip 'g' by typing 'a' -> resets errorCount.
+  equal(zhQp.appendChar(200, X, 100), Feedback.Failed);
+  equal(getCursor(zhQp)?.errorCount, 1);
+  equal(zhQp.appendChar(300, X, 100), Feedback.Failed);
+  equal(getCursor(zhQp)?.errorCount, 2);
+  equal(zhQp.appendChar(400, A, 100), Feedback.Recovered);
+  equal(zhQp.pos, 5);
+  equal(getCursor(zhQp)?.errorCount, undefined);
+});
+
 function showSteps({ steps }: TextInput) {
   return steps
     .map(({ codePoint, timeStamp, timeToType, typo }) => {

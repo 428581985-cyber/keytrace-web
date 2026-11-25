@@ -223,6 +223,8 @@ type Unit = {
   /** stopOnError=false 时当前字存在未清除的错字 */
   readonly hasGarbage?: boolean;
   readonly garbageCount?: number;
+  /** 当前字活跃位置的连续错误次数（stopOnError=true/false 均生效，上限 10） */
+  readonly errorCount?: number;
   readonly isPureGarbage?: boolean;
   /** 光标正停在这个字上 */
   readonly cursor: boolean;
@@ -234,6 +236,7 @@ type SpaceToken = {
   readonly attrs: number;
   readonly hasGarbage?: boolean;
   readonly garbageCount?: number;
+  readonly errorCount?: number;
 };
 
 type Group =
@@ -301,6 +304,24 @@ function writeShowCode(storageKey: string, value: boolean): void {
   }
 }
 
+const MAX_ERROR_BADGE = 10;
+
+function getCursorErrorCount(chars: readonly Char[]): number {
+  for (const ch of chars) {
+    if (has(ch.attrs, Attr.Cursor)) {
+      return ch.errorCount ?? 0;
+    }
+  }
+  return 0;
+}
+
+function resolveErrorCount(
+  garbageCount: number,
+  cursorErrorCount: number,
+): number {
+  return Math.min(MAX_ERROR_BADGE, Math.max(garbageCount, cursorErrorCount));
+}
+
 function popTrailingGarbage(buffer: Char[]): number {
   let count = 0;
   while (
@@ -332,6 +353,10 @@ function toGroupsShuangpin(chars: readonly Char[]): Group[] {
             hanzi: "",
             hasGarbage: true,
             garbageCount: buffer.length,
+            errorCount: resolveErrorCount(
+              buffer.length,
+              getCursorErrorCount(buffer),
+            ),
             isPureGarbage: true,
             cursor: buffer.some((c) => has(c.attrs, Attr.Cursor)),
           },
@@ -378,6 +403,10 @@ function toGroupsShuangpin(chars: readonly Char[]): Group[] {
         chars: unitChars,
         hasGarbage: unitGarbageCount > 0,
         garbageCount: unitGarbageCount,
+        errorCount: resolveErrorCount(
+          unitGarbageCount,
+          getCursorErrorCount(unitChars),
+        ),
         cursor: unitChars.some((c) => has(c.attrs, Attr.Cursor)),
       });
     }
@@ -390,11 +419,16 @@ function toGroupsShuangpin(chars: readonly Char[]): Group[] {
     if (!has(char.attrs, Attr.Garbage) && char.codePoint === 0x20) {
       const trailingGarbageCount = popTrailingGarbage(buffer);
       flush();
+      const isCursor = has(char.attrs, Attr.Cursor);
       const space: SpaceToken = {
-        cursor: has(char.attrs, Attr.Cursor),
+        cursor: isCursor,
         attrs: char.attrs,
         hasGarbage: trailingGarbageCount > 0,
         garbageCount: trailingGarbageCount,
+        errorCount: resolveErrorCount(
+          trailingGarbageCount,
+          isCursor ? (char.errorCount ?? 0) : 0,
+        ),
       };
       const prev = groups[groups.length - 1];
       if (prev != null && prev.kind === "word" && prev.trailingSpace == null) {
@@ -408,12 +442,17 @@ function toGroupsShuangpin(chars: readonly Char[]): Group[] {
     if (!has(char.attrs, Attr.Garbage) && isPunctuation(char.codePoint)) {
       const trailingGarbageCount = popTrailingGarbage(buffer);
       flush();
+      const isCursor = has(char.attrs, Attr.Cursor);
       const punctUnit: Unit = {
         code: String.fromCodePoint(char.codePoint),
         chars: [char],
         hasGarbage: trailingGarbageCount > 0,
         garbageCount: trailingGarbageCount,
-        cursor: has(char.attrs, Attr.Cursor),
+        errorCount: resolveErrorCount(
+          trailingGarbageCount,
+          isCursor ? (char.errorCount ?? 0) : 0,
+        ),
+        cursor: isCursor,
       };
       const prev = groups[groups.length - 1];
       if (prev != null && prev.kind === "word" && prev.trailingSpace == null) {
@@ -460,6 +499,10 @@ function toGroupsQuanpin(chars: readonly Char[]): Group[] {
             hanzi: "",
             hasGarbage: true,
             garbageCount: buffer.length,
+            errorCount: resolveErrorCount(
+              buffer.length,
+              getCursorErrorCount(buffer),
+            ),
             isPureGarbage: true,
             cursor: buffer.some((c) => has(c.attrs, Attr.Cursor)),
           },
@@ -525,6 +568,10 @@ function toGroupsQuanpin(chars: readonly Char[]): Group[] {
         hanzi: hanziList[u] ?? "",
         hasGarbage: unitGarbageCount > 0,
         garbageCount: unitGarbageCount,
+        errorCount: resolveErrorCount(
+          unitGarbageCount,
+          getCursorErrorCount(unitChars),
+        ),
         cursor: unitChars.some((c) => has(c.attrs, Attr.Cursor)),
       });
     }
@@ -537,11 +584,16 @@ function toGroupsQuanpin(chars: readonly Char[]): Group[] {
     if (!has(char.attrs, Attr.Garbage) && char.codePoint === 0x20) {
       const trailingGarbageCount = popTrailingGarbage(buffer);
       flush();
+      const isCursor = has(char.attrs, Attr.Cursor);
       const space: SpaceToken = {
-        cursor: has(char.attrs, Attr.Cursor),
+        cursor: isCursor,
         attrs: char.attrs,
         hasGarbage: trailingGarbageCount > 0,
         garbageCount: trailingGarbageCount,
+        errorCount: resolveErrorCount(
+          trailingGarbageCount,
+          isCursor ? (char.errorCount ?? 0) : 0,
+        ),
       };
       const prev = groups[groups.length - 1];
       if (prev != null && prev.kind === "word" && prev.trailingSpace == null) {
@@ -555,13 +607,18 @@ function toGroupsQuanpin(chars: readonly Char[]): Group[] {
       const trailingGarbageCount = popTrailingGarbage(buffer);
       flush();
       const code = String.fromCodePoint(char.codePoint);
+      const isCursor = has(char.attrs, Attr.Cursor);
       const punctUnit: Unit = {
         code,
         chars: [char],
         hanzi: mapPunctuation(code) ?? code,
         hasGarbage: trailingGarbageCount > 0,
         garbageCount: trailingGarbageCount,
-        cursor: has(char.attrs, Attr.Cursor),
+        errorCount: resolveErrorCount(
+          trailingGarbageCount,
+          isCursor ? (char.errorCount ?? 0) : 0,
+        ),
+        cursor: isCursor,
       };
       const prev = groups[groups.length - 1];
       if (prev != null && prev.kind === "word" && prev.trailingSpace == null) {
@@ -703,7 +760,9 @@ function findCursorMeta(groupsByLine: readonly Group[][]): CursorMeta | null {
       if (group.kind === "space") {
         if (group.cursor) {
           const hasError = Boolean(
-            group.hasGarbage || has(group.attrs, Attr.Miss),
+            group.hasGarbage ||
+              (group.errorCount ?? 0) > 0 ||
+              has(group.attrs, Attr.Miss),
           );
           return {
             segments: [hasError ? COLOR.miss : COLOR.current],
@@ -719,12 +778,15 @@ function findCursorMeta(groupsByLine: readonly Group[][]): CursorMeta | null {
             0,
             unit.chars.findIndex((c) => has(c.attrs, Attr.Cursor)),
           );
+          const hasActiveError = Boolean(
+            unit.hasGarbage || (unit.errorCount ?? 0) > 0,
+          );
           const segments = unit.chars.map((c, idx) => {
             const color = stateColor(c.attrs);
             if (color != null) {
               return color;
             }
-            if (unit.hasGarbage && idx === activeIndex) {
+            if (hasActiveError && idx === activeIndex) {
               return COLOR.miss;
             }
             return COLOR.current;
@@ -732,7 +794,7 @@ function findCursorMeta(groupsByLine: readonly Group[][]): CursorMeta | null {
           const resolvedSegments =
             segments.length > 0 ? segments : [COLOR.current];
           const hasError = Boolean(
-            unit.hasGarbage ||
+            hasActiveError ||
               unit.isPureGarbage ||
               resolvedSegments[activeIndex] === COLOR.miss,
           );
@@ -746,6 +808,7 @@ function findCursorMeta(groupsByLine: readonly Group[][]): CursorMeta | null {
       if (group.trailingSpace?.cursor) {
         const hasError = Boolean(
           group.trailingSpace.hasGarbage ||
+            (group.trailingSpace.errorCount ?? 0) > 0 ||
             has(group.trailingSpace.attrs, Attr.Miss),
         );
         return {
@@ -1189,17 +1252,18 @@ function SpaceView({
   readonly whitespaceStyle: WhitespaceStyle;
 }): ReactNode {
   const garbageCount = space.garbageCount ?? 0;
+  const errorCount = space.errorCount ?? garbageCount;
+  const hasError = Boolean(space.hasGarbage || errorCount > 0);
   return (
     <span
       data-space="1"
       data-whitespace={whitespaceStyle}
       data-cursor={showCursor && space.cursor ? "1" : undefined}
       data-garbage={garbageCount > 0 ? String(garbageCount) : undefined}
+      data-error-count={errorCount > 0 ? String(errorCount) : undefined}
       style={{
         ...styles.space,
-        color:
-          stateColor(space.attrs) ??
-          (space.hasGarbage ? COLOR.miss : COLOR.todo),
+        color: stateColor(space.attrs) ?? (hasError ? COLOR.miss : COLOR.todo),
       }}
     >
       {whitespaceStyle === WhitespaceStyle.Bullet ? (
@@ -1209,9 +1273,9 @@ function SpaceView({
       ) : (
         "\u00a0"
       )}
-      {garbageCount > 0 ? (
+      {errorCount >= 2 ? (
         <span data-garbage-badge="1" style={styles.garbageBadge}>
-          {String(garbageCount)}
+          {String(errorCount)}
         </span>
       ) : null}
     </span>
@@ -1245,13 +1309,17 @@ function UnitView({
       )
     : -1;
 
+  const garbageCount = unit.garbageCount ?? 0;
+  const errorCount = unit.errorCount ?? garbageCount;
+  const hasActiveError = Boolean(unit.hasGarbage || errorCount > 0);
+
   // 每个键的状态色（绿/红），未打为 null
   const keyColors = unit.chars.map((c, idx) => {
     const color = stateColor(c.attrs);
     if (color != null) {
       return color;
     }
-    if (unit.hasGarbage && idx === activeIdx) {
+    if (hasActiveError && idx === activeIdx) {
       return COLOR.miss;
     }
     return null;
@@ -1273,7 +1341,6 @@ function UnitView({
   // 拼音/双拼码按字符分别上色
   const codeChars = Array.from(unit.code);
   const inFlowCode = isQuanpin && showCode;
-  const garbageCount = unit.garbageCount ?? 0;
   const displayChar = unit.isPureGarbage
     ? unit.code
     : char !== ""
@@ -1291,6 +1358,7 @@ function UnitView({
       data-inflow={inFlowCode ? "1" : undefined}
       data-cursor={showCursor && unit.cursor ? "1" : undefined}
       data-garbage={garbageCount > 0 ? String(garbageCount) : undefined}
+      data-error-count={errorCount > 0 ? String(errorCount) : undefined}
     >
       {showCode ? (
         <span
@@ -1323,9 +1391,9 @@ function UnitView({
       <span data-hanzi="1" style={hanziStyle}>
         {displayChar}
       </span>
-      {garbageCount > 0 ? (
+      {errorCount >= 2 ? (
         <span data-garbage-badge="1" style={styles.garbageBadge}>
-          {String(garbageCount)}
+          {String(errorCount)}
         </span>
       ) : null}
     </span>

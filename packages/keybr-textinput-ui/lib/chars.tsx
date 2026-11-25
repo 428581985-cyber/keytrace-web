@@ -9,49 +9,107 @@ import { type ReactNode } from "react";
 import * as styles from "./chars.module.less";
 import { getTextStyle } from "./styles.ts";
 
+const maxErrorBadge = 10;
+
+type CharSpan = {
+  chars: CodePoint[];
+  attrs: number;
+  cls: string | null;
+  errorCount: number;
+};
+
 export function renderChars(
   settings: TextDisplaySettings,
   chars: readonly Char[],
 ): ReactNode[] {
   const nodes: ReactNode[] = [];
-  type Span = { chars: CodePoint[]; attrs: number; cls: string | null };
-  let span: Span = { chars: [], attrs: 0, cls: null };
-  const pushSpan = (nextSpan: Span) => {
+  let span: CharSpan = { chars: [], attrs: 0, cls: null, errorCount: 0 };
+  const pushSpan = (nextSpan: CharSpan) => {
     if (span.chars.length > 0) {
       nodes.push(
-        <span
-          key={nodes.length}
-          className={getClassName(span)}
-          style={getTextStyle(span, /* special= */ false)}
-        >
-          {String.fromCodePoint(...span.chars)}
-        </span>,
+        renderCharSpan(
+          nodes.length,
+          span,
+          /* special= */ false,
+          String.fromCodePoint(...span.chars),
+        ),
       );
     }
     span = nextSpan;
   };
   for (let i = 0; i < chars.length; i++) {
-    const { codePoint, attrs, cls = null } = chars[i];
+    const { codePoint, attrs, cls = null, errorCount = 0 } = chars[i];
     if (codePoint > 0x0020) {
-      if (span.attrs !== attrs || span.cls !== cls) {
-        pushSpan({ chars: [], attrs, cls });
+      if (
+        span.attrs !== attrs ||
+        span.cls !== cls ||
+        span.errorCount !== errorCount ||
+        attrs === Attr.Cursor
+      ) {
+        pushSpan({ chars: [], attrs, cls, errorCount });
       }
       span.chars.push(codePoint);
     } else {
-      pushSpan({ chars: [], attrs, cls });
+      pushSpan({ chars: [], attrs, cls, errorCount });
       nodes.push(
-        <span
-          key={nodes.length}
-          className={getClassName(span)}
-          style={getTextStyle(span, /* special= */ true)}
-        >
-          {specialChar(settings.whitespaceStyle, codePoint)}
-        </span>,
+        renderCharSpan(
+          nodes.length,
+          span,
+          /* special= */ true,
+          specialChar(settings.whitespaceStyle, codePoint),
+        ),
       );
     }
   }
-  pushSpan({ chars: [], attrs: 0, cls: null });
+  pushSpan({ chars: [], attrs: 0, cls: null, errorCount: 0 });
   return nodes;
+}
+
+function renderCharSpan(
+  key: number,
+  span: CharSpan,
+  special: boolean,
+  text: string,
+): ReactNode {
+  const className = getClassName(span);
+  const style = getTextStyle(span, special);
+  if (span.attrs === Attr.Cursor && span.errorCount > 0) {
+    const count = Math.min(maxErrorBadge, span.errorCount);
+    if (count >= 2) {
+      return (
+        <span
+          key={key}
+          className={className}
+          style={style}
+          data-error-count={String(count)}
+        >
+          {text}
+          <span
+            className={styles.errorBadge}
+            data-error-badge="1"
+            aria-hidden={true}
+          >
+            {String(count)}
+          </span>
+        </span>
+      );
+    }
+    return (
+      <span
+        key={key}
+        className={className}
+        style={style}
+        data-error-count={String(count)}
+      >
+        {text}
+      </span>
+    );
+  }
+  return (
+    <span key={key} className={className} style={style}>
+      {text}
+    </span>
+  );
 }
 
 function specialChar(whitespaceStyle: WhitespaceStyle, codePoint: CodePoint) {

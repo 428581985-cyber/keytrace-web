@@ -76,6 +76,7 @@ type MatchOutcome =
 
 const recoverBufferLength = 3;
 const garbageBufferLength = 10;
+const maxErrorCount = 10;
 
 export class TextInput {
   readonly text: StyledText;
@@ -96,6 +97,7 @@ export class TextInput {
   #fuzzyState: QuanpinFuzzyState = {};
   #snapshots: InputSnapshot[] = [];
   #typo!: boolean;
+  #errorCountAtPos = 0;
   #output!: { chars: Char[]; lines: LineList; remaining: Char[] };
 
   constructor(
@@ -133,6 +135,7 @@ export class TextInput {
     this.#fuzzyState = {};
     this.#snapshots = [];
     this.#typo = false;
+    this.#errorCountAtPos = 0;
     this.#update();
   }
 
@@ -195,6 +198,11 @@ export class TextInput {
   clearChar(): Feedback {
     this.#garbage.pop();
     this.#ignoredSpace = null;
+    if (!this.stopOnError) {
+      this.#errorCountAtPos = this.#garbage.length;
+    } else if (this.#errorCountAtPos > 0) {
+      this.#errorCountAtPos--;
+    }
     this.#typo = true;
     return this.#return(Feedback.Succeeded);
   }
@@ -202,6 +210,7 @@ export class TextInput {
   clearWord(): Feedback {
     this.#garbage = [];
     this.#ignoredSpace = null;
+    this.#errorCountAtPos = 0;
     while (this.pos > 0 && !this.#isBoundaryAfter(this.pos - 1)) {
       const snapshot = this.#snapshots.pop();
       if (snapshot == null) {
@@ -248,6 +257,7 @@ export class TextInput {
         this.#garbage = [];
         this.#ignoredSpace = null;
         this.#typo = false;
+        this.#errorCountAtPos = 0;
         if (typo) {
           return this.#return(Feedback.Recovered);
         } else {
@@ -298,6 +308,7 @@ export class TextInput {
         this.#garbage = [];
         this.#ignoredSpace = null;
         this.#typo = false;
+        this.#errorCountAtPos = 0;
         if (typo) {
           return this.#return(Feedback.Recovered);
         } else {
@@ -307,6 +318,9 @@ export class TextInput {
     }
 
     this.#typo = true;
+    if (this.#errorCountAtPos < maxErrorCount) {
+      this.#errorCountAtPos++;
+    }
     if (!this.stopOnError || this.forgiveErrors) {
       if (this.#garbage.length < garbageBufferLength) {
         this.#garbage.push({
@@ -347,7 +361,11 @@ export class TextInput {
     }
     if (remaining.length > 0) {
       const [head, ...tail] = remaining;
-      chars.push({ ...head, attrs: Attr.Cursor }, ...tail);
+      const cursorChar: Char =
+        this.#errorCountAtPos > 0
+          ? { ...head, attrs: Attr.Cursor, errorCount: this.#errorCountAtPos }
+          : { ...head, attrs: Attr.Cursor };
+      chars.push(cursorChar, ...tail);
     }
     const lines = { text, lines: [{ text, chars }] };
     this.#output = { chars, lines, remaining };
@@ -636,6 +654,7 @@ export class TextInput {
     this.#garbage = [];
     this.#ignoredSpace = null;
     this.#typo = false;
+    this.#errorCountAtPos = 0;
   }
 
   #tryRecoverLookahead(
@@ -695,6 +714,7 @@ export class TextInput {
     this.#garbage = [];
     this.#ignoredSpace = null;
     this.#typo = false;
+    this.#errorCountAtPos = 0;
     return true;
   }
 

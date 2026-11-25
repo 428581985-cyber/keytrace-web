@@ -68,15 +68,25 @@ export function getTextStyle(
   {
     attrs,
     cls,
+    errorCount = 0,
   }: {
     readonly attrs: number;
     readonly cls: string | null;
+    readonly errorCount?: number;
   },
   special: boolean,
 ): CSSProperties | undefined {
   switch (attrs) {
-    case Attr.Normal:
+    case Attr.Normal: {
+      return (
+        syntaxStyles[cls ?? ""] ??
+        (special ? textStyles.special : textStyles.normal)
+      );
+    }
     case Attr.Cursor: {
+      if (errorCount > 0) {
+        return textStyles.miss;
+      }
       return (
         syntaxStyles[cls ?? ""] ??
         (special ? textStyles.special : textStyles.normal)

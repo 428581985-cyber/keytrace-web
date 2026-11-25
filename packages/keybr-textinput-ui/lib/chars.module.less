@@ -1,3 +1,19 @@
 .cursor {
   /* Marks a character under cursor. */
+  position: relative;
+}
+
+.errorBadge {
+  display: flex;
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: calc(100% + 2px);
+  z-index: 2;
+  justify-content: center;
+  color: var(--textinput--miss__color);
+  font-size: clamp(10px, 0.35em, 14px);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
 }
