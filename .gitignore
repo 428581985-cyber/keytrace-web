@@ -30,3 +30,7 @@ sandbox/
 
 # Custom scripts
 deploy.sh
+
+# Python (e2e)
+__pycache__/
+*.py[cod]

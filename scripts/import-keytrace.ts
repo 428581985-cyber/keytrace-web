@@ -168,8 +168,8 @@ async function main(): Promise<void> {
     throw new Error(
       [
         `DATA_DIR 不存在: ${options.dataDir}`,
-        `必须与正在运行的服务进程一致（keybr-server.bat 里设为 %USERPROFILE%\\keybr.com\\data）。`,
-        `请先在同一 shell 里 set DATA_DIR=%USERPROFILE%\\keybr.com\\data，或显式传 --data-dir。`,
+        `必须与正在运行的服务进程一致（keybr-server.bat 默认设为 <仓库根目录>\\data）。`,
+        `请先在同一 shell 里设置 DATA_DIR=<仓库根目录>\\data，或显式传 --data-dir。`,
       ].join("\n"),
     );
   }
