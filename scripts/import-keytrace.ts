@@ -44,7 +44,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 /* eslint-disable n/no-extraneous-import -- 一次性脚本直接复用仓库内的 workspace 包 */
-import { Layout } from "@keybr/keyboard";
+import { isZhLayout, Layout } from "@keybr/keyboard";
 import { Result, speedToTime, TextType } from "@keybr/result";
 import { formatMessage, parseFile } from "@keybr/result-io";
 import { Histogram } from "@keybr/textinput";
@@ -72,11 +72,12 @@ const MIN_TIME_TO_TYPE = 40;
 const MAX_TIME_TO_TYPE = 12000;
 
 /**
- * keybr's default target speed, see `packages/keybr-lesson/lib/settings.ts`.
- * `confidence = speedToTime(175) / timeToType`, and a key is only unlocked in
- * guided mode when `confidence >= 1`.
+ * keybr's default target speeds, see `packages/keybr-lesson/lib/settings.ts`.
+ * `confidence = speedToTime(targetSpeed) / timeToType`, where EN defaults to
+ * 175 CPM and ZH layouts (`zh-sp*`, `zh-qp`) default to 125 CPM.
  */
 const DEFAULT_TARGET_SPEED = 175;
+const DEFAULT_ZH_TARGET_SPEED = 125;
 
 const USAGE = `用法: npx tsnode scripts/import-keytrace.ts [选项]
 
@@ -515,7 +516,7 @@ function convert(stats: KeyTraceStats, layoutId: string): Conversion {
   // is a no-op, so keybr sees exactly the KeyTrace numbers (docs/IMPORT.md §5).
   const result = new Result(
     Layout.ALL.get(layoutId),
-    TextType.GENERATED,
+    TextType.KEYTRACE,
     parseTimestamp(stats.generatedAt),
     length,
     time,
@@ -587,7 +588,10 @@ function printReport(
   sha256: string,
 ): void {
   const { result, rows, skipped, withoutTiming, clamped } = conversion;
-  const target = speedToTime(DEFAULT_TARGET_SPEED);
+  const targetSpeed = isZhLayout(result.layout)
+    ? DEFAULT_ZH_TARGET_SPEED
+    : DEFAULT_TARGET_SPEED;
+  const target = speedToTime(targetSpeed);
 
   console.log("=== KeyTrace → keybr 导入 ===");
   console.log(

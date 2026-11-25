@@ -6,6 +6,11 @@ export type NewLetterEvent = {
   readonly lessonKey: LessonKey;
 };
 
+export type FocusLetterEvent = {
+  readonly type: "focus-letter";
+  readonly lessonKey: LessonKey;
+};
+
 export type TopSpeedEvent = {
   readonly type: "top-speed";
   readonly speed: number;
@@ -24,6 +29,7 @@ export type DailyGoalEvent = {
 
 export type LessonEvent =
   | NewLetterEvent
+  | FocusLetterEvent
   | TopSpeedEvent
   | TopScoreEvent
   | DailyGoalEvent;

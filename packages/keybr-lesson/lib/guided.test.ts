@@ -2,13 +2,19 @@ import { describe, it, test } from "node:test";
 import { type Language, Layout, loadKeyboard } from "@keybr/keyboard";
 import { FakePhoneticModel, Letter } from "@keybr/phonetic-model";
 import { LCG } from "@keybr/rand";
-import { makeKeyStatsMap } from "@keybr/result";
+import {
+  type KeyStats,
+  type KeyStatsMap,
+  makeKeyStatsMap,
+  speedToTime,
+} from "@keybr/result";
 import { Settings } from "@keybr/settings";
 import { deepEqual, equal } from "rich-assert";
 import { fakeKeyStatsMap, printLessonKeys } from "./fakes.ts";
 import { GuidedLesson } from "./guided.ts";
 import { LessonKey } from "./key.ts";
 import { lessonProps } from "./settings.ts";
+import { Target } from "./target.ts";
 
 test("provide key set", () => {
   const settings = new Settings();
@@ -735,7 +741,9 @@ describe("zh-sp sticky weak-key focus and word inclusion", () => {
     });
     const words = ["abcd", "abef", "bcef", "ghij", "cdef"];
     const settings = new Settings().set(lessonProps.guided.recoverKeys, false);
-    const lesson = new GuidedLesson(settings, keyboard, model, words);
+    const lesson = new GuidedLesson(settings, keyboard, model, words, {
+      unlockAllKeys: true,
+    });
 
     const makeStats = (overrides: Record<number, [number, number]>) =>
       fakeKeyStatsMap(
@@ -748,6 +756,7 @@ describe("zh-sp sticky weak-key focus and word inclusion", () => {
             entry != null ? entry[1] : 1.2,
           ];
         }),
+        keyboard.layout,
       );
 
     // b (letter2) has real-time confidence 0.25 even though bestConfidence was 1.5;
@@ -806,7 +815,9 @@ describe("zh-sp sticky weak-key focus and word inclusion", () => {
     });
     const words = ["abcd", "efgh", "ghij", "abgh", "ijcd"];
     const settings = new Settings().set(lessonProps.punctuators, 0.4);
-    const lesson = new GuidedLesson(settings, keyboard, model, words);
+    const lesson = new GuidedLesson(settings, keyboard, model, words, {
+      unlockAllKeys: true,
+    });
 
     const stats = fakeKeyStatsMap(
       settings,
@@ -815,6 +826,7 @@ describe("zh-sp sticky weak-key focus and word inclusion", () => {
         letter.codePoint === model.letters[9].codePoint ? 0.2 : 1.2,
         letter.codePoint === model.letters[9].codePoint ? 0.2 : 1.2,
       ]),
+      keyboard.layout,
     );
     const lessonKeys = lesson.update(stats);
     equal(
@@ -893,14 +905,20 @@ describe("zh-qp guided lesson", () => {
       "jingshenwenming", // 15 letters, 4-char idiom -> idiom
     ];
     const settings = new Settings();
-    const lesson = new GuidedLesson(settings, keyboard, model, words);
+    const lesson = new GuidedLesson(settings, keyboard, model, words, {
+      unlockAllKeys: true,
+    });
 
     deepEqual([...lesson.idioms], ["yixinyiyi", "jingshenwenming"]);
     deepEqual([...lesson.dictionary], ["zhongguo", "zhuangkuang", "fangan"]);
 
-    // Full alphabet is unlocked immediately for zh-qp.
+    // Full alphabet is unlocked cleanly (included, never forced) in KeyTrace mode.
     const lessonKeys = lesson.update(makeKeyStatsMap(lesson.letters, []));
     equal(lessonKeys.findIncludedKeys().length, 26);
+    equal(
+      lessonKeys.findIncludedKeys().every((k) => !k.isForced),
+      true,
+    );
 
     // Idiom ratio 1 draws exclusively from idioms when focused key is present.
     const focusIStats = fakeKeyStatsMap(
@@ -910,12 +928,14 @@ describe("zh-qp guided lesson", () => {
         letter.codePoint === "i".codePointAt(0)! ? 0.2 : 1.2,
         letter.codePoint === "i".codePointAt(0)! ? 0.2 : 1.2,
       ]),
+      keyboard.layout,
     );
     const idiomOnlyLesson = new GuidedLesson(
       settings.set(lessonProps.idioms, 1),
       keyboard,
       model,
       words,
+      { unlockAllKeys: true },
     );
     const idiomKeys = idiomOnlyLesson.update(focusIStats);
     const generated = idiomOnlyLesson.generate(idiomKeys, LCG(7));
@@ -935,21 +955,28 @@ describe("zh-qp guided lesson", () => {
 
       const spKeyboard = loadKeyboard(Layout.ZH_SP);
       const spModel = makeFullAlphabetZhModel(spKeyboard.layout.language);
-      const spLesson = new GuidedLesson(settings, spKeyboard, spModel, [
-        "dage",
-        "ykgo",
-      ]);
+      const spLesson = new GuidedLesson(
+        settings,
+        spKeyboard,
+        spModel,
+        ["dage", "ykgo"],
+        { unlockAllKeys: true },
+      );
 
       const qpKeyboard = loadKeyboard(Layout.ZH_QP);
       const qpModel = makeFullAlphabetZhModel(qpKeyboard.layout.language);
-      const qpLesson = new GuidedLesson(settings, qpKeyboard, qpModel, [
-        "zhongguo",
-        "fangan",
-      ]);
+      const qpLesson = new GuidedLesson(
+        settings,
+        qpKeyboard,
+        qpModel,
+        ["zhongguo", "fangan"],
+        { unlockAllKeys: true },
+      );
 
       const makeStats = (
         letters: readonly Letter[],
         weakChar: string,
+        layout: Layout,
       ) =>
         fakeKeyStatsMap(
           settings,
@@ -957,16 +984,21 @@ describe("zh-qp guided lesson", () => {
             const isWeak = letter.codePoint === weakChar.codePointAt(0)!;
             return [letter, isWeak ? 0.25 : 1.2, isWeak ? 0.25 : 1.2];
           }),
+          layout,
         );
 
       // Lock 'b' in zh-sp -> writes keybr.zh.lockedFocusKey only.
-      const spKeys = spLesson.update(makeStats(spLesson.letters, "b"));
+      const spKeys = spLesson.update(
+        makeStats(spLesson.letters, "b", spKeyboard.layout),
+      );
       equal(spKeys.findFocusedKey()?.letter.codePoint, "b".codePointAt(0)!);
       equal(store.get("keybr.zh.lockedFocusKey"), "b");
       equal(store.get("keybr.zh-qp.lockedFocusKey"), undefined);
 
       // Lock 'v' in zh-qp -> writes keybr.zh-qp.lockedFocusKey and does NOT inherit 'b' from zh-sp.
-      const qpKeys = qpLesson.update(makeStats(qpLesson.letters, "v"));
+      const qpKeys = qpLesson.update(
+        makeStats(qpLesson.letters, "v", qpKeyboard.layout),
+      );
       equal(qpKeys.findFocusedKey()?.letter.codePoint, "v".codePointAt(0)!);
       equal(store.get("keybr.zh-qp.lockedFocusKey"), "v");
       equal(store.get("keybr.zh.lockedFocusKey"), "b");
@@ -975,13 +1007,17 @@ describe("zh-qp guided lesson", () => {
       store.set("keybr.zh.drillFocusKey", "f");
       store.set("keybr.zh-qp.drillFocusKey", "p");
 
-      const qpDrilled = qpLesson.update(makeStats(qpLesson.letters, "v"));
+      const qpDrilled = qpLesson.update(
+        makeStats(qpLesson.letters, "v", qpKeyboard.layout),
+      );
       equal(qpDrilled.findFocusedKey()?.letter.codePoint, "p".codePointAt(0)!);
       equal(store.get("keybr.zh-qp.drillFocusKey"), undefined);
       equal(store.get("keybr.zh-qp.lockedFocusKey"), "p");
       equal(store.get("keybr.zh.drillFocusKey"), "f");
 
-      const spDrilled = spLesson.update(makeStats(spLesson.letters, "b"));
+      const spDrilled = spLesson.update(
+        makeStats(spLesson.letters, "b", spKeyboard.layout),
+      );
       equal(spDrilled.findFocusedKey()?.letter.codePoint, "f".codePointAt(0)!);
       equal(store.get("keybr.zh.drillFocusKey"), undefined);
       equal(store.get("keybr.zh.lockedFocusKey"), "f");
@@ -1008,11 +1044,13 @@ describe("zh-qp guided lesson", () => {
       .set(lessonProps.idioms, 0)
       .set(lessonProps.punctuators, 0)
       .set(lessonProps.length, 0.5);
-    const lesson = new GuidedLesson(settings, keyboard, model, [
-      ...vWords,
-      "zhongguo",
-      "fangan",
-    ]);
+    const lesson = new GuidedLesson(
+      settings,
+      keyboard,
+      model,
+      [...vWords, "zhongguo", "fangan"],
+      { unlockAllKeys: true },
+    );
 
     const stats = fakeKeyStatsMap(
       settings,
@@ -1020,6 +1058,7 @@ describe("zh-qp guided lesson", () => {
         const isV = letter.codePoint === "v".codePointAt(0)!;
         return [letter, isV ? 0.2 : 1.2, isV ? 0.2 : 1.2];
       }),
+      keyboard.layout,
     );
     const lessonKeys = lesson.update(stats);
     equal(lessonKeys.findFocusedKey()?.letter.codePoint, "v".codePointAt(0)!);
@@ -1043,11 +1082,22 @@ describe("zh-qp guided lesson", () => {
 
     // With a 20-word pool, a 16-word cooldown prevents repeats across the first 16 draws
     // and keeps the start of the next lesson fresh from the tail of the prior lesson.
-    const largeVPool = Array.from({ length: 20 }, (_, i) => `lvword${String.fromCodePoint(0x61 + i)}`);
-    const largeLesson = new GuidedLesson(settings, keyboard, model, largeVPool);
+    const largeVPool = Array.from(
+      { length: 20 },
+      (_, i) => `lvword${String.fromCodePoint(0x61 + i)}`,
+    );
+    const largeLesson = new GuidedLesson(settings, keyboard, model, largeVPool, {
+      unlockAllKeys: true,
+    });
     const largeKeys = largeLesson.update(stats);
-    const frag1 = largeLesson.generate(largeKeys, LCG(99)).split(" ").filter(Boolean);
-    const frag2 = largeLesson.generate(largeKeys, LCG(100)).split(" ").filter(Boolean);
+    const frag1 = largeLesson
+      .generate(largeKeys, LCG(99))
+      .split(" ")
+      .filter(Boolean);
+    const frag2 = largeLesson
+      .generate(largeKeys, LCG(100))
+      .split(" ")
+      .filter(Boolean);
     equal(new Set(frag1.slice(0, 16)).size, Math.min(16, frag1.length));
     const tail1 = new Set(frag1.slice(-Math.min(8, frag1.length)));
     equal(tail1.has(frag2[0]), false);
@@ -1059,7 +1109,9 @@ describe("zh-qp guided lesson", () => {
     const words = ["zhongguo", "fangan", "shijian", "wenhua", "yanjiu", "lvyou"];
 
     const sHalf = new Settings().set(lessonProps.punctuators, 0.5);
-    const lHalf = new GuidedLesson(sHalf, keyboard, model, words);
+    const lHalf = new GuidedLesson(sHalf, keyboard, model, words, {
+      unlockAllKeys: true,
+    });
     const kHalf = lHalf.update(makeKeyStatsMap(lHalf.letters, []));
     const textHalf = lHalf.generate(kHalf, LCG(42));
     equal(/[,.]\s|\s[,.]/.test(textHalf), false);
@@ -1075,7 +1127,9 @@ describe("zh-sp-ms semicolon key integration", () => {
       const model = makeFullAlphabetZhModel(keyboard.layout.language);
       const words = ["jnx;", "mztm", "tiug", "dax;"];
       const settings = new Settings().set(lessonProps.guided.recoverKeys, false);
-      const lesson = new GuidedLesson(settings, keyboard, model, words);
+      const lesson = new GuidedLesson(settings, keyboard, model, words, {
+        unlockAllKeys: true,
+      });
 
       const hasSemicolon = lesson.letters.some((l) => l.codePoint === 0x003b);
       equal(hasSemicolon, true);
@@ -1086,6 +1140,7 @@ describe("zh-sp-ms semicolon key integration", () => {
           const isSemi = letter.codePoint === 0x003b;
           return [letter, isSemi ? 0.25 : 1.2, isSemi ? 0.25 : 1.2];
         }),
+        keyboard.layout,
       );
       const keys = lesson.update(stats);
       equal(keys.findFocusedKey()?.letter.codePoint, 0x003b);
@@ -1096,6 +1151,250 @@ describe("zh-sp-ms semicolon key integration", () => {
       const drawn = generated.split(/[ ,.]+/).filter(Boolean);
       equal(drawn.length > 0, true);
       equal(drawn.every((w) => w.includes(";")), true);
+    });
+  });
+});
+
+describe("standalone progressive Chinese curriculum vs KeyTrace unlockAllKeys", () => {
+  it("starts standalone zh-sp with 6 curriculum keys (iujdgs) and unlocks v as 7th", () => {
+    const keyboard = loadKeyboard(Layout.ZH_SP);
+    const model = makeFullAlphabetZhModel(keyboard.layout.language);
+    const words = [
+      "gssi",
+      "jiuu",
+      "ugij",
+      "djui",
+      "igui",
+      "uiji",
+      "ijug",
+      "jiiu",
+      "gsig",
+      "jidi",
+      "vgvi",
+      "vidu",
+      "vjvg",
+    ];
+    const settings = new Settings();
+    const lesson = new GuidedLesson(settings, keyboard, model, words);
+
+    const k0 = lesson.update(makeKeyStatsMap(lesson.letters, []));
+    const inc0 = k0
+      .findIncludedKeys()
+      .map((k) => String.fromCodePoint(k.letter.codePoint))
+      .join("");
+    equal(inc0, "iujdgs");
+    equal(k0.findExcludedKeys().length, 20);
+    equal(
+      k0.findIncludedKeys().every((k) => !k.isForced),
+      true,
+    );
+    equal(k0.findFocusedKey()?.letter.codePoint, "i".codePointAt(0)!);
+
+    // Generated text in stage 1 only uses the 6 unlocked keys.
+    const text0 = lesson.generate(k0, LCG(1));
+    const drawn0 = text0.split(/[ ,.]+/).filter(Boolean);
+    equal(drawn0.length > 0, true);
+    const allowed0 = new Set([..."iujdgs"]);
+    for (const word of drawn0) {
+      equal([...word].every((ch) => allowed0.has(ch)), true);
+    }
+
+    // Once all 6 keys reach zhTargetSpeed (bestConfidence >= 1), key #7 ('v') unlocks and becomes focused.
+    const stats6Ready = fakeKeyStatsMap(
+      settings,
+      lesson.letters.map((letter) => {
+        const ch = String.fromCodePoint(letter.codePoint);
+        return allowed0.has(ch) ? [letter, 1.1, 1.1] : [letter, null, null];
+      }),
+      keyboard.layout,
+    );
+    const k1 = lesson.update(stats6Ready);
+    const inc1 = k1
+      .findIncludedKeys()
+      .map((k) => String.fromCodePoint(k.letter.codePoint))
+      .join("");
+    equal(inc1, "iujdgsv");
+    equal(k1.findFocusedKey()?.letter.codePoint, "v".codePointAt(0)!);
+  });
+
+  it("starts standalone zh-qp with 6 curriculum keys (inagjd) and unlocks x as 7th", () => {
+    const keyboard = loadKeyboard(Layout.ZH_QP);
+    const model = makeFullAlphabetZhModel(keyboard.layout.language);
+    const words = [
+      "jingji",
+      "dajia",
+      "niandai",
+      "jidi",
+      "jinnian",
+      "jiji",
+      "dangnian",
+      "dangdi",
+      "jinxing",
+      "xianjin",
+      "xinxi",
+    ];
+    const settings = new Settings();
+    const lesson = new GuidedLesson(settings, keyboard, model, words);
+
+    const k0 = lesson.update(makeKeyStatsMap(lesson.letters, []));
+    const inc0 = k0
+      .findIncludedKeys()
+      .map((k) => String.fromCodePoint(k.letter.codePoint))
+      .join("");
+    equal(inc0, "inagjd");
+    equal(k0.findExcludedKeys().length, 20);
+
+    const allowed0 = new Set([..."inagjd"]);
+    const stats6Ready = fakeKeyStatsMap(
+      settings,
+      lesson.letters.map((letter) => {
+        const ch = String.fromCodePoint(letter.codePoint);
+        return allowed0.has(ch) ? [letter, 1.1, 1.1] : [letter, null, null];
+      }),
+      keyboard.layout,
+    );
+    const k1 = lesson.update(stats6Ready);
+    const inc1 = k1
+      .findIncludedKeys()
+      .map((k) => String.fromCodePoint(k.letter.codePoint))
+      .join("");
+    equal(inc1, "inagjdx");
+    equal(k1.findFocusedKey()?.letter.codePoint, "x".codePointAt(0)!);
+  });
+
+  it("guards ahead-of-frontier zh auto-unlock against single-hit fuzzy noise", () => {
+    const keyboard = loadKeyboard(Layout.ZH_QP);
+    const model = makeFullAlphabetZhModel(keyboard.layout.language);
+    const settings = new Settings();
+    const lesson = new GuidedLesson(settings, keyboard, model, ["jingji", "dajia"]);
+    const target = new Target(settings, keyboard.layout);
+    const fastTime = speedToTime(target.targetSpeed) / 1.2;
+
+    const buildStats = (hSampleCount: number): KeyStatsMap => {
+      const map = new Map<Letter, KeyStats>(
+        lesson.letters.map((letter) => {
+          if (letter.codePoint === "h".codePointAt(0)!) {
+            const samples = Array.from({ length: hSampleCount }, (_, i) => ({
+              index: i,
+              timeStamp: 1000 + i * 1000,
+              hitCount: 1,
+              missCount: 0,
+              timeToType: fastTime,
+              filteredTimeToType: fastTime,
+            }));
+            return [
+              letter,
+              {
+                letter,
+                samples,
+                timeToType: fastTime,
+                bestTimeToType: fastTime,
+              },
+            ];
+          }
+          return [
+            letter,
+            {
+              letter,
+              samples: [],
+              timeToType: null,
+              bestTimeToType: null,
+            },
+          ];
+        }),
+      );
+      return {
+        letters: [...map.keys()],
+        results: [],
+        get: (letter) => map.get(letter)!,
+        [Symbol.iterator]: () => map.values(),
+      };
+    };
+
+    // 1 sample on locked 'h' (e.g. fuzzy consumeExtra) must NOT prematurely unlock 'h'.
+    const k1 = lesson.update(buildStats(1));
+    equal(k1.find("h".codePointAt(0)!)?.isIncluded, false);
+
+    // 2+ samples with bestConfidence >= 1 unlocks 'h'.
+    const k2 = lesson.update(buildStats(2));
+    equal(k2.find("h".codePointAt(0)!)?.isIncluded, true);
+  });
+
+  it("suppresses tiny idiom pool (< 6) in standalone zh mode to prevent repetition", () => {
+    const keyboard = loadKeyboard(Layout.ZH_SP);
+    const model = makeFullAlphabetZhModel(keyboard.layout.language);
+    // All 4-char commons and 8-char idioms use only the stage-1 keys iujdgs.
+    const commons = ["gssi", "jiuu", "ugij", "djui", "igui", "uiji", "ijug"];
+    const twoIdioms = ["gssijiuu", "ugijdjui"];
+    const settings = new Settings()
+      .set(lessonProps.idioms, 1)
+      .set(lessonProps.punctuators, 0);
+
+    const lessonFew = new GuidedLesson(settings, keyboard, model, [
+      ...commons,
+      ...twoIdioms,
+    ]);
+    const keysFew = lessonFew.update(makeKeyStatsMap(lessonFew.letters, []));
+    const drawnFew = lessonFew.generate(keysFew, LCG(7)).split(" ").filter(Boolean);
+    equal(drawnFew.length > 0, true);
+    equal(drawnFew.every((w) => w.length === 4), true);
+
+    const sixIdioms = [
+      "gssijiuu",
+      "ugijdjui",
+      "iguiuiji",
+      "ijugjiiu",
+      "gsigjidi",
+      "jiiugssi",
+    ];
+    const lessonEnough = new GuidedLesson(settings, keyboard, model, [
+      ...commons,
+      ...sixIdioms,
+    ]);
+    const keysEnough = lessonEnough.update(
+      makeKeyStatsMap(lessonEnough.letters, []),
+    );
+    const drawnEnough = lessonEnough
+      .generate(keysEnough, LCG(7))
+      .split(" ")
+      .filter(Boolean);
+    equal(drawnEnough.length > 0, true);
+    equal(drawnEnough.every((w) => w.length === 8), true);
+  });
+
+  it("unlocks all EN keys cleanly in KeyTrace mode and supports drillKey override", () => {
+    withMockLocalStorage((store) => {
+      const keyboard = loadKeyboard(Layout.EN_US);
+      const model = new FakePhoneticModel(["uno", "due", "tre"]);
+      const settings = new Settings().set(lessonProps.guided.alphabetSize, 0);
+      const lesson = new GuidedLesson(settings, keyboard, model, [], {
+        unlockAllKeys: true,
+      });
+
+      const stats = fakeKeyStatsMap(
+        settings,
+        lesson.letters.map((letter, idx) => [
+          letter,
+          idx === 8 ? 0.4 : 1.2,
+          1.5, // even though bestConfidence >= 1, live confidence < 1 must be targeted
+        ]),
+      );
+
+      const keys1 = lesson.update(stats);
+      equal(keys1.findIncludedKeys().length, lesson.letters.length);
+      equal(keys1.findExcludedKeys().length, 0);
+      equal(
+        keys1.findIncludedKeys().every((k) => !k.isForced),
+        true,
+      );
+      equal(keys1.findFocusedKey()?.letter.codePoint, lesson.letters[8].codePoint);
+
+      // Drill override on EN key works in KeyTrace mode.
+      const drillChar = String.fromCodePoint(lesson.letters[2].codePoint);
+      store.set("keybr.en-us.drillFocusKey", drillChar);
+      const keys2 = lesson.update(stats);
+      equal(keys2.findFocusedKey()?.letter.codePoint, lesson.letters[2].codePoint);
+      equal(store.get("keybr.en-us.drillFocusKey"), undefined);
     });
   });
 });

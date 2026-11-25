@@ -4,6 +4,7 @@ import {
   Layout,
   useKeyboard,
 } from "@keybr/keyboard";
+import { lessonProps } from "@keybr/lesson";
 import { type NamedUser, Screen, usePageData } from "@keybr/pages-shared";
 import {
   activeDayCount,
@@ -14,7 +15,7 @@ import {
   selectChartSeries,
   totalCharacters,
 } from "@keybr/result";
-import { Settings } from "@keybr/settings";
+import { Settings, useSettings } from "@keybr/settings";
 import { ExplainerBoundary } from "@keybr/widget";
 import { AccuracyStreaksSection } from "./profile/AccuracyStreaksSection.tsx";
 import { CalendarSection } from "./profile/CalendarSection.tsx";
@@ -60,9 +61,13 @@ export function ProfilePage() {
 }
 
 function Content({ keyStatsMap }: { keyStatsMap: KeyStatsMap }) {
-  const { publicUser } = usePageData();
+  const { publicUser, keytraceAvailable } = usePageData();
+  const { settings } = useSettings();
   const keyboard = useKeyboard();
   const isZh = isZhLanguage(keyboard.layout.language);
+  const keytraceMode = settings.get(lessonProps.keytraceMode);
+  const showKeytraceSync =
+    Boolean(keytraceAvailable) && keytraceMode !== "standalone";
   const { results } = keyStatsMap;
   const stats = makeWeightedSummaryStats(results);
   const dailyStatsMap = new DailyStatsMap(results);
@@ -79,7 +84,7 @@ function Content({ keyStatsMap }: { keyStatsMap: KeyStatsMap }) {
     <>
       <DataScript stats={stats} dailyStatsMap={dailyStatsMap} />
 
-      <KeyTraceSyncBar />
+      {showKeytraceSync && <KeyTraceSyncBar />}
 
       <AllTimeSummary
         stats={stats}

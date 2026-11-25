@@ -1,18 +1,18 @@
-import { LearningRate, type LessonKey, Target } from "@keybr/lesson";
+import { LearningRate, type LessonKey } from "@keybr/lesson";
 import { timeToSpeed } from "@keybr/result";
-import { useSettings } from "@keybr/settings";
 import { Name, NameValue, Value } from "@keybr/widget";
 import { clsx } from "clsx";
 import { useIntl } from "react-intl";
 import { useFormatter } from "./format.ts";
 import { Happiness } from "./Happiness.tsx";
 import * as styles from "./styles.module.less";
+import { useTarget } from "./use-target.ts";
 
 export const KeyDetails = ({ lessonKey }: { lessonKey: LessonKey }) => {
   const { formatMessage } = useIntl();
   const { formatSpeed, formatConfidence, formatLearningRate, speedUnitName } =
     useFormatter();
-  const { settings } = useSettings();
+  const target = useTarget();
   const { timeToType, bestTimeToType, confidence, bestConfidence } = lessonKey;
   if (
     timeToType != null &&
@@ -23,7 +23,7 @@ export const KeyDetails = ({ lessonKey }: { lessonKey: LessonKey }) => {
     const learningRate =
       LearningRate.from(
         lessonKey.samples, //
-        new Target(settings),
+        target,
       )?.learningRate ?? null;
     return (
       <span className={clsx(styles.keyDetails, styles.keyDetails_calibrated)}>

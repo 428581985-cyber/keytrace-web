@@ -1,3 +1,4 @@
+import { type Language, type Layout } from "@keybr/keyboard";
 import { type Letter } from "@keybr/phonetic-model";
 import { type KeyStats, type KeyStatsMap, speedToTime } from "@keybr/result";
 import { type Settings } from "@keybr/settings";
@@ -11,8 +12,9 @@ export function fakeKeyStatsMap(
     confidence: number | null,
     bestConfidence: number | null,
   ][],
+  languageOrLayout?: Language | Layout,
 ): KeyStatsMap {
-  const target = new Target(settings);
+  const target = new Target(settings, languageOrLayout);
   const map = new Map<Letter, KeyStats>(
     items.map(([letter, confidence, bestConfidence]) => {
       const timeToType =

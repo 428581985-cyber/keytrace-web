@@ -1,5 +1,10 @@
 import { Tasks } from "@keybr/lang";
-import { type LessonKey } from "@keybr/lesson";
+import {
+  GuidedLesson,
+  type LessonKey,
+  lessonProps,
+  resolvePracticeMode,
+} from "@keybr/lesson";
 import {
   CurrentKeyRow,
   DailyGoalRow,
@@ -8,20 +13,44 @@ import {
   names,
   StreakListRow,
 } from "@keybr/lesson-ui";
-import { Pages } from "@keybr/pages-shared";
+import { PageDataContext, Pages } from "@keybr/pages-shared";
+import { hasKeyTraceResults, ResultContext } from "@keybr/result";
+import { useSettings } from "@keybr/settings";
 import { Popup, Portal, type ZoomableProps } from "@keybr/widget";
-import { memo, type ReactNode, useEffect, useState } from "react";
+import { memo, type ReactNode, useContext, useEffect, useState } from "react";
 import { useIntl } from "react-intl";
 import * as styles from "./Indicators.module.less";
 import { KeyExtendedDetails } from "./KeyExtendedDetails.tsx";
 import { type LessonState } from "./state/index.ts";
 
 export const Indicators = memo(function Indicators({
-  state: { keyStatsMap, summaryStats, lessonKeys, streakList, dailyGoal },
+  state: {
+    lesson,
+    keyStatsMap,
+    summaryStats,
+    lessonKeys,
+    streakList,
+    dailyGoal,
+  },
   moving = false,
 }: {
   readonly state: LessonState;
 } & ZoomableProps): ReactNode {
+  const { settings } = useSettings();
+  const pageData = useContext(PageDataContext);
+  const resultContext = useContext(ResultContext);
+  const keytraceAvailable = Boolean(pageData?.keytraceAvailable);
+  const keytraceMode = settings.get(lessonProps.keytraceMode);
+  const showKeytracePill = keytraceAvailable && keytraceMode !== "standalone";
+  const isKeytraceMode =
+    lesson instanceof GuidedLesson
+      ? lesson.unlockAllKeys
+      : resolvePracticeMode({
+          settings,
+          keytraceAvailable,
+          hasKeyTraceData: hasKeyTraceResults(resultContext?.results ?? []),
+        }) === "keytrace";
+
   type State = Readonly<
     | { type: "hidden" }
     | { type: "visible-in"; key: LessonKey; elem: Element }
@@ -79,12 +108,16 @@ export const Indicators = memo(function Indicators({
           }
         }}
       />
-      <CurrentKeyRow lessonKeys={lessonKeys} names={names} />
+      <CurrentKeyRow
+        lessonKeys={lessonKeys}
+        names={names}
+        allUnlockedMode={isKeytraceMode}
+      />
       <StreakListRow streakList={streakList} names={names} />
       {dailyGoal.goal > 0 && (
         <DailyGoalRow dailyGoal={dailyGoal} names={names} />
       )}
-      <KeyTracePracticePill />
+      {showKeytracePill && <KeyTracePracticePill />}
       {!moving &&
         (state.type === "visible" || state.type === "visible-out") && (
           <Portal>
@@ -100,6 +133,7 @@ export const Indicators = memo(function Indicators({
               <KeyExtendedDetails
                 lessonKey={state.key}
                 keyStats={keyStatsMap.get(state.key.letter)}
+                allUnlockedMode={isKeytraceMode}
               />
             </Popup>
           </Portal>
@@ -137,12 +171,18 @@ function KeyTracePracticePill(): ReactNode {
         }
         const json = (await res.json()) as {
           readonly status?: {
+            readonly available?: boolean;
             readonly active?: boolean;
             readonly lastEventTs?: number | null;
           };
           readonly today?: { readonly totalKeys?: number };
         };
         if (alive) {
+          if (json.status?.available === false) {
+            cachedKeyTraceInfo = null;
+            setInfo(null);
+            return;
+          }
           const nextInfo: KeyTraceInfo = {
             active: Boolean(json.status?.active),
             todayKeys: json.today?.totalKeys ?? 0,

@@ -1,15 +1,24 @@
-import { type PageInfo, Pages } from "@keybr/pages-shared";
+import { lessonProps } from "@keybr/lesson";
+import { type PageInfo, Pages, usePageData } from "@keybr/pages-shared";
+import { SettingsContext } from "@keybr/settings";
 import { Icon } from "@keybr/widget";
 import { mdiGithub, mdiTranslate } from "@mdi/js";
 import { clsx } from "clsx";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useContext, useEffect, useState } from "react";
 import { useIntl } from "react-intl";
 import { NavLink } from "react-router";
 import * as styles from "./NavMenu.module.less";
 import { ThemeSwitcher } from "./themes/ThemeSwitcher.tsx";
 
-// 本地双语版：保留练习页、个人统计、键盘监控、帮助、主题切换，以及中/英双语切换入口。
+// 本地双语版：保留练习页、个人统计、按需显示的键盘监控、帮助、主题切换，以及中/英双语切换入口。
 export function NavMenu({ currentPath }: { readonly currentPath: string }) {
+  const { keytraceAvailable } = usePageData();
+  const settingsContext = useContext(SettingsContext);
+  const keytraceMode =
+    settingsContext?.settings.get(lessonProps.keytraceMode) ?? "auto";
+  const showKeytrace =
+    Boolean(keytraceAvailable) && keytraceMode !== "standalone";
+
   return (
     <div className={styles.root}>
       <MenuItem>
@@ -24,9 +33,11 @@ export function NavMenu({ currentPath }: { readonly currentPath: string }) {
         <MenuItemLink page={Pages.profile} />
       </MenuItem>
 
-      <MenuItem>
-        <MenuItemLink page={Pages.keytrace} badge={<KeyTraceStatusDot />} />
-      </MenuItem>
+      {showKeytrace && (
+        <MenuItem>
+          <MenuItemLink page={Pages.keytrace} badge={<KeyTraceStatusDot />} />
+        </MenuItem>
+      )}
 
       <MenuItem>
         <MenuItemLink page={Pages.help} />

@@ -18,6 +18,10 @@ export function useKeyboard(): Keyboard {
   return value;
 }
 
+export function useOptionalKeyboard(): Keyboard | null {
+  return useContext(KeyboardContext) ?? null;
+}
+
 export function KeyboardProvider({
   children,
 }: {

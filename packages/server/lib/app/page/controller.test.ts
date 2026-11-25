@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { Application } from "@fastr/core";
 import { Cookie } from "@fastr/headers";
@@ -102,4 +105,69 @@ test(`ignore invalid theme cookie`, async () => {
   const $ = load(await response.body.text());
   equal($("html").attr("data-color"), "system");
   equal($("html").attr("data-font"), "open-sans");
+});
+
+function extractPageData(html: string): Record<string, unknown> {
+  const $ = load(html);
+  const script = $("script#page-data").text();
+  const match = script.match(/var __PAGE_DATA__ = (.+);$/);
+  if (match == null) {
+    throw new Error(`Missing __PAGE_DATA__ script: ${script}`);
+  }
+  return JSON.parse(match[1]) as Record<string, unknown>;
+}
+
+test("populates keytraceAvailable in SSR pageData according to events dir and KEYTRACE_ENABLED", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-page-"));
+  const prevDir = process.env.KEYTRACE_EVENTS_DIR;
+  const prevEnabled = process.env.KEYTRACE_ENABLED;
+  const request = startApp(context.get(Application, kMain));
+
+  try {
+    // 1. Empty directory in auto mode -> keytraceAvailable: false.
+    delete process.env.KEYTRACE_ENABLED;
+    process.env.KEYTRACE_EVENTS_DIR = dir;
+    const resEmpty = await request
+      .GET("/")
+      .header("X-Forwarded-Host", "www.keybr.com")
+      .header("X-Forwarded-Proto", "https")
+      .send();
+    equal(resEmpty.status, 200);
+    equal(extractPageData(await resEmpty.body.text()).keytraceAvailable, false);
+
+    // 2. Directory with a valid day event file -> keytraceAvailable: true.
+    await writeFile(join(dir, "2026-11-24.jsonl"), "\n", "utf8");
+    const resAvail = await request
+      .GET("/")
+      .header("X-Forwarded-Host", "www.keybr.com")
+      .header("X-Forwarded-Proto", "https")
+      .send();
+    equal(resAvail.status, 200);
+    equal(extractPageData(await resAvail.body.text()).keytraceAvailable, true);
+
+    // 3. KEYTRACE_ENABLED=false overrides existing files -> keytraceAvailable: false.
+    process.env.KEYTRACE_ENABLED = "false";
+    const resDisabled = await request
+      .GET("/")
+      .header("X-Forwarded-Host", "www.keybr.com")
+      .header("X-Forwarded-Proto", "https")
+      .send();
+    equal(resDisabled.status, 200);
+    equal(
+      extractPageData(await resDisabled.body.text()).keytraceAvailable,
+      false,
+    );
+  } finally {
+    if (prevDir === undefined) {
+      delete process.env.KEYTRACE_EVENTS_DIR;
+    } else {
+      process.env.KEYTRACE_EVENTS_DIR = prevDir;
+    }
+    if (prevEnabled === undefined) {
+      delete process.env.KEYTRACE_ENABLED;
+    } else {
+      process.env.KEYTRACE_ENABLED = prevEnabled;
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
 });

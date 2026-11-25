@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { FakeIntlProvider } from "@keybr/intl";
 import { Layout } from "@keybr/keyboard";
+import { lessonProps } from "@keybr/lesson";
 import { type PageData, PageDataContext } from "@keybr/pages-shared";
 import { FakePhoneticModel } from "@keybr/phonetic-model";
 import { PhoneticModelLoader } from "@keybr/phonetic-model-loader";
@@ -121,4 +122,83 @@ test("KeySpeedChartSection KeyDetails uses session-level keyStatsMap across mult
   isNull(r.queryByText((content) => content.includes("45.0wpm")));
 
   r.unmount();
+});
+
+test("ProfilePage renders KeyTraceSyncBar only when keytraceAvailable is true and mode is not standalone", async () => {
+  PhoneticModelLoader.loader = FakePhoneticModel.loader;
+  const results = faker.nextResultList(5);
+
+  // Unavailable -> hidden.
+  const rUnavailable = render(
+    <FakeIntlProvider>
+      <PageDataContext.Provider
+        value={
+          { publicUser: { id: "abc" }, keytraceAvailable: false } as PageData
+        }
+      >
+        <FakeSettingsContext>
+          <FakeResultContext initialResults={results}>
+            <ProfilePage />
+          </FakeResultContext>
+        </FakeSettingsContext>
+      </PageDataContext.Provider>
+    </FakeIntlProvider>,
+  );
+  try {
+    await rUnavailable.findByText("Typing Speed");
+    isNull(rUnavailable.queryByText("Sync KeyTrace"));
+  } finally {
+    rUnavailable.unmount();
+  }
+
+  // Available + auto -> shown.
+  const rAvailable = render(
+    <FakeIntlProvider>
+      <PageDataContext.Provider
+        value={
+          { publicUser: { id: "abc" }, keytraceAvailable: true } as PageData
+        }
+      >
+        <FakeSettingsContext>
+          <FakeResultContext initialResults={results}>
+            <ProfilePage />
+          </FakeResultContext>
+        </FakeSettingsContext>
+      </PageDataContext.Provider>
+    </FakeIntlProvider>,
+  );
+  try {
+    await rAvailable.findByText("Typing Speed");
+    isNotNull(rAvailable.queryByText("Sync KeyTrace"));
+  } finally {
+    rAvailable.unmount();
+  }
+
+  // Available + standalone -> hidden.
+  const rStandalone = render(
+    <FakeIntlProvider>
+      <PageDataContext.Provider
+        value={
+          { publicUser: { id: "abc" }, keytraceAvailable: true } as PageData
+        }
+      >
+        <FakeSettingsContext
+          initialSettings={new Settings().set(
+            lessonProps.keytraceMode,
+            "standalone",
+          )}
+        >
+          <FakeResultContext initialResults={results}>
+            <ProfilePage />
+          </FakeResultContext>
+        </FakeSettingsContext>
+      </PageDataContext.Provider>
+    </FakeIntlProvider>,
+  );
+  try {
+    await rStandalone.findByText("Typing Speed");
+    isNull(rStandalone.queryByText("Sync KeyTrace"));
+  } finally {
+    rStandalone.unmount();
+  }
 });

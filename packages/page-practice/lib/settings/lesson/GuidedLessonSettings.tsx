@@ -1,11 +1,19 @@
 import { getZhSchemeFromLayout, isZhLanguage } from "@keybr/keyboard";
-import { type GuidedLesson } from "@keybr/lesson";
+import {
+  type GuidedLesson,
+  lessonProps,
+  resolvePracticeMode,
+} from "@keybr/lesson";
+import { PageDataContext } from "@keybr/pages-shared";
+import { hasKeyTraceResults, ResultContext } from "@keybr/result";
+import { useSettings } from "@keybr/settings";
 import { Description, Explainer, FieldSet } from "@keybr/widget";
-import { type ReactNode } from "react";
+import { type ReactNode, useContext } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { AlphabetSizeProp } from "./AlphabetSizeProp.tsx";
 import { FuzzyPinyinProp } from "./FuzzyPinyinProp.tsx";
 import { KeyboardOrderProp } from "./KeyboardOrderProp.tsx";
+import { KeytraceModeProp } from "./KeytraceModeProp.tsx";
 import { LessonLengthProp } from "./LessonLengthProp.tsx";
 import { NaturalWordsProp } from "./NaturalWordsProp.tsx";
 import { RecoverKeysProp } from "./RecoverKeysProp.tsx";
@@ -20,8 +28,21 @@ export function GuidedLessonSettings({
   readonly lesson: GuidedLesson;
 }): ReactNode {
   const { formatMessage } = useIntl();
-  // 中文（双拼 / 全拼）是「26 个键一开始就全开」，上游那套「先解锁几个键、按成绩逐渐放」
-  // 在这里既不生效也没意义，相关开关全部隐藏，免得看着像一个能调的选项。
+  const { settings } = useSettings();
+  const pageData = useContext(PageDataContext);
+  const resultContext = useContext(ResultContext);
+  const keytraceAvailable = Boolean(pageData?.keytraceAvailable);
+  const hasKeyTraceData = hasKeyTraceResults(resultContext?.results ?? []);
+  const practiceMode = resolvePracticeMode({
+    settings,
+    keytraceAvailable,
+    hasKeyTraceData,
+  });
+  const isStandalone = practiceMode === "standalone";
+  const showKeytraceModeSelector =
+    keytraceAvailable ||
+    hasKeyTraceData ||
+    settings.get(lessonProps.keytraceMode) !== "auto";
   const { language } = lesson.model;
   const isZh = isZhLanguage(language);
   const zhScheme = getZhSchemeFromLayout(lesson.keyboard.layout) ?? "zh-sp";
@@ -42,11 +63,12 @@ export function GuidedLessonSettings({
         })}
       >
         <TargetSpeedProp />
-        {!isZh && <RecoverKeysProp />}
-        {!isZh && <KeyboardOrderProp />}
+        {showKeytraceModeSelector && <KeytraceModeProp />}
+        {isStandalone && <RecoverKeysProp />}
+        {isStandalone && <KeyboardOrderProp />}
         {!isZh && <NaturalWordsProp />}
         <RepeatWordsProp />
-        {!isZh && <AlphabetSizeProp />}
+        {isStandalone && <AlphabetSizeProp />}
         <TextManglingProp showCapitals={!isZh} />
         {isZh && <ZhProp />}
         {isZh && <FuzzyPinyinProp scheme={zhScheme} />}

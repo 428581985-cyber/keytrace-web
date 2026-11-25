@@ -10,13 +10,14 @@ import { Application } from "@fastr/core";
 import { Container } from "@fastr/invert";
 import { Router } from "@fastr/middleware-router";
 import { HighScoresFactory } from "@keybr/highscores";
-import { Result } from "@keybr/result";
+import { Result, TextType } from "@keybr/result";
 import { resultFromJson } from "@keybr/result-io";
 import { UserDataFactory } from "@keybr/result-userdata";
-import { deepEqual, equal, isNotNull, isTrue } from "rich-assert";
+import { deepEqual, equal, isFalse, isNotNull, isTrue } from "rich-assert";
 import { createTestServer } from "../test/request.ts";
 import { Controller } from "./controller.ts";
 import {
+  isKeyTraceAvailable,
   readKeyTraceDashboard,
   readKeyTraceSyncData,
   resolveZhLayoutFromIme,
@@ -80,7 +81,8 @@ test("missing events directory returns empty result gracefully", async () => {
   const missingDir = join(tmpdir(), `keytrace-missing-${Date.now()}`);
   const data = await readKeyTraceSyncData({ eventsDir: missingDir });
   deepEqual(data, {
-    syncVersion: 2,
+    available: false,
+    syncVersion: 3,
     records: [],
     latestTs: 0,
     daysScanned: 0,
@@ -184,12 +186,15 @@ test("reads .jsonl and .jsonl.gz into valid zh-sp and en-us Result JSON", async 
 
     const data = await readKeyTraceSyncData({ eventsDir: dir });
 
+    equal(data.available, true);
+    equal(data.syncVersion, 3);
     equal(data.daysScanned, 2);
     equal(data.records.length, 2);
     equal(data.latestTs, 1700086405000);
 
     const zhRecord = data.records[0];
     equal(zhRecord.l, "zh-sp");
+    equal(zhRecord.m, "keytrace");
     equal(zhRecord.ts, 1700000010000);
     equal(zhRecord.n, 12); // 'x' popped by Backspace; 12 surviving keys
     equal(zhRecord.e, 1); // 1 miss attributed to corrected 'a'
@@ -199,15 +204,18 @@ test("reads .jsonl and .jsonl.gz into valid zh-sp and en-us Result JSON", async 
     equal(zhRecord.h[50], undefined); // digit '2' excluded for zh-sp
     const zhResult = resultFromJson(zhRecord);
     isNotNull(zhResult);
+    equal(zhResult!.textType, TextType.KEYTRACE);
     isTrue(Result.isValid(zhResult!));
 
     const enRecord = data.records[1];
     equal(enRecord.l, "en-us");
+    equal(enRecord.m, "keytrace");
     equal(enRecord.ts, 1700086405000);
     equal(enRecord.n, 10);
     equal(enRecord.h[49]?.h, 1); // digit '1' included for en-us
     const enResult = resultFromJson(enRecord);
     isNotNull(enResult);
+    equal(enResult!.textType, TextType.KEYTRACE);
     isTrue(Result.isValid(enResult!));
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -337,12 +345,14 @@ test("GET /_/sync/keytrace endpoint responds without auth and supports since que
     const res1 = await req.GET("/_/sync/keytrace").send();
     equal(res1.status, 200);
     const body1 = await res1.body.json<{
+      available: boolean;
       syncVersion: number;
       records: unknown[];
       latestTs: number;
       daysScanned: number;
     }>();
-    equal(body1.syncVersion, 2);
+    equal(body1.available, true);
+    equal(body1.syncVersion, 3);
     equal(body1.records.length, 1);
     equal(body1.latestTs, 5000);
     equal(body1.daysScanned, 1);
@@ -350,10 +360,12 @@ test("GET /_/sync/keytrace endpoint responds without auth and supports since que
     const res2 = await req.GET("/_/sync/keytrace?since=5000").send();
     equal(res2.status, 200);
     const body2 = await res2.body.json<{
+      available: boolean;
       records: unknown[];
       latestTs: number;
       daysScanned: number;
     }>();
+    equal(body2.available, true);
     equal(body2.records.length, 0);
     equal(body2.latestTs, 0);
     equal(body2.daysScanned, 1);
@@ -600,12 +612,15 @@ test("migrate=1 endpoint returns commitKeys covering legacy commits", async () =
     const res = await req.GET("/_/sync/keytrace?since=0&migrate=1").send();
     equal(res.status, 200);
     const body = await res.body.json<{
+      available: boolean;
       syncVersion: number;
-      records: unknown[];
+      records: { m: string }[];
       commitKeys: string[];
     }>();
-    equal(body.syncVersion, 2);
+    equal(body.available, true);
+    equal(body.syncVersion, 3);
     equal(body.records.length, 1);
+    equal(body.records[0].m, "keytrace");
     isTrue(body.commitKeys.includes("en-us:10"));
     isTrue(body.commitKeys.includes("en-us:20"));
   } finally {
@@ -650,7 +665,12 @@ test("GET /_/keytrace/summary returns human-readable dashboard stats, apps, weak
     const res = await req.GET("/_/keytrace/summary?days=7").send();
     equal(res.status, 200);
     const body = await res.body.json<{
-      status: { active: boolean; imeName: string | null; todayBytes: number };
+      status: {
+        available: boolean;
+        active: boolean;
+        imeName: string | null;
+        todayBytes: number;
+      };
       today: { totalKeys: number; zhKeys: number; corrections: number; commits: number };
       apps: { exe: string; totalKeys: number }[];
       weakKeys: { "zh-sp": { letter: string; misses: number }[] };
@@ -658,6 +678,7 @@ test("GET /_/keytrace/summary returns human-readable dashboard stats, apps, weak
       recentCommits: { text: string; exe: string }[];
     }>();
 
+    equal(body.status.available, true);
     equal(body.status.active, true);
     equal(body.status.imeName, "shuangpin/xiaohe");
     isTrue(body.status.todayBytes > 0);
@@ -861,6 +882,7 @@ test("readKeyTraceDashboard aggregates zh-sp + zh-qp into zhKeys and isolates we
   const dir = await mkdtemp(join(tmpdir(), "keytrace-dash-qp-"));
   try {
     const empty = await readKeyTraceDashboard({ eventsDir: dir });
+    equal(empty.status.available, false);
     deepEqual(empty.weakKeys, {
       "zh-sp": [],
       "zh-sp-zrm": [],
@@ -1155,6 +1177,175 @@ test("records aborted pending corrections (BS+Space, BS exhausting stack, empty-
     const rec = data.records[0];
     equal(rec.n, 10);
     equal(rec.e, 3); // Episode 1 (1) + Episode 2 (1) + Episode 3 (1)
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("isKeyTraceAvailable handles auto, true, and false KEYTRACE_ENABLED modes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-avail-"));
+  const missingDir = join(tmpdir(), `keytrace-missing-avail-${Date.now()}`);
+  const prevEnabled = process.env.KEYTRACE_ENABLED;
+  const prevDir = process.env.KEYTRACE_EVENTS_DIR;
+  try {
+    // Default ("auto"): non-existent or empty or non-event files -> false.
+    delete process.env.KEYTRACE_ENABLED;
+    process.env.KEYTRACE_EVENTS_DIR = missingDir;
+    isFalse(isKeyTraceAvailable());
+    isFalse(isKeyTraceAvailable({ eventsDir: dir }));
+
+    await writeFile(join(dir, "notes.txt"), "not an event file", "utf8");
+    isFalse(isKeyTraceAvailable({ eventsDir: dir }));
+
+    // Forced "true": empty readable directory -> true; missing directory -> false.
+    process.env.KEYTRACE_ENABLED = "true";
+    isTrue(isKeyTraceAvailable({ eventsDir: dir }));
+    isFalse(isKeyTraceAvailable({ eventsDir: missingDir }));
+
+    // Valid day file in "auto" -> true.
+    process.env.KEYTRACE_ENABLED = "auto";
+    await writeFile(join(dir, "2026-11-24.jsonl"), "\n", "utf8");
+    isTrue(isKeyTraceAvailable({ eventsDir: dir }));
+
+    // "false" disables even when valid day files exist.
+    process.env.KEYTRACE_ENABLED = "false";
+    isFalse(isKeyTraceAvailable({ eventsDir: dir }));
+  } finally {
+    if (prevEnabled === undefined) {
+      delete process.env.KEYTRACE_ENABLED;
+    } else {
+      process.env.KEYTRACE_ENABLED = prevEnabled;
+    }
+    if (prevDir === undefined) {
+      delete process.env.KEYTRACE_EVENTS_DIR;
+    } else {
+      process.env.KEYTRACE_EVENTS_DIR = prevDir;
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("KEYTRACE_ENABLED=false disables FS scans and returns available: false from sync and summary endpoints", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-disabled-"));
+  const prevDir = process.env.KEYTRACE_EVENTS_DIR;
+  const prevEnabled = process.env.KEYTRACE_ENABLED;
+  process.env.KEYTRACE_EVENTS_DIR = dir;
+  process.env.KEYTRACE_ENABLED = "false";
+  try {
+    const lines = [
+      kd(65, 100, 900),
+      kd(66, 220, 910),
+      kd(67, 340, 920),
+      kd(68, 460, 930),
+      kd(69, 580, 940),
+      kd(70, 700, 950),
+      kd(71, 820, 960),
+      kd(72, 940, 970),
+      kd(73, 1060, 980),
+      kd(74, 1180, 990),
+      commit("abcdefghij", 10, 1250, 5000),
+    ];
+    await writeFile(join(dir, "2026-11-24.jsonl"), jsonl(lines), "utf8");
+
+    const syncDirect = await readKeyTraceSyncData({
+      eventsDir: dir,
+      includeCommitKeys: true,
+    });
+    deepEqual(syncDirect, {
+      available: false,
+      syncVersion: 3,
+      records: [],
+      latestTs: 0,
+      daysScanned: 0,
+      commitKeys: [],
+    });
+
+    const dashDirect = await readKeyTraceDashboard({ eventsDir: dir });
+    equal(dashDirect.status.available, false);
+    equal(dashDirect.status.active, false);
+    equal(dashDirect.status.daysAvailable, 0);
+    equal(dashDirect.overall.totalKeys, 0);
+
+    const container = new Container();
+    container.bind(HighScoresFactory).toValue(null!);
+    container.bind(UserDataFactory).toValue(null!);
+    const app = new Application(container).use(
+      new Router().registerAll(allToRoutes(Controller)).middleware(),
+    );
+    const req = request.use(start(createTestServer(app.callback())));
+
+    const syncRes = await req.GET("/_/sync/keytrace?since=0&migrate=1").send();
+    equal(syncRes.status, 200);
+    const syncBody = await syncRes.body.json<{
+      available: boolean;
+      syncVersion: number;
+      records: unknown[];
+      daysScanned: number;
+      commitKeys: string[];
+    }>();
+    equal(syncBody.available, false);
+    equal(syncBody.syncVersion, 3);
+    equal(syncBody.records.length, 0);
+    equal(syncBody.daysScanned, 0);
+    deepEqual(syncBody.commitKeys, []);
+
+    const summaryRes = await req.GET("/_/keytrace/summary?days=7").send();
+    equal(summaryRes.status, 200);
+    const summaryBody = await summaryRes.body.json<{
+      status: { available: boolean; active: boolean; daysAvailable: number };
+      overall: { totalKeys: number };
+    }>();
+    equal(summaryBody.status.available, false);
+    equal(summaryBody.status.active, false);
+    equal(summaryBody.status.daysAvailable, 0);
+    equal(summaryBody.overall.totalKeys, 0);
+  } finally {
+    if (prevDir === undefined) {
+      delete process.env.KEYTRACE_EVENTS_DIR;
+    } else {
+      process.env.KEYTRACE_EVENTS_DIR = prevDir;
+    }
+    if (prevEnabled === undefined) {
+      delete process.env.KEYTRACE_ENABLED;
+    } else {
+      process.env.KEYTRACE_ENABLED = prevEnabled;
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("migrate=1 includes layout-specific commitKeys for zh-qp v2 -> v3 migration", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-migrate-qp-"));
+  try {
+    const lines: Record<string, unknown>[] = [
+      {
+        v: 1,
+        ts: 1700000000000,
+        mono: 10,
+        ev: "meta",
+        exe: "keytrace",
+        text: "ime=full-pinyin",
+      },
+    ];
+    const vks = [78, 73, 72, 65, 79, 83, 72, 73, 74, 73];
+    for (let i = 0; i < vks.length; i += 1) {
+      lines.push(kd(vks[i], 100 + i * 120, 1700000001000 + i * 120));
+    }
+    lines.push(commit("你好世界", vks.length, 1500, 1700000010000));
+
+    await writeFile(join(dir, "2026-11-24.jsonl"), jsonl(lines), "utf8");
+
+    const data = await readKeyTraceSyncData({
+      eventsDir: dir,
+      includeCommitKeys: true,
+    });
+    equal(data.available, true);
+    equal(data.syncVersion, 3);
+    equal(data.records.length, 1);
+    equal(data.records[0].l, "zh-qp");
+    equal(data.records[0].m, "keytrace");
+    isTrue(data.commitKeys?.includes("zh-qp:1700000010") ?? false);
+    isTrue(data.commitKeys?.includes("zh-sp:1700000010") ?? false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

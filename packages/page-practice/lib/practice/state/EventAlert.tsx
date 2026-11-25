@@ -15,6 +15,15 @@ export function EventAlert({ event }: { readonly event: LessonEvent }) {
           />
         </Award>
       );
+    case "focus-letter":
+      return (
+        <Award icon={<Key lessonKey={event.lessonKey} size="announcement" />}>
+          <FormattedMessage
+            id="t_ev_Focus_letter_changed"
+            defaultMessage="Practice key switched!"
+          />
+        </Award>
+      );
     case "top-speed":
       return (
         <Award icon={<TrophyIcon />}>

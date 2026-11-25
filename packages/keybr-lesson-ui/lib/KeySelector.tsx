@@ -1,10 +1,10 @@
-import { LessonKey, Target } from "@keybr/lesson";
+import { LessonKey } from "@keybr/lesson";
 import { type Letter } from "@keybr/phonetic-model";
 import { computeKeyMastery, type KeyStatsMap } from "@keybr/result";
-import { useSettings } from "@keybr/settings";
 import { type FocusProps, useHotkeysHandler } from "@keybr/widget";
 import { Key } from "./Key.tsx";
 import * as styles from "./KeySelector.module.less";
+import { useTarget } from "./use-target.ts";
 
 export const KeySelector = ({
   current,
@@ -21,8 +21,7 @@ export const KeySelector = ({
   title?: string;
   onSelect?: (letter: Letter) => void;
 } & FocusProps) => {
-  const { settings } = useSettings();
-  const target = new Target(settings);
+  const target = useTarget();
   const { letters } = keyStatsMap;
   const handlePrev = () => {
     if (onSelect != null) {

@@ -8,7 +8,7 @@ import {
   switchPracticeLanguage,
   useFormattedNames,
 } from "@keybr/keyboard";
-import { getZhFocusStorageKeys } from "@keybr/lesson";
+import { getFocusStorageKeys } from "@keybr/lesson";
 import { useFormatter } from "@keybr/lesson-ui";
 import { Pages, Screen } from "@keybr/pages-shared";
 import { useResults } from "@keybr/result";
@@ -32,7 +32,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useIntl } from "react-intl";
+import { FormattedMessage, useIntl } from "react-intl";
 import * as styles from "./KeytracePage.module.less";
 
 type KeyTraceSummaryBucket = {
@@ -119,6 +119,7 @@ type KeyTraceCommitItem = {
 
 type KeyTraceDashboardData = {
   readonly status: {
+    readonly available?: boolean;
     readonly active: boolean;
     readonly lastEventTs: number | null;
     readonly todayDate: string;
@@ -232,7 +233,7 @@ export function KeytracePage({
 }: {
   readonly onNavigateToPractice?: () => void;
 } = {}): ReactNode {
-  const { locale } = useIntl();
+  const { formatMessage, locale } = useIntl();
   const isZhLocale = locale.startsWith("zh");
   const t = (zh: string, en: string) => (isZhLocale ? zh : en);
 
@@ -249,7 +250,7 @@ export function KeytracePage({
 
   const [data, setData] = useState<KeyTraceDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [keyTab, setKeyTab] = useState<WeakKeyLangTab>(() =>
@@ -267,44 +268,66 @@ export function KeytracePage({
     setKeyTab(tab);
   }, []);
 
+  const applySummary = useCallback((json: KeyTraceDashboardData) => {
+    if (json.status.available === false) {
+      setData(json);
+      setUnavailable(true);
+      return false;
+    }
+    setData(json);
+    setUnavailable(false);
+    if (!userSelectedTabRef.current) {
+      setKeyTab((prev) =>
+        pickAutoKeyTab(prev, activeZhLayoutIdRef.current, json),
+      );
+    }
+    return true;
+  }, []);
+
   const refreshManual = useCallback(() => {
     setLoading(true);
     requestKeyTraceSummary()
       .then((json) => {
-        setData(json);
-        if (!userSelectedTabRef.current) {
-          setKeyTab((prev) =>
-            pickAutoKeyTab(prev, activeZhLayoutIdRef.current, json),
-          );
-        }
-        setError(null);
+        applySummary(json);
       })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : String(err));
+      .catch(() => {
+        setData(null);
+        setUnavailable(true);
       })
       .finally(() => {
         setLoading(false);
       });
-  }, []);
+  }, [applySummary]);
 
   useEffect(() => {
     let alive = true;
+    let timer: number | null = null;
     const poll = () => {
       requestKeyTraceSummary()
         .then((json) => {
-          if (alive) {
-            setData(json);
-            if (!userSelectedTabRef.current) {
-              setKeyTab((prev) =>
-                pickAutoKeyTab(prev, activeZhLayoutIdRef.current, json),
-              );
-            }
-            setError(null);
+          if (!alive) {
+            return;
+          }
+          const isAvailable = applySummary(json);
+          if (isAvailable && timer == null) {
+            timer = window.setInterval(() => {
+              if (!document.hidden) {
+                poll();
+              }
+            }, 30000);
+          } else if (!isAvailable && timer != null) {
+            window.clearInterval(timer);
+            timer = null;
           }
         })
-        .catch((err) => {
+        .catch(() => {
           if (alive) {
-            setError(err instanceof Error ? err.message : String(err));
+            setData(null);
+            setUnavailable(true);
+            if (timer != null) {
+              window.clearInterval(timer);
+              timer = null;
+            }
           }
         })
         .finally(() => {
@@ -314,16 +337,13 @@ export function KeytracePage({
         });
     };
     poll();
-    const timer = window.setInterval(() => {
-      if (!document.hidden) {
-        poll();
-      }
-    }, 30000);
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      if (timer != null) {
+        window.clearInterval(timer);
+      }
     };
-  }, []);
+  }, [applySummary]);
 
   const handleSync = async () => {
     if (syncing) {
@@ -342,11 +362,7 @@ export function KeytracePage({
           : t("练习统计已是最新", "Already up to date"),
       );
       const json = await requestKeyTraceSummary();
-      setData(json);
-      if (!userSelectedTabRef.current) {
-        setKeyTab((prev) => pickAutoKeyTab(prev, activeZhLayoutId, json));
-      }
-      setError(null);
+      applySummary(json);
     } catch {
       setSyncMsg(t("同步失败", "Sync failed"));
     } finally {
@@ -354,14 +370,24 @@ export function KeytracePage({
     }
   };
 
+  const navigateToPractice = useCallback(() => {
+    if (onNavigateToPractice != null) {
+      onNavigateToPractice();
+    } else if (typeof window !== "undefined") {
+      window.location.assign(Pages.intlPath(Pages.practice.path, locale));
+    }
+  }, [onNavigateToPractice, locale]);
+
   const handlePracticeKey = (letter: string, layoutId: KeyTraceLayoutId) => {
     const currentOptions = KeyboardOptions.from(settings);
+    let targetLayoutId: string = layoutId;
     if (layoutId === "en-us") {
       if (currentOptions.layout.id !== "en-us") {
         updateSettings(switchPracticeLanguage(settings, "en"));
       }
     } else {
       const targetLayout = Layout.ALL.get(layoutId, activeZhLayout);
+      targetLayoutId = targetLayout.id;
       let next = setZhScheme(settings, targetLayout);
       if (!isZhLanguage(KeyboardOptions.from(next).language)) {
         next = switchPracticeLanguage(next, "zh");
@@ -373,145 +399,181 @@ export function KeytracePage({
       ) {
         updateSettings(next);
       }
-      const { lockedKey, drillKey } = getZhFocusStorageKeys(targetLayout.id);
-      try {
-        window.localStorage.setItem(lockedKey, letter.toLowerCase());
-        window.localStorage.setItem(drillKey, letter.toLowerCase());
-      } catch {
-        // Ignore storage errors.
-      }
     }
-    if (onNavigateToPractice != null) {
-      onNavigateToPractice();
-    } else if (typeof window !== "undefined") {
-      window.location.assign(Pages.practice.path);
+    const { lockedKey, drillKey } = getFocusStorageKeys(targetLayoutId);
+    try {
+      window.localStorage.setItem(lockedKey, letter.toLowerCase());
+      window.localStorage.setItem(drillKey, letter.toLowerCase());
+    } catch {
+      // Ignore storage errors.
     }
+    navigateToPractice();
   };
+
+  const isDisconnected = unavailable || data?.status.available === false;
 
   return (
     <Screen>
       <Header level={1}>{t("键盘监控", "KeyTrace Monitor")}</Header>
 
-      <Para>
-        {t(
-          "实时汇总本地 ~/.keytrace/events/ 的日常真实打字记录（纯本地读取、不上传云端）。停顿超过 3 秒不计入速度，退格纠正自动归因到最终正确按下的键。",
-          "Summarizes real-world typing logs from ~/.keytrace/events/ locally. Pauses over 3s are discarded and backspace corrections are attributed to the final key.",
-        )}
-      </Para>
-
-      <div className={styles.statusBar}>
-        <div className={styles.statusInfo}>
-          <span className={styles.statusBadge}>
-            <span
-              className={clsx(
-                styles.dot,
-                data?.status.active && styles.dotActive,
-              )}
+      {isDisconnected ? (
+        <div className={styles.disconnectedCard}>
+          <h2 className={styles.disconnectedTitle}>
+            <FormattedMessage
+              id="keytrace.disconnected.title"
+              defaultMessage="Local KeyTrace data not detected"
             />
-            {data == null
-              ? t("加载中…", "Loading…")
-              : data.status.active
-                ? t("录制活跃中", "Recording Active")
-                : data.status.todayBytes > 0
-                  ? t("今日已记录", "Recorded Today")
-                  : t("今日暂无事件", "Idle Today")}
-          </span>
-          {data?.status.imeName && (
-            <span className={styles.metaText}>
-              {t("输入法:", "IME:")} {data.status.imeName}
-            </span>
-          )}
-          <span className={styles.metaText}>
-            {t("最近事件:", "Last event:")}{" "}
-            {formatClockTime(data?.status.lastEventTs ?? null)}
-          </span>
-          {data != null && (
-            <span className={styles.metaText}>
-              {t("今日日志:", "Today log:")} {formatBytes(data.status.todayBytes)}
-            </span>
-          )}
-          {syncMsg && <span className={styles.metaText}>{syncMsg}</span>}
+          </h2>
+          <p className={styles.disconnectedText}>
+            <FormattedMessage
+              id="keytrace.disconnected.description"
+              defaultMessage="KeyTrace Monitor reads daily typing event logs recorded locally by the KeyTrace desktop collector (~/.keytrace/events/). Web typing practice works completely standalone without installing KeyTrace."
+            />
+          </p>
+          <p className={styles.disconnectedText}>
+            <FormattedMessage
+              id="keytrace.disconnected.hint"
+              defaultMessage="To enable daily typing analytics and weak-key linking, run KeyTrace locally so event logs are written to ~/.keytrace/events/ (or configure KEYTRACE_EVENTS_DIR), then click Refresh."
+            />
+          </p>
+          <div className={styles.disconnectedActions}>
+            <Button
+              disabled={loading}
+              icon={<Icon shape={mdiRefresh} />}
+              label={formatMessage({
+                id: "keytrace.disconnected.refresh",
+                defaultMessage: "Refresh",
+              })}
+              onClick={refreshManual}
+            />
+            <Button
+              icon={<Icon shape={mdiKeyboardOutline} />}
+              label={formatMessage({
+                id: "keytrace.disconnected.goPractice",
+                defaultMessage: "Go to Practice",
+              })}
+              onClick={navigateToPractice}
+            />
+          </div>
         </div>
-        <div className={styles.actions}>
-          <Button
-            disabled={loading}
-            icon={<Icon shape={mdiRefresh} />}
-            label={t("刷新", "Refresh")}
-            onClick={refreshManual}
-          />
-          <Button
-            disabled={syncing}
-            icon={<Icon shape={mdiSync} />}
-            label={t("同步到练习", "Sync to Practice")}
-            onClick={() => {
-              void handleSync();
-            }}
-          />
-        </div>
-      </div>
-
-      {error && (
-        <Para className={styles.emptyNote}>
-          {t("加载监控数据失败：", "Failed to load monitor summary: ")}
-          {error}
-        </Para>
-      )}
-
-      {data && (
+      ) : (
         <>
-          <SummarySection
-            title={t(
-              `今日日常打字（${data.status.todayDate}）`,
-              `Today (${data.status.todayDate})`,
+          <Para>
+            {t(
+              "实时汇总本地 ~/.keytrace/events/ 的日常真实打字记录（纯本地读取、不上传云端）。停顿超过 3 秒不计入速度，退格纠正自动归因到最终正确按下的键。",
+              "Summarizes real-world typing logs from ~/.keytrace/events/ locally. Pauses over 3s are discarded and backspace corrections are attributed to the final key.",
             )}
-            bucket={data.today}
-            formatSpeed={formatSpeed}
-            isZhLocale={isZhLocale}
-          />
+          </Para>
 
-          <SummarySection
-            title={t(
-              `累计监控统计（共 ${data.status.daysAvailable} 天日志）`,
-              `All-Time (${data.status.daysAvailable} days)`,
-            )}
-            bucket={data.overall}
-            formatSpeed={formatSpeed}
-            isZhLocale={isZhLocale}
-          />
-
-          <DailyChartSection daily={data.daily} isZhLocale={isZhLocale} />
-
-          <WeakKeysSection
-            weakKeys={data.weakKeys}
-            keyTab={keyTab}
-            activeZhLayoutId={activeZhLayoutId}
-            activeZhSchemeName={formatZhSchemeName(activeZhLayout)}
-            formatZhSchemeName={formatZhSchemeName}
-            onTabChange={handleTabChange}
-            onPractice={handlePracticeKey}
-            isZhLocale={isZhLocale}
-          />
-
-          <AppsSection
-            apps={data.apps}
-            formatSpeed={formatSpeed}
-            isZhLocale={isZhLocale}
-          />
-
-          <div className={styles.twoCols}>
-            <div>
-              <CorrectionsSection
-                items={data.recentCorrections}
-                isZhLocale={isZhLocale}
-              />
+          <div className={styles.statusBar}>
+            <div className={styles.statusInfo}>
+              <span className={styles.statusBadge}>
+                <span
+                  className={clsx(
+                    styles.dot,
+                    data?.status.active && styles.dotActive,
+                  )}
+                />
+                {data == null
+                  ? t("加载中…", "Loading…")
+                  : data.status.active
+                    ? t("录制活跃中", "Recording Active")
+                    : data.status.todayBytes > 0
+                      ? t("今日已记录", "Recorded Today")
+                      : t("今日暂无事件", "Idle Today")}
+              </span>
+              {data?.status.imeName && (
+                <span className={styles.metaText}>
+                  {t("输入法:", "IME:")} {data.status.imeName}
+                </span>
+              )}
+              <span className={styles.metaText}>
+                {t("最近事件:", "Last event:")}{" "}
+                {formatClockTime(data?.status.lastEventTs ?? null)}
+              </span>
+              {data != null && (
+                <span className={styles.metaText}>
+                  {t("今日日志:", "Today log:")}{" "}
+                  {formatBytes(data.status.todayBytes)}
+                </span>
+              )}
+              {syncMsg && <span className={styles.metaText}>{syncMsg}</span>}
             </div>
-            <div>
-              <CommitsSection
-                items={data.recentCommits}
-                isZhLocale={isZhLocale}
+            <div className={styles.actions}>
+              <Button
+                disabled={loading}
+                icon={<Icon shape={mdiRefresh} />}
+                label={t("刷新", "Refresh")}
+                onClick={refreshManual}
+              />
+              <Button
+                disabled={syncing}
+                icon={<Icon shape={mdiSync} />}
+                label={t("同步到练习", "Sync to Practice")}
+                onClick={() => {
+                  void handleSync();
+                }}
               />
             </div>
           </div>
+
+          {data && (
+            <>
+              <SummarySection
+                title={t(
+                  `今日日常打字（${data.status.todayDate}）`,
+                  `Today (${data.status.todayDate})`,
+                )}
+                bucket={data.today}
+                formatSpeed={formatSpeed}
+                isZhLocale={isZhLocale}
+              />
+
+              <SummarySection
+                title={t(
+                  `累计监控统计（共 ${data.status.daysAvailable} 天日志）`,
+                  `All-Time (${data.status.daysAvailable} days)`,
+                )}
+                bucket={data.overall}
+                formatSpeed={formatSpeed}
+                isZhLocale={isZhLocale}
+              />
+
+              <DailyChartSection daily={data.daily} isZhLocale={isZhLocale} />
+
+              <WeakKeysSection
+                weakKeys={data.weakKeys}
+                keyTab={keyTab}
+                activeZhLayoutId={activeZhLayoutId}
+                activeZhSchemeName={formatZhSchemeName(activeZhLayout)}
+                formatZhSchemeName={formatZhSchemeName}
+                onTabChange={handleTabChange}
+                onPractice={handlePracticeKey}
+                isZhLocale={isZhLocale}
+              />
+
+              <AppsSection
+                apps={data.apps}
+                formatSpeed={formatSpeed}
+                isZhLocale={isZhLocale}
+              />
+
+              <div className={styles.twoCols}>
+                <div>
+                  <CorrectionsSection
+                    items={data.recentCorrections}
+                    isZhLocale={isZhLocale}
+                  />
+                </div>
+                <div>
+                  <CommitsSection
+                    items={data.recentCommits}
+                    isZhLocale={isZhLocale}
+                  />
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
     </Screen>

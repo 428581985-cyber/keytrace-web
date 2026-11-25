@@ -14,6 +14,7 @@
     "@keybr/pages-shared": "*",
     "@keybr/phonetic-model": "*",
     "@keybr/phonetic-model-loader": "*",
+    "@keybr/result": "*",
     "@keybr/settings": "*",
     "@keybr/textinput": "*"
   },

@@ -26,6 +26,7 @@ export class Progress {
   readonly #streakList: MutableStreakList;
   readonly #dailyGoal: MutableDailyGoal;
   readonly #events: LessonEventSource;
+  #version = 0;
 
   constructor(settings: Settings, lesson: Lesson) {
     this.#settings = settings;
@@ -89,6 +90,7 @@ export class Progress {
 
   append(result: Result, listener: LessonEventListener = () => {}) {
     this.#results.push(result);
+    this.#version += 1;
     // 键位统计只收当前布局的结果。
     // 双拼里 C 键打的是韵母 ao，和英文打字母 c 是两套完全不同的肌肉记忆，
     // 混在一起会让「哪个键弱」的判断失真——英文练得多，双拼的弱键就被稀释掉。
@@ -101,6 +103,23 @@ export class Progress {
     this.#streakList.append(result);
     this.#dailyGoal.append(result);
     this.#events.append(result, listener);
+  }
+
+  isAppendOnlyExtension(results: readonly Result[]): boolean {
+    const current = this.#results;
+    if (results.length < current.length) {
+      return false;
+    }
+    for (let i = 0; i < current.length; i++) {
+      if (results[i] !== current[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  get version(): number {
+    return this.#version;
   }
 
   get settings() {

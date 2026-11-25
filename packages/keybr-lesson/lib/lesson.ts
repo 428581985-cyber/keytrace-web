@@ -9,6 +9,7 @@ import { type KeyStatsMap, type Result, ResultGroups } from "@keybr/result";
 import { type Settings } from "@keybr/settings";
 import { type StyledText } from "@keybr/textinput";
 import { type LessonKeys } from "./key.ts";
+import { Target } from "./target.ts";
 
 export abstract class Lesson {
   static rng: RNGStream = LCG(Date.now());
@@ -27,6 +28,10 @@ export abstract class Lesson {
     this.keyboard = keyboard;
     this.codePoints = keyboard.getCodePoints();
     this.model = PhoneticModel.restrict(model, this.codePoints);
+  }
+
+  protected createTarget(): Target {
+    return new Target(this.settings, this.keyboard.layout);
   }
 
   filter(results: readonly Result[]): readonly Result[] {

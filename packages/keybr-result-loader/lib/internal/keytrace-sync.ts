@@ -4,9 +4,10 @@ import { resultFromJson, type ResultJson } from "@keybr/result-io";
 const STORAGE_KEY = "keybr.keytrace.lastSyncedTs";
 const VERSION_KEY = "keybr.keytrace.syncVersion";
 const SYNCED_KEYS_KEY = "keybr.keytrace.syncedKeys";
-const CURRENT_SYNC_VERSION = 2;
+const CURRENT_SYNC_VERSION = 3;
 
 export type KeyTraceSyncResponse = {
+  readonly available?: boolean;
   readonly syncVersion?: number;
   readonly records: readonly ResultJson[];
   readonly latestTs: number;
@@ -18,6 +19,20 @@ export type KeyTraceSyncSummary = {
   readonly added: number;
   readonly daysScanned: number;
 };
+
+function isResponseUnavailable(
+  data: Partial<KeyTraceSyncResponse>,
+  daysScanned: number,
+  recordsCount: number,
+): boolean {
+  if (data.available === false) {
+    return true;
+  }
+  if (data.available == null && daysScanned === 0 && recordsCount === 0) {
+    return true;
+  }
+  return false;
+}
 
 export async function syncKeyTraceResults(
   existingResults: readonly Result[],
@@ -47,6 +62,10 @@ export async function syncKeyTraceResults(
       typeof data.daysScanned === "number" && Number.isFinite(data.daysScanned)
         ? data.daysScanned
         : 0;
+
+    if (isResponseUnavailable(data, daysScanned, records.length)) {
+      return { added: 0, daysScanned: 0 };
+    }
 
     const removeSet = new Set<string>(readSyncedKeys());
     if (Array.isArray(data.commitKeys)) {
@@ -110,6 +129,10 @@ export async function syncKeyTraceResults(
     typeof data.daysScanned === "number" && Number.isFinite(data.daysScanned)
       ? data.daysScanned
       : 0;
+
+  if (isResponseUnavailable(data, daysScanned, records.length)) {
+    return { added: 0, daysScanned: 0 };
+  }
 
   const existingKeys = new Set(existingResults.map(dedupKey));
   const fresh: Result[] = [];

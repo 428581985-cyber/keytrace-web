@@ -1,8 +1,7 @@
 import { KeySpeedChart, Marker } from "@keybr/chart";
-import { LessonKey, Target } from "@keybr/lesson";
-import { KeyDetails, KeySelector } from "@keybr/lesson-ui";
+import { LessonKey } from "@keybr/lesson";
+import { KeyDetails, KeySelector, useTarget } from "@keybr/lesson-ui";
 import { type KeyStatsMap } from "@keybr/result";
-import { useSettings } from "@keybr/settings";
 import { Explainer, Figure, Para } from "@keybr/widget";
 import { useState } from "react";
 import { FormattedMessage } from "react-intl";
@@ -16,12 +15,11 @@ export function KeySpeedChartSection({
   keyStatsMap: KeyStatsMap;
   summaryKeyStatsMap?: KeyStatsMap;
 }) {
-  const { settings } = useSettings();
   const { letters } = keyStatsMap;
   const summaryMap = summaryKeyStatsMap ?? keyStatsMap;
   const [current, setCurrent] = useState(letters[0]);
   const [smoothness, setSmoothness] = useState(0.5);
-  const target = new Target(settings);
+  const target = useTarget();
 
   if (!letters.includes(current)) {
     setCurrent(letters[0]);

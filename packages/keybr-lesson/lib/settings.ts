@@ -1,13 +1,45 @@
 import { Syntax } from "@keybr/code";
 import { Book } from "@keybr/content";
 import {
+  type AnyProp,
   booleanProp,
   flagsProp,
   itemProp,
   numberProp,
+  type Settings,
   stringProp,
 } from "@keybr/settings";
 import { LessonType } from "./lessontype.ts";
+
+export type KeytraceMode = "auto" | "keytrace" | "standalone";
+export type PracticeMode = "keytrace" | "standalone";
+
+const KEYTRACE_MODES: readonly KeytraceMode[] = [
+  "auto",
+  "keytrace",
+  "standalone",
+];
+
+function isKeytraceMode(value: unknown): value is KeytraceMode {
+  return (
+    typeof value === "string" &&
+    (KEYTRACE_MODES as readonly string[]).includes(value)
+  );
+}
+
+const keytraceModeProp: AnyProp<KeytraceMode> = {
+  key: "lesson.keytraceMode",
+  defaultValue: "auto",
+  toJson(value: KeytraceMode): unknown {
+    return isKeytraceMode(value) ? value : "auto";
+  },
+  fromJson(
+    value: unknown,
+    defaultValue: KeytraceMode = "auto",
+  ): KeytraceMode {
+    return isKeytraceMode(value) ? value : defaultValue;
+  },
+};
 
 export const lessonProps = {
   type: itemProp("lesson.type", LessonType.ALL, LessonType.GUIDED),
@@ -60,5 +92,29 @@ export const lessonProps = {
   punctuators: numberProp("lesson.punctuators", 0, { min: 0, max: 1 }),
   repeatWords: numberProp("lesson.repeatWords", 1, { min: 1, max: 10 }),
   targetSpeed: numberProp("lesson.targetSpeed", 175, { min: 75, max: 750 }),
+  zhTargetSpeed: numberProp("lesson.zhTargetSpeed", 125, {
+    min: 50,
+    max: 750,
+  }),
+  keytraceMode: keytraceModeProp,
   dailyGoal: numberProp("lesson.dailyGoal", 30, { min: 0, max: 120 }),
 } as const;
+
+export function resolvePracticeMode({
+  settings,
+  keytraceAvailable = false,
+  hasKeyTraceData = false,
+}: {
+  readonly settings: Settings;
+  readonly keytraceAvailable?: boolean;
+  readonly hasKeyTraceData?: boolean;
+}): PracticeMode {
+  const mode = settings.get(lessonProps.keytraceMode);
+  if (mode === "standalone") {
+    return "standalone";
+  }
+  if (mode === "keytrace") {
+    return "keytrace";
+  }
+  return keytraceAvailable || hasKeyTraceData ? "keytrace" : "standalone";
+}

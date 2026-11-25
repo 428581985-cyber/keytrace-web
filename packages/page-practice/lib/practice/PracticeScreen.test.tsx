@@ -9,14 +9,23 @@ import {
 } from "@keybr/keyboard";
 import { lessonProps, LessonType } from "@keybr/lesson";
 import { names } from "@keybr/lesson-ui";
+import { type PageData, PageDataContext } from "@keybr/pages-shared";
 import { FakePhoneticModel, type PhoneticModel } from "@keybr/phonetic-model";
 import { PhoneticModelLoader } from "@keybr/phonetic-model-loader";
-import { FakeResultContext, ResultFaker } from "@keybr/result";
+import {
+  FakeResultContext,
+  type Result,
+  ResultContext,
+  ResultFaker,
+  speedToTime,
+  TextType,
+} from "@keybr/result";
 import {
   FakeSettingsContext,
   Settings,
   SettingsContext,
 } from "@keybr/settings";
+import { Histogram } from "@keybr/textinput";
 import { act, fireEvent, render } from "@testing-library/react";
 import { type ReactNode, useState } from "react";
 import { equal, includes, isNotNull, isNull } from "rich-assert";
@@ -238,6 +247,194 @@ test("EN <-> ZH toggle retains #id_indicators, #id_text_input, and #id_keyboard 
     equal(r.container.querySelector(`#${names.keyboard}`), keyboardEl);
   } finally {
     PhoneticModelLoader.loader = prevLoader;
+    r.unmount();
+  }
+});
+
+test("live-sync append and replaceResults update PracticeScreen immediately without reload", async () => {
+  const prevLoader = PhoneticModelLoader.loader;
+  const prevFetch = globalThis.fetch;
+  PhoneticModelLoader.loader = FakePhoneticModel.loader;
+  globalThis.fetch = async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        status: { available: true, active: false, lastEventTs: null },
+        today: { totalKeys: 0 },
+      }),
+    }) as unknown as Response;
+
+  let pushResults!: (next: readonly Result[]) => void;
+  let swapResults!: (next: readonly Result[]) => void;
+
+  function LiveResultProvider({ children }: { readonly children: ReactNode }) {
+    const [results, setResults] = useState<readonly Result[]>([]);
+    pushResults = (added) => {
+      setResults((prev) => [...prev, ...added]);
+    };
+    swapResults = (next) => {
+      setResults([...next]);
+    };
+    return (
+      <ResultContext.Provider
+        value={{
+          results,
+          appendResults: pushResults,
+          replaceResults: swapResults,
+          clearResults: () => {
+            setResults([]);
+          },
+        }}
+      >
+        {children}
+      </ResultContext.Provider>
+    );
+  }
+
+  const settings = new Settings()
+    .set(lessonProps.type, LessonType.CUSTOM)
+    .set(lessonProps.customText.content, "abcdefghij");
+
+  const r = render(
+    <FakeIntlProvider>
+      <PageDataContext.Provider value={{ keytraceAvailable: true } as PageData}>
+        <FakeSettingsContext initialSettings={settings}>
+          <LiveResultProvider>
+            <PracticeScreen />
+          </LiveResultProvider>
+        </FakeSettingsContext>
+      </PageDataContext.Provider>
+    </FakeIntlProvider>,
+  );
+
+  try {
+    await r.findByTitle("Change practice settings", { exact: false });
+    const indicators = () =>
+      r.container.querySelector(`#${names.indicators}`)!.textContent ?? "";
+    equal(indicators().includes("60.0wpm"), false);
+
+    // Simulate async KeyTrace sync appending a 60 WPM (300 CPM) result.
+    const synced60 = faker.nextResult({
+      layout: Layout.EN_US,
+      textType: TextType.KEYTRACE,
+      length: 100,
+      time: 20_000,
+      errors: 0,
+      histogram: new Histogram([
+        {
+          codePoint: 0x0061,
+          hitCount: 20,
+          missCount: 0,
+          timeToType: speedToTime(300),
+        },
+      ]),
+    });
+    await act(async () => {
+      pushResults([synced60]);
+    });
+    await r.findByText("60.0wpm");
+
+    // Simulate v2->v3 migration replacing results with a 40 WPM (200 CPM) record.
+    const replaced40 = faker.nextResult({
+      layout: Layout.EN_US,
+      textType: TextType.KEYTRACE,
+      length: 100,
+      time: 30_000,
+      errors: 0,
+      histogram: new Histogram([
+        {
+          codePoint: 0x0061,
+          hitCount: 20,
+          missCount: 0,
+          timeToType: speedToTime(200),
+        },
+      ]),
+    });
+    await act(async () => {
+      swapResults([replaced40]);
+    });
+    await r.findByText("40.0wpm");
+    equal(indicators().includes("60.0wpm"), false);
+  } finally {
+    PhoneticModelLoader.loader = prevLoader;
+    globalThis.fetch = prevFetch;
+    r.unmount();
+  }
+});
+
+test("standalone mode isolates TextType.KEYTRACE results and restores them when switching back", async () => {
+  const prevLoader = PhoneticModelLoader.loader;
+  const prevFetch = globalThis.fetch;
+  PhoneticModelLoader.loader = FakePhoneticModel.loader;
+  globalThis.fetch = async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        status: { available: true, active: false, lastEventTs: null },
+        today: { totalKeys: 0 },
+      }),
+    }) as unknown as Response;
+
+  const native40 = faker.nextResult({
+    layout: Layout.EN_US,
+    textType: TextType.GENERATED,
+    length: 100,
+    time: 30_000, // 200 CPM = 40.0 WPM
+    errors: 0,
+  });
+  const keytrace80 = faker.nextResult({
+    layout: Layout.EN_US,
+    textType: TextType.KEYTRACE,
+    length: 100,
+    time: 15_000, // 400 CPM = 80.0 WPM
+    errors: 0,
+  });
+
+  let setMode!: (mode: "standalone" | "keytrace") => void;
+
+  function ModeHarness() {
+    const [settings, setSettings] = useState(() =>
+      new Settings()
+        .set(lessonProps.type, LessonType.CUSTOM)
+        .set(lessonProps.customText.content, "abcdefghij")
+        .set(lessonProps.keytraceMode, "standalone"),
+    );
+    setMode = (mode) => {
+      setSettings((prev) => prev.set(lessonProps.keytraceMode, mode));
+    };
+    return (
+      <FakeIntlProvider>
+        <PageDataContext.Provider
+          value={{ keytraceAvailable: true } as PageData}
+        >
+          <SettingsContext.Provider
+            value={{ settings, updateSettings: setSettings }}
+          >
+            <FakeResultContext initialResults={[native40, keytrace80]}>
+              <PracticeScreen />
+            </FakeResultContext>
+          </SettingsContext.Provider>
+        </PageDataContext.Provider>
+      </FakeIntlProvider>
+    );
+  }
+
+  const r = render(<ModeHarness />);
+  try {
+    // In standalone mode, keytrace80 is ignored so last speed is native 40.0wpm (not 80.0wpm).
+    await r.findByText("40.0wpm");
+    const indicators = () =>
+      r.container.querySelector(`#${names.indicators}`)!.textContent ?? "";
+    equal(indicators().includes("80.0wpm"), false);
+
+    // Switching back to keytrace mode immediately restores keytrace80 (80.0wpm).
+    await act(async () => {
+      setMode("keytrace");
+    });
+    await r.findByText("80.0wpm");
+  } finally {
+    PhoneticModelLoader.loader = prevLoader;
+    globalThis.fetch = prevFetch;
     r.unmount();
   }
 });

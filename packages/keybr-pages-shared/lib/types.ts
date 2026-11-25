@@ -32,6 +32,10 @@ export type PageData = {
    * Serialized user settings.
    */
   readonly settings: unknown | null;
+  /**
+   * Whether local KeyTrace monitoring data is available on the server.
+   */
+  readonly keytraceAvailable?: boolean;
 };
 
 export type UserDetails = {

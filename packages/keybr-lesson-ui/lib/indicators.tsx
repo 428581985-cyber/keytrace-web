@@ -78,9 +78,11 @@ export const KeySetRow = memo(function KeySetRow({
 export const CurrentKeyRow = memo(function CurrentKeyRow({
   lessonKeys,
   names,
+  allUnlockedMode = false,
 }: {
   lessonKeys: LessonKeys;
   names?: Names;
+  allUnlockedMode?: boolean;
 }) {
   const { formatMessage } = useIntl();
   return (
@@ -96,6 +98,7 @@ export const CurrentKeyRow = memo(function CurrentKeyRow({
         id={names?.currentKey}
         className={styles.value}
         lessonKeys={lessonKeys}
+        allUnlockedMode={allUnlockedMode}
       />
     </div>
   );

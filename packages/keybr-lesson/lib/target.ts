@@ -1,12 +1,43 @@
+import {
+  isZhLanguage,
+  isZhLayout,
+  KeyboardOptions,
+  type Language,
+  type Layout,
+} from "@keybr/keyboard";
 import { speedToTime } from "@keybr/result";
-import { type Settings } from "@keybr/settings";
+import { type NumberProp, type Settings } from "@keybr/settings";
 import { lessonProps } from "./settings.ts";
+
+export function isZhTargetContext(
+  settings: Settings,
+  languageOrLayout?: Language | Layout,
+): boolean {
+  if (languageOrLayout != null) {
+    return "language" in languageOrLayout
+      ? isZhLayout(languageOrLayout)
+      : isZhLanguage(languageOrLayout);
+  }
+  const options = KeyboardOptions.from(settings);
+  return isZhLanguage(options.language) || isZhLayout(options.layout);
+}
+
+export function getTargetSpeedProp(
+  settings: Settings,
+  languageOrLayout?: Language | Layout,
+): NumberProp {
+  return isZhTargetContext(settings, languageOrLayout)
+    ? lessonProps.zhTargetSpeed
+    : lessonProps.targetSpeed;
+}
 
 export class Target {
   readonly targetSpeed: number;
 
-  constructor(settings: Settings) {
-    this.targetSpeed = settings.get(lessonProps.targetSpeed);
+  constructor(settings: Settings, languageOrLayout?: Language | Layout) {
+    this.targetSpeed = settings.get(
+      getTargetSpeedProp(settings, languageOrLayout),
+    );
   }
 
   confidence(timeToType: number): number;

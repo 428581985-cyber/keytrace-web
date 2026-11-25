@@ -1,13 +1,11 @@
 import { useIntlNumbers } from "@keybr/intl";
-import { Target } from "@keybr/lesson";
-import { useKeyStyles } from "@keybr/lesson-ui";
+import { useKeyStyles, useTarget } from "@keybr/lesson-ui";
 import { Range, resample, Vector } from "@keybr/math";
 import {
   computeSampleMastery,
   type KeyStats,
   type KeyStatsMap,
 } from "@keybr/result";
-import { useSettings } from "@keybr/settings";
 import {
   Canvas,
   type Graphics,
@@ -47,9 +45,8 @@ export function ProgressOverviewChart({
 function usePaint(styles: ChartStyles, keyStatsMap: KeyStatsMap) {
   const { formatMessage } = useIntl();
   const { formatInteger } = useIntlNumbers();
-  const { settings } = useSettings();
   const { confidenceColor } = useKeyStyles();
-  const target = new Target(settings);
+  const target = useTarget();
   const g = withStyles(styles);
   const { letters, results } = keyStatsMap;
 

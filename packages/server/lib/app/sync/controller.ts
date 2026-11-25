@@ -11,6 +11,9 @@ import { parseMessage } from "@keybr/result-io";
 import { UserDataFactory } from "@keybr/result-userdata";
 import { type AuthState, pProfileOwner } from "../auth/index.ts";
 import {
+  emptyKeyTraceDashboardData,
+  emptyKeyTraceSyncData,
+  isKeyTraceEnabled,
   readKeyTraceDashboard,
   readKeyTraceSyncData,
 } from "./keytrace-events.ts";
@@ -25,10 +28,14 @@ export class Controller {
 
   @http.GET("/_/sync/keytrace")
   async getKeyTraceData(ctx: Context<RouterState & AuthState>) {
-    const rawSince = Number(ctx.request.query.get("since") ?? 0);
-    const sinceTs = Number.isFinite(rawSince) && rawSince > 0 ? rawSince : 0;
     const migrate = ctx.request.query.get("migrate") === "1";
     ctx.response.type = "application/json";
+    if (!isKeyTraceEnabled()) {
+      ctx.response.body = emptyKeyTraceSyncData({ includeCommitKeys: migrate });
+      return;
+    }
+    const rawSince = Number(ctx.request.query.get("since") ?? 0);
+    const sinceTs = Number.isFinite(rawSince) && rawSince > 0 ? rawSince : 0;
     ctx.response.body = await readKeyTraceSyncData({
       sinceTs,
       includeCommitKeys: migrate,
@@ -37,12 +44,16 @@ export class Controller {
 
   @http.GET("/_/keytrace/summary")
   async getKeyTraceSummary(ctx: Context<RouterState & AuthState>) {
+    ctx.response.type = "application/json";
+    if (!isKeyTraceEnabled()) {
+      ctx.response.body = emptyKeyTraceDashboardData();
+      return;
+    }
     const rawDays = Number(ctx.request.query.get("days") ?? 14);
     const days =
       Number.isFinite(rawDays) && rawDays > 0
         ? Math.min(90, Math.floor(rawDays))
         : 14;
-    ctx.response.type = "application/json";
     ctx.response.body = await readKeyTraceDashboard({ days });
   }
 

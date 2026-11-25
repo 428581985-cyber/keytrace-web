@@ -7,11 +7,13 @@
   "types": ".types/index.d.ts",
   "dependencies": {
     "@keybr/debug": "*",
+    "@keybr/lesson": "*",
     "@keybr/pages-shared": "*",
     "@keybr/publicid": "*",
     "@keybr/request": "*",
     "@keybr/result": "*",
-    "@keybr/result-io": "*"
+    "@keybr/result-io": "*",
+    "@keybr/settings": "*"
   },
   "devDependencies": {},
   "scripts": {

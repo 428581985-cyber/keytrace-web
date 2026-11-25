@@ -5,8 +5,8 @@ import {
   layoutUsesSemicolon,
   useKeyboard,
 } from "@keybr/keyboard";
-import { lessonProps, Target } from "@keybr/lesson";
-import { useFormatter } from "@keybr/lesson-ui";
+import { lessonProps } from "@keybr/lesson";
+import { useFormatter, useTarget } from "@keybr/lesson-ui";
 import {
   computeKeyMastery,
   type KeyStatsMap,
@@ -132,7 +132,7 @@ export function MasterySection({
   const { settings } = useSettings();
   const { formatSpeed } = useFormatter();
   const { formatInteger, formatPercents } = useIntlNumbers();
-  const target = new Target(settings);
+  const target = useTarget();
   const keyboard = useKeyboard();
   const zhKeyLabels = getZhKeyLabelsForLayout(keyboard.layout);
   const rows = layoutUsesSemicolon(keyboard.layout)

@@ -7,9 +7,20 @@ import {
   Layout,
   loadKeyboard,
 } from "@keybr/keyboard";
-import { type Lesson } from "@keybr/lesson";
+import {
+  type GuidedLesson,
+  type Lesson,
+  lessonProps,
+} from "@keybr/lesson";
+import { type PageData, PageDataContext } from "@keybr/pages-shared";
 import { FakePhoneticModel, type PhoneticModel } from "@keybr/phonetic-model";
 import { PhoneticModelLoader } from "@keybr/phonetic-model-loader";
+import {
+  type Result,
+  ResultContext,
+  ResultFaker,
+  TextType,
+} from "@keybr/result";
 import { FakeSettingsContext, Settings, SettingsContext } from "@keybr/settings";
 import { act, render } from "@testing-library/react";
 import { type ReactNode, useEffect, useState } from "react";
@@ -233,3 +244,155 @@ test("rapid toggle EN -> ZH_SP_MS (pending) -> EN restores EN without stale ZH o
 function TestChild({ model }: { model: PhoneticModel }) {
   return <span title="letters">{model.letters.map(String).join("")}</span>;
 }
+
+test("resolves GuidedLesson unlockAllKeys from PageDataContext, ResultContext, and keytraceMode reactively", async () => {
+  const prevLoader = PhoneticModelLoader.loader;
+  PhoneticModelLoader.loader = FakePhoneticModel.loader;
+
+  const emitted: GuidedLesson[] = [];
+
+  function Inspector({ lesson }: { readonly lesson: Lesson }) {
+    const guided = lesson as GuidedLesson;
+    emitted.push(guided);
+    return (
+      <span data-testid="unlock-all">
+        {String(guided.unlockAllKeys)}:{emitted.length}
+      </span>
+    );
+  }
+
+  function Harness({
+    settings,
+    keytraceAvailable,
+    results,
+  }: {
+    readonly settings: Settings;
+    readonly keytraceAvailable?: boolean;
+    readonly results?: readonly Result[];
+  }) {
+    const content = (
+      <SettingsContext.Provider value={{ settings, updateSettings: () => {} }}>
+        <KeyboardProvider>
+          <LessonLoader>
+            {(lesson) => <Inspector lesson={lesson} />}
+          </LessonLoader>
+        </KeyboardProvider>
+      </SettingsContext.Provider>
+    );
+    const withResults =
+      results !== undefined ? (
+        <ResultContext.Provider
+          value={{
+            results,
+            appendResults: () => {},
+            replaceResults: () => {},
+            clearResults: () => {},
+          }}
+        >
+          {content}
+        </ResultContext.Provider>
+      ) : (
+        content
+      );
+    return keytraceAvailable !== undefined ? (
+      <PageDataContext.Provider
+        value={{ keytraceAvailable } as PageData}
+      >
+        {withResults}
+      </PageDataContext.Provider>
+    ) : (
+      withResults
+    );
+  }
+
+  const autoSettings = new Settings();
+  const standaloneSettings = new Settings().set(
+    lessonProps.keytraceMode,
+    "standalone",
+  );
+  const keytraceSettings = new Settings().set(
+    lessonProps.keytraceMode,
+    "keytrace",
+  );
+  const faker = new ResultFaker();
+  const nativeResult = faker.nextResult({ textType: TextType.GENERATED });
+  const keytraceResult = faker.nextResult({ textType: TextType.KEYTRACE });
+
+  try {
+    // 1. Without PageDataContext / ResultContext -> defaults to standalone (unlockAllKeys = false).
+    const r = render(<Harness settings={autoSettings} />);
+    await r.findByTestId("unlock-all");
+    equal(emitted.at(-1)!.unlockAllKeys, false);
+
+    // 2. keytraceAvailable: false + native-only results -> still standalone.
+    r.rerender(
+      <Harness
+        settings={autoSettings}
+        keytraceAvailable={false}
+        results={[nativeResult]}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    equal(emitted.at(-1)!.unlockAllKeys, false);
+
+    // 3. Async KeyTrace sync adds a TextType.KEYTRACE result -> immediately recreates GuidedLesson with unlockAllKeys = true!
+    const prevLesson = emitted.at(-1)!;
+    r.rerender(
+      <Harness
+        settings={autoSettings}
+        keytraceAvailable={false}
+        results={[nativeResult, keytraceResult]}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    equal(emitted.at(-1)!.unlockAllKeys, true);
+    equal(emitted.at(-1) !== prevLesson, true);
+
+    // 4. Explicit standalone mode overrides both keytraceAvailable=true and KEYTRACE results.
+    r.rerender(
+      <Harness
+        settings={standaloneSettings}
+        keytraceAvailable={true}
+        results={[keytraceResult]}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    equal(emitted.at(-1)!.unlockAllKeys, false);
+
+    // 5. Explicit keytrace mode enables unlockAllKeys even when unavailable and no results.
+    r.rerender(
+      <Harness
+        settings={keytraceSettings}
+        keytraceAvailable={false}
+        results={[]}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    equal(emitted.at(-1)!.unlockAllKeys, true);
+
+    // 6. Auto mode with keytraceAvailable: true and empty results -> unlockAllKeys = true.
+    r.rerender(
+      <Harness
+        settings={autoSettings}
+        keytraceAvailable={true}
+        results={[]}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    equal(emitted.at(-1)!.unlockAllKeys, true);
+
+    r.unmount();
+  } finally {
+    PhoneticModelLoader.loader = prevLoader;
+  }
+});

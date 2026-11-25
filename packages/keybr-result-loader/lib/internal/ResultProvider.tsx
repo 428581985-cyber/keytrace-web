@@ -1,7 +1,11 @@
+import { lessonProps } from "@keybr/lesson";
+import { PageDataContext } from "@keybr/pages-shared";
 import { type Result, ResultContext } from "@keybr/result";
+import { SettingsContext } from "@keybr/settings";
 import {
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -21,6 +25,14 @@ export function ResultProvider({
   readonly children: ReactNode;
 }): ReactNode {
   const [results, setResults] = useState(initialResults);
+  const pageData = useContext(PageDataContext);
+  const settingsContext = useContext(SettingsContext);
+  const keytraceAvailable = pageData?.keytraceAvailable ?? false;
+  const keytraceMode =
+    settingsContext?.settings.get(lessonProps.keytraceMode) ?? "auto";
+  const shouldSyncKeyTrace =
+    keytraceAvailable && keytraceMode !== "standalone";
+
   const appendResults = useCallback(
     (newResults: readonly Result[]) => {
       setResults((prev) => [...prev, ...newResults]);
@@ -45,18 +57,21 @@ export function ResultProvider({
   }, [storage]);
 
   const syncedRef = useRef(false);
-  const initialResultsRef = useRef(initialResults);
+  const resultsRef = useRef(results);
   useEffect(() => {
-    if (syncedRef.current) {
+    resultsRef.current = results;
+  }, [results]);
+  useEffect(() => {
+    if (!shouldSyncKeyTrace || syncedRef.current) {
       return;
     }
     syncedRef.current = true;
     syncKeyTraceResults(
-      initialResultsRef.current,
+      resultsRef.current,
       appendResults,
       replaceResults,
     ).catch(() => {});
-  }, [appendResults, replaceResults]);
+  }, [shouldSyncKeyTrace, appendResults, replaceResults]);
 
   const value = useMemo(
     () => ({

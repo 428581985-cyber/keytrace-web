@@ -6,7 +6,6 @@ import { type Settings } from "@keybr/settings";
 import { LessonKeys } from "./key.ts";
 import { Lesson } from "./lesson.ts";
 import { lessonProps } from "./settings.ts";
-import { Target } from "./target.ts";
 import { generateFragment } from "./text/fragment.ts";
 import { randomWords, uniqueWords, wordSequence } from "./text/words.ts";
 
@@ -24,7 +23,7 @@ export class CustomTextLesson extends Lesson {
   }
 
   override update(keyStatsMap: KeyStatsMap) {
-    return LessonKeys.includeAll(keyStatsMap, new Target(this.settings));
+    return LessonKeys.includeAll(keyStatsMap, this.createTarget());
   }
 
   override generate(lessonKeys: LessonKeys, rng: RNGStream) {

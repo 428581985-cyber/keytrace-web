@@ -60,3 +60,29 @@ test("render key", () => {
 
   r.unmount();
 });
+
+test("render no key in allUnlockedMode", () => {
+  const lessonKeys = new LessonKeys([
+    new LessonKey({
+      letter: letters[0],
+      samples: [],
+      timeToType: 100,
+      bestTimeToType: 100,
+      confidence: 1.0,
+      bestConfidence: 1.0,
+    }).asIncluded(),
+  ]);
+
+  const r = render(
+    <FakeIntlProvider>
+      <FakeSettingsContext>
+        <CurrentKey lessonKeys={lessonKeys} allUnlockedMode={true} />
+      </FakeSettingsContext>
+    </FakeIntlProvider>,
+  );
+
+  isNull(r.queryByText("All keys are unlocked."));
+  isNotNull(r.queryByText("All keys are above target speed."));
+
+  r.unmount();
+});

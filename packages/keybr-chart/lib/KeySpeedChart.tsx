@@ -1,9 +1,7 @@
 import { useIntlNumbers } from "@keybr/intl";
-import { Target } from "@keybr/lesson";
-import { useFormatter } from "@keybr/lesson-ui";
+import { useFormatter, useTarget } from "@keybr/lesson-ui";
 import { linearRegression, Range, smooth, Vector } from "@keybr/math";
 import { type KeySample, timeToSpeed } from "@keybr/result";
-import { useSettings } from "@keybr/settings";
 import { Canvas, type Rect, type ShapeList, Shapes } from "@keybr/widget";
 import { type ReactNode } from "react";
 import { useIntl } from "react-intl";
@@ -39,8 +37,7 @@ function usePaint(
   const { formatMessage } = useIntl();
   const { formatInteger } = useIntlNumbers();
   const { formatSpeed } = useFormatter();
-  const { settings } = useSettings();
-  const target = new Target(settings);
+  const target = useTarget();
   const g = withStyles(styles);
 
   if (samples.length < 2) {

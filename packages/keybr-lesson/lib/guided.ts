@@ -15,7 +15,6 @@ import { Dictionary, filterWordList } from "./dictionary.ts";
 import { LessonKey, LessonKeys } from "./key.ts";
 import { Lesson } from "./lesson.ts";
 import { lessonProps } from "./settings.ts";
-import { Target } from "./target.ts";
 import { generateFragment } from "./text/fragment.ts";
 import {
   mangledWords,
@@ -23,6 +22,11 @@ import {
   randomWords,
   uniqueWords,
 } from "./text/words.ts";
+import { orderZhLetters } from "./zh-curriculum.ts";
+
+export type GuidedLessonOptions = {
+  readonly unlockAllKeys?: boolean;
+};
 
 /** 越慢越常出现：confidence 趋近 0 时，该键在词里的权重最多 ×5 */
 const SLOW_BOOST = 4;
@@ -64,6 +68,8 @@ export function getZhFocusStorageKeys(layoutId: string): {
     drillKey: `keybr.${layoutId}.drillFocusKey`,
   };
 }
+
+export const getFocusStorageKeys = getZhFocusStorageKeys;
 
 function readStorageCodePoint(key: string): number | null {
   try {
@@ -223,24 +229,25 @@ export class GuidedLesson extends Lesson {
   readonly dictionary: Dictionary;
   readonly idioms: Dictionary;
   readonly #letters: readonly Letter[];
+  readonly #unlockAllKeys: boolean;
   // 每个字符的抽样权重：1 表示中性，越大越常出现。
   // update() 根据打字统计算出来，generate() 抽词时用。
   // 空表 = 没有数据 = 均匀抽样（与原先行为一致）。
   #keyWeights = new Map<number, number>();
-  #zhLockedFocusCodePoint: number | null = null;
+  #lockedFocusCodePoint: number | null = null;
   #recentZhWords: string[] = [];
 
-  #readZhLockedFocus(): number | null {
+  #readLockedFocus(): number | null {
     if (typeof localStorage !== "undefined") {
-      const { lockedKey } = getZhFocusStorageKeys(this.keyboard.layout.id);
+      const { lockedKey } = getFocusStorageKeys(this.keyboard.layout.id);
       return readStorageCodePoint(lockedKey);
     }
-    return this.#zhLockedFocusCodePoint;
+    return this.#lockedFocusCodePoint;
   }
 
-  #writeZhLockedFocus(codePoint: number | null): void {
-    this.#zhLockedFocusCodePoint = codePoint;
-    const { lockedKey } = getZhFocusStorageKeys(this.keyboard.layout.id);
+  #writeLockedFocus(codePoint: number | null): void {
+    this.#lockedFocusCodePoint = codePoint;
+    const { lockedKey } = getFocusStorageKeys(this.keyboard.layout.id);
     writeLockedFocusStorage(lockedKey, codePoint);
   }
 
@@ -249,9 +256,11 @@ export class GuidedLesson extends Lesson {
     keyboard: Keyboard,
     model: PhoneticModel,
     wordList: WordList,
+    options?: GuidedLessonOptions,
   ) {
     super(settings, keyboard, model);
     this.#letters = getLayoutLetters(keyboard.layout, this.model.letters);
+    this.#unlockAllKeys = options?.unlockAllKeys ?? false;
     // 上游这里是 > 2，因为英文太短的词练不到几个键。
     // 但中文双拼一个音节正好两键，按上游规则词表会被滤空，练习区就成了白板。
     // 这里放宽到 >= 2。
@@ -272,6 +281,10 @@ export class GuidedLesson extends Lesson {
     this.idioms = new Dictionary(idioms);
   }
 
+  get unlockAllKeys(): boolean {
+    return this.#unlockAllKeys;
+  }
+
   override get letters() {
     return this.#letters;
   }
@@ -280,67 +293,76 @@ export class GuidedLesson extends Lesson {
     keyStatsMap: KeyStatsMap,
     options?: { readonly persistFocus?: boolean },
   ) {
-    // 中文（双拼与全拼）不能按上游那套"先解锁几个字母"来：英文是 26 个字母慢慢扩，
-    // 中文只解锁 6 个键时几乎抽不出自然真词，这里直接全解锁。
     const isZh = isZhLanguage(this.model.language);
-    const alphabetSize = isZh
-      ? 1
-      : this.settings.get(lessonProps.guided.alphabetSize);
+    const unlockAllKeys = this.#unlockAllKeys;
     const recoverKeys = this.settings.get(lessonProps.guided.recoverKeys);
 
     const letters = this.#getLetters();
-
-    const minSize = 6;
-    const maxSize =
-      minSize + Math.round((letters.length - minSize) * alphabetSize);
-
-    const target = new Target(this.settings);
+    const target = this.createTarget();
 
     const lessonKeys = new LessonKeys(
       letters.map((letter) => LessonKey.from(keyStatsMap.get(letter), target)),
     );
 
-    for (const lessonKey of lessonKeys) {
-      const includedKeys = lessonKeys.findIncludedKeys();
-
-      if (includedKeys.length < minSize) {
-        // Meet the minimal required alphabet size.
+    if (unlockAllKeys) {
+      // KeyTrace 模式（中英文一致）：全部键位直接纳入，不锁定、不标记强制解锁。
+      for (const lessonKey of lessonKeys) {
         lessonKeys.include(lessonKey.letter);
-        continue;
       }
+    } else {
+      // 独立网页渐进课程模式（中英文一致）：从 minSize = 6 起逐键解锁。
+      const alphabetSize = this.settings.get(lessonProps.guided.alphabetSize);
+      const minSize = 6;
+      const maxSize =
+        minSize + Math.round((letters.length - minSize) * alphabetSize);
 
-      if (includedKeys.length < maxSize) {
-        // Meet the maximal required alphabet size.
-        lessonKeys.force(lessonKey.letter);
-        continue;
-      }
+      for (const lessonKey of lessonKeys) {
+        const includedKeys = lessonKeys.findIncludedKeys();
 
-      if ((lessonKey.bestConfidence ?? 0) >= 1) {
-        // Must include all confident keys.
-        lessonKeys.include(lessonKey.letter);
-        continue;
-      }
-
-      if (recoverKeys) {
-        if (includedKeys.every((key) => (key.confidence ?? 0) >= 1)) {
-          // Include a new key only when all the previous keys
-          // are now above the target speed.
+        if (includedKeys.length < minSize) {
+          // Meet the minimal required alphabet size.
           lessonKeys.include(lessonKey.letter);
           continue;
         }
-      } else {
-        if (includedKeys.every((key) => (key.bestConfidence ?? 0) >= 1)) {
-          // Include a new key only when all the previous keys
-          // were once above the target speed.
+
+        if (includedKeys.length < maxSize) {
+          // Meet the maximal required alphabet size.
+          lessonKeys.force(lessonKey.letter);
+          continue;
+        }
+
+        // 中文模糊音 consumeExtra 可能在未解锁键上产生单次击键样本；要求 >= 2 个样本
+        // 才能提前自动纳入，避免单次噪声打乱渐进解锁顺序。
+        const hasReliableBestConfidence =
+          (lessonKey.bestConfidence ?? 0) >= 1 &&
+          (!isZh || lessonKey.samples.length >= 2);
+        if (hasReliableBestConfidence) {
+          // Must include all confident keys.
           lessonKeys.include(lessonKey.letter);
           continue;
+        }
+
+        if (recoverKeys) {
+          if (includedKeys.every((key) => (key.confidence ?? 0) >= 1)) {
+            // Include a new key only when all the previous keys
+            // are now above the target speed.
+            lessonKeys.include(lessonKey.letter);
+            continue;
+          }
+        } else {
+          if (includedKeys.every((key) => (key.bestConfidence ?? 0) >= 1)) {
+            // Include a new key only when all the previous keys
+            // were once above the target speed.
+            lessonKeys.include(lessonKey.letter);
+            continue;
+          }
         }
       }
     }
 
     // Find the least confident of all included keys and focus on it.
     const confidenceOf = (key: LessonKey): number => {
-      if (isZh) {
+      if (unlockAllKeys) {
         return key.confidence ?? 0;
       }
       return recoverKeys ? (key.confidence ?? 0) : (key.bestConfidence ?? 0);
@@ -350,8 +372,8 @@ export class GuidedLesson extends Lesson {
       .filter((key) => confidenceOf(key) < 1)
       .sort((a, b) => confidenceOf(a) - confidenceOf(b));
     const persistFocus = options?.persistFocus ?? true;
-    if (isZh) {
-      const { drillKey } = getZhFocusStorageKeys(this.keyboard.layout.id);
+    if (unlockAllKeys || isZh) {
+      const { drillKey } = getFocusStorageKeys(this.keyboard.layout.id);
       const overrideCp = persistFocus
         ? consumeDrillOverrideStorage(drillKey)
         : readStorageCodePoint(drillKey);
@@ -365,38 +387,39 @@ export class GuidedLesson extends Lesson {
       if (overrideKey != null) {
         lessonKeys.focus(overrideKey.letter);
         if (persistFocus) {
-          this.#writeZhLockedFocus(overrideKey.letter.codePoint);
+          this.#writeLockedFocus(overrideKey.letter.codePoint);
         }
       } else if (!hasAnySamples) {
         if (persistFocus) {
-          this.#writeZhLockedFocus(null);
+          this.#writeLockedFocus(null);
         }
         if (weakestKeys.length > 0) {
           lessonKeys.focus(weakestKeys[0].letter);
         }
       } else {
-        const lockedCodePoint = this.#readZhLockedFocus();
+        const lockedCodePoint = this.#readLockedFocus();
         const lockedKey =
           lockedCodePoint != null
-            ? includedKeys.find((key) => key.letter.codePoint === lockedCodePoint)
+            ? includedKeys.find(
+                (key) => key.letter.codePoint === lockedCodePoint,
+              )
             : undefined;
         if (lockedKey != null && confidenceOf(lockedKey) < 1) {
           lessonKeys.focus(lockedKey.letter);
         } else if (weakestKeys.length > 0) {
           lessonKeys.focus(weakestKeys[0].letter);
           if (persistFocus) {
-            this.#writeZhLockedFocus(weakestKeys[0].letter.codePoint);
+            this.#writeLockedFocus(weakestKeys[0].letter.codePoint);
           }
         } else if (persistFocus) {
-          this.#writeZhLockedFocus(null);
+          this.#writeLockedFocus(null);
         }
       }
     } else if (weakestKeys.length > 0) {
       lessonKeys.focus(weakestKeys[0].letter);
     }
 
-    // 这一步只算权重，不改纳入/聚焦逻辑——所有键仍然全部纳入，
-    // 权重只影响后面抽词时哪些词更容易出现。
+    // 这一步只算权重，不改纳入/聚焦逻辑；权重只影响后面抽词时哪些词更容易出现。
     this.#updateKeyWeights(lessonKeys);
 
     return lessonKeys;
@@ -494,6 +517,13 @@ export class GuidedLesson extends Lesson {
 
   #getLetters() {
     const letters = this.#letters;
+    if (isZhLanguage(this.model.language)) {
+      return orderZhLetters(
+        this.keyboard.layout,
+        letters,
+        this.settings.get(lessonProps.guided.keyboardOrder),
+      );
+    }
     const { codePoints } = this;
     if (this.settings.get(lessonProps.guided.keyboardOrder)) {
       return Letter.weightedFrequencyOrder(letters, ({ codePoint }) =>
@@ -516,12 +546,16 @@ export class GuidedLesson extends Lesson {
         idioms = this.idioms.find(filter, true);
       }
       const ratio = this.settings.get(lessonProps.idioms);
+      // 渐进解锁初期成语池极小时（< 6 条）避免反复复读个别成语，等成语池充足后再按比例混入。
+      const allowIdioms =
+        idioms.length > 0 &&
+        (this.#unlockAllKeys || idioms.length >= 6 || commons.length === 0);
       // 权重进来时算一次，之后每次抽词只做采样，不重复遍历词表
       const commonsWeights = this.#weightsFor(commons);
       const idiomsWeights = this.#weightsFor(idioms);
       const recent = this.#recentZhWords;
       return (): string | null => {
-        const useIdiom = idioms.length > 0 && rng() < ratio;
+        const useIdiom = allowIdioms && rng() < ratio;
         const pool = useIdiom ? idioms : commons;
         const poolWeights = useIdiom ? idiomsWeights : commonsWeights;
         const fallback = useIdiom ? commons : idioms;

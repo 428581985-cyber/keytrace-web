@@ -8,10 +8,12 @@ export const CurrentKey = ({
   id,
   className,
   lessonKeys,
+  allUnlockedMode = false,
 }: {
   id?: string;
   className?: ClassName;
   lessonKeys: LessonKeys;
+  allUnlockedMode?: boolean;
 }) => {
   const focusedKey = lessonKeys.findFocusedKey();
   return (
@@ -20,6 +22,13 @@ export const CurrentKey = ({
         <>
           <Key lessonKey={focusedKey} /> <KeyDetails lessonKey={focusedKey} />
         </>
+      ) : allUnlockedMode ? (
+        <span className={styleTextTruncate}>
+          <FormattedMessage
+            id="t_All_keys_reached_target"
+            defaultMessage="All keys are above target speed."
+          />
+        </span>
       ) : (
         <span className={styleTextTruncate}>
           <FormattedMessage

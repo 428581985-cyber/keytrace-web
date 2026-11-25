@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +16,7 @@ const ALNUM_RE = /[a-zA-Z0-9]/;
 const INTERNAL_APOS_TOKEN_RE = /[a-z]+(?:'[a-z]+)+/gi;
 const ENGLISH_CONTRACTION_SUFFIX_RE = /^(?:s|t|m|d|re|ve|ll)$/i;
 
-const SYNC_VERSION = 2;
+const SYNC_VERSION = 3;
 const KD_BUFFER_LIMIT = 60;
 const MAX_STEP_GAP_MS = 3000;
 const MAX_CORRECTION_MS = 6000;
@@ -38,7 +39,10 @@ const MODIFIER_VK_SET = new Set([
   165, // RAlt
 ]);
 
+export type KeyTraceEnabledMode = "auto" | "true" | "false";
+
 export type KeyTraceSyncData = {
+  readonly available: boolean;
   readonly syncVersion: number;
   readonly records: ResultJson[];
   readonly latestTs: number;
@@ -121,6 +125,7 @@ export type KeyTraceCommitItem = {
 
 export type KeyTraceDashboardData = {
   readonly status: {
+    readonly available: boolean;
     readonly active: boolean;
     readonly lastEventTs: number | null;
     readonly todayDate: string;
@@ -281,31 +286,97 @@ function findActiveIme(
   return null;
 }
 
+export function getKeyTraceEnabledMode(
+  raw: string | undefined = process.env.KEYTRACE_ENABLED,
+): KeyTraceEnabledMode {
+  const normalized = raw?.trim().toLowerCase();
+  if (normalized === "false") {
+    return "false";
+  }
+  if (normalized === "true") {
+    return "true";
+  }
+  return "auto";
+}
+
+export function isKeyTraceEnabled(): boolean {
+  return getKeyTraceEnabledMode() !== "false";
+}
+
+function resolveEventsDir(eventsDir?: string): string {
+  return (
+    eventsDir ??
+    (process.env.KEYTRACE_EVENTS_DIR || join(homedir(), ".keytrace", "events"))
+  );
+}
+
+export function isKeyTraceAvailable(options?: {
+  readonly eventsDir?: string;
+}): boolean {
+  const mode = getKeyTraceEnabledMode();
+  if (mode === "false") {
+    return false;
+  }
+  const eventsDir = resolveEventsDir(options?.eventsDir);
+  let entries;
+  try {
+    entries = readdirSync(eventsDir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  if (mode === "true") {
+    return true;
+  }
+  return entries.some(
+    (entry) =>
+      (entry.isFile() || entry.isSymbolicLink()) &&
+      DAY_FILE_RE.test(entry.name),
+  );
+}
+
+export function emptyKeyTraceSyncData(options?: {
+  readonly available?: boolean;
+  readonly includeCommitKeys?: boolean;
+}): KeyTraceSyncData {
+  return {
+    available: options?.available ?? false,
+    syncVersion: SYNC_VERSION,
+    records: [],
+    latestTs: 0,
+    daysScanned: 0,
+    ...(options?.includeCommitKeys ? { commitKeys: [] } : {}),
+  };
+}
+
 export async function readKeyTraceSyncData(options?: {
   readonly eventsDir?: string;
   readonly sinceTs?: number;
   readonly includeCommitKeys?: boolean;
 }): Promise<KeyTraceSyncData> {
-  const eventsDir =
-    options?.eventsDir ??
-    (process.env.KEYTRACE_EVENTS_DIR || join(homedir(), ".keytrace", "events"));
+  const includeCommitKeys = options?.includeCommitKeys === true;
+  const mode = getKeyTraceEnabledMode();
+  if (mode === "false") {
+    return emptyKeyTraceSyncData({
+      available: false,
+      includeCommitKeys,
+    });
+  }
+
+  const eventsDir = resolveEventsDir(options?.eventsDir);
   const sinceTs =
     typeof options?.sinceTs === "number" &&
     Number.isFinite(options.sinceTs) &&
     options.sinceTs > 0
       ? options.sinceTs
       : 0;
-  const includeCommitKeys = options?.includeCommitKeys === true;
 
-  const dayGroups = await listDayFiles(eventsDir);
+  const { readable, dayGroups } = await scanDayFiles(eventsDir);
+  const available = mode === "true" ? readable : dayGroups.length > 0;
   if (dayGroups.length === 0) {
-    return {
-      syncVersion: SYNC_VERSION,
-      records: [],
-      latestTs: 0,
-      daysScanned: 0,
-      ...(includeCommitKeys ? { commitKeys: [] } : {}),
-    };
+    return emptyKeyTraceSyncData({
+      available,
+      includeCommitKeys,
+    });
   }
 
   const buckets = new Map<string, DayBucket>();
@@ -403,6 +474,10 @@ export async function readKeyTraceSyncData(options?: {
       if (layoutId == null) {
         continue;
       }
+      if (commitKeys != null) {
+        commitKeys.add(`${layoutId}:${Math.round(event.ts / 1000)}`);
+        commitKeys.add(`${layoutId}:${Math.floor(event.ts / 1000)}`);
+      }
 
       if (event.ts <= sinceTs) {
         const lastKd = slice[slice.length - 1];
@@ -446,7 +521,7 @@ export async function readKeyTraceSyncData(options?: {
     }
     const result = new Result(
       Layout.ALL.get(bucket.layoutId),
-      TextType.GENERATED,
+      TextType.KEYTRACE,
       bucket.lastTs,
       bucket.length,
       Math.round(bucket.activeMs),
@@ -464,6 +539,7 @@ export async function readKeyTraceSyncData(options?: {
   records.sort((a, b) => a.ts - b.ts);
 
   return {
+    available: true,
     syncVersion: SYNC_VERSION,
     records,
     latestTs,
@@ -472,16 +548,18 @@ export async function readKeyTraceSyncData(options?: {
   };
 }
 
-async function listDayFiles(
-  eventsDir: string,
-): Promise<
-  readonly { readonly date: string; readonly files: DayFileEntry[] }[]
-> {
+async function scanDayFiles(eventsDir: string): Promise<{
+  readonly readable: boolean;
+  readonly dayGroups: readonly {
+    readonly date: string;
+    readonly files: DayFileEntry[];
+  }[];
+}> {
   let entries;
   try {
     entries = await readdir(eventsDir, { withFileTypes: true });
   } catch {
-    return [];
+    return { readable: false, dayGroups: [] };
   }
 
   const matched: DayFileEntry[] = [];
@@ -515,7 +593,7 @@ async function listDayFiles(
       groups.push({ date: file.date, files: [file] });
     }
   }
-  return groups;
+  return { readable: true, dayGroups: groups };
 }
 
 async function readEventsFile(file: DayFileEntry): Promise<RawEvent[]> {
@@ -1042,45 +1120,57 @@ function buildWeakKeys(
   return out;
 }
 
+export function emptyKeyTraceDashboardData(options?: {
+  readonly available?: boolean;
+  readonly todayDate?: string;
+}): KeyTraceDashboardData {
+  return {
+    status: {
+      available: options?.available ?? false,
+      active: false,
+      lastEventTs: null,
+      todayDate: options?.todayDate ?? formatLocalDay(),
+      todayBytes: 0,
+      daysAvailable: 0,
+      imeName: null,
+    },
+    today: emptySummaryBucket(),
+    overall: emptySummaryBucket(),
+    daily: [],
+    apps: [],
+    weakKeys: {
+      "zh-sp": [],
+      "zh-sp-zrm": [],
+      "zh-sp-ms": [],
+      "zh-sp-sg": [],
+      "zh-qp": [],
+      "en-us": [],
+    },
+    recentCorrections: [],
+    recentCommits: [],
+  };
+}
+
 export async function readKeyTraceDashboard(options?: {
   readonly eventsDir?: string;
   readonly days?: number;
 }): Promise<KeyTraceDashboardData> {
-  const eventsDir =
-    options?.eventsDir ??
-    (process.env.KEYTRACE_EVENTS_DIR || join(homedir(), ".keytrace", "events"));
+  const todayDate = formatLocalDay();
+  const mode = getKeyTraceEnabledMode();
+  if (mode === "false") {
+    return emptyKeyTraceDashboardData({ available: false, todayDate });
+  }
+
+  const eventsDir = resolveEventsDir(options?.eventsDir);
   const daysLimit =
     typeof options?.days === "number" && options.days > 0
       ? Math.floor(options.days)
       : 14;
-  const todayDate = formatLocalDay();
 
-  const dayGroups = await listDayFiles(eventsDir);
+  const { readable, dayGroups } = await scanDayFiles(eventsDir);
+  const available = mode === "true" ? readable : dayGroups.length > 0;
   if (dayGroups.length === 0) {
-    return {
-      status: {
-        active: false,
-        lastEventTs: null,
-        todayDate,
-        todayBytes: 0,
-        daysAvailable: 0,
-        imeName: null,
-      },
-      today: emptySummaryBucket(),
-      overall: emptySummaryBucket(),
-      daily: [],
-      apps: [],
-      weakKeys: {
-        "zh-sp": [],
-        "zh-sp-zrm": [],
-        "zh-sp-ms": [],
-        "zh-sp-sg": [],
-        "zh-qp": [],
-        "en-us": [],
-      },
-      recentCorrections: [],
-      recentCommits: [],
-    };
+    return emptyKeyTraceDashboardData({ available, todayDate });
   }
 
   let todayBytes = 0;
@@ -1358,6 +1448,7 @@ export async function readKeyTraceDashboard(options?: {
 
   return {
     status: {
+      available: true,
       active,
       lastEventTs,
       todayDate,

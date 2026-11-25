@@ -16,14 +16,16 @@ import {
   lessonProps,
   LessonType,
   NumbersLesson,
+  resolvePracticeMode,
   WordListLesson,
 } from "@keybr/lesson";
-import { LoadingProgress } from "@keybr/pages-shared";
+import { LoadingProgress, PageDataContext } from "@keybr/pages-shared";
 import { type PhoneticModel } from "@keybr/phonetic-model";
 import { PhoneticModelLoader } from "@keybr/phonetic-model-loader";
+import { hasKeyTraceResults, ResultContext } from "@keybr/result";
 import { useSettings } from "@keybr/settings";
 import { getShuangpinWordList } from "@keybr/textinput";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 
 const wordListCache = new Map<Language, ReturnType<typeof loadWordList>>();
 const contentCache = new Map<
@@ -110,6 +112,20 @@ function useLoader(
 ): Lesson | null {
   const { settings } = useSettings();
   const keyboard = useKeyboard();
+  const pageData = useContext(PageDataContext);
+  const resultContext = useContext(ResultContext);
+  const keytraceAvailable = pageData?.keytraceAvailable ?? false;
+  const results = resultContext?.results;
+  const hasKeyTraceData = useMemo(
+    () => (results != null ? hasKeyTraceResults(results) : false),
+    [results],
+  );
+  const practiceMode = resolvePracticeMode({
+    settings,
+    keytraceAvailable,
+    hasKeyTraceData,
+  });
+  const unlockAllKeys = practiceMode === "keytrace";
   const [result, setResult] = useState<Lesson | null>(null);
 
   useEffect(() => {
@@ -128,7 +144,11 @@ function useLoader(
               ? getShuangpinWordList(layout.id)
               : await cachedLoadWordList(language);
           if (!didCancel) {
-            setResult(new GuidedLesson(settings, keyboard, model, wordList));
+            setResult(
+              new GuidedLesson(settings, keyboard, model, wordList, {
+                unlockAllKeys,
+              }),
+            );
           }
           break;
         }
@@ -181,7 +201,7 @@ function useLoader(
     return () => {
       didCancel = true;
     };
-  }, [settings, keyboard, model, isModelLoading]);
+  }, [settings, keyboard, model, isModelLoading, unlockAllKeys]);
 
   return result;
 }
