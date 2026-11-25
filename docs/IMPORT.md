@@ -1,6 +1,6 @@
 # 把 KeyTrace 的真实打字数据导入本地 keybr
 
-> 调研对象：`C:\Users\Gordo\keybr.com`（当前运行中，端口 3000，Node 22 + `node:sqlite`）
+> 调研对象：`C:\Users\<you>\keytrace-web`（当前运行中，端口 3000，Node 22 + `node:sqlite`）
 > 目标：让本地 keybr 的 guided 练习直接基于 KeyTrace 的逐键数据，而不是从默认字母顺序冷启动。
 > 本文只读代码 + 只读数据库；未修改任何源码、数据库或正在运行的服务。所有"运行时事实"都标注了验证方式。
 
@@ -278,7 +278,7 @@ async postData(ctx, @body.binary(null, { maxLength: 1048576 }) value: Buffer) {
    writeFileSync(process.argv[3], formatMessage([result]));
    ```
    ```bash
-   cd C:/Users/Gordo/keybr.com
+   cd C:/Users/<you>/keytrace-web
    node --import @keybr/tsl scripts/import-keytrace.ts \
      "$USERPROFILE/.keytrace/stats.json" ./keytrace.stats
    ```
@@ -458,7 +458,7 @@ FROM user_login_request;
 3. **HTTP 端到端未测。** 为了避免写库/写文件，只验证了未登录时三个接口返回 403；登录、POST、204 后的文件内容都还没有实跑。
 4. **`user` 表为空、token 未过期（约剩 3.8h）是调研时点的快照。** 执行前请重新确认；token 过期后 `login()` 会直接删掉那一行。
 5. **keybr-tui 的 `--import` 具体行为没有验证**（该仓库不在本地）。它是否也是打同一个 `POST /_/sync/data`，无法确认，本文不依赖它。
-6. **KeyTrace `stats.json` 的 `timeStamp` 是数字还是 ISO 字符串**没有读（按约束未访问 `C:\Users\Gordo\keytrace`）。脚本里两种都兼容；若还有额外字段，以 `packages/keybr-result/lib/result.ts:46-54` 的构造参数为准。
+6. **KeyTrace `stats.json` 的 `timeStamp` 是数字还是 ISO 字符串**没有读（按约束未访问 `C:\Users\<you>\keytrace`）。脚本里两种都兼容；若还有额外字段，以 `packages/keybr-result/lib/result.ts:46-54` 的构造参数为准。
 7. **`histogram` 的键数**：建议只保留实际参与练习的 26 个小写字母。C++ 校验器限制 `< 128` 个样本（`stats_data.cpp:60-62`）；TS 侧不限，但多余的标点/大写键只会增大 `complexity` 并影响排行榜，不会帮助选键。
 
 ---

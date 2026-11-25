@@ -2,7 +2,7 @@
 
 > 配套脚本：`scripts/import-keytrace.ts`
 > 调研结论：`docs/IMPORT.md`（数据模型、`POST /_/sync/data`、加扰格式、非幂等风险）
-> KeyTrace 字段说明：`C:\Users\Gordo\keytrace\docs\stats-schema.md`
+> KeyTrace 字段说明：`C:\Users\<you>\keytrace\docs\stats-schema.md`
 >
 > **这次操作会往正在运行的服务里写数据，而且不能原样撤销。** 先读完第 5 节「回滚」再执行。
 
@@ -60,7 +60,7 @@ length 6654 / time 4410580ms / errors 34 / speed 90.5 CPM / complexity 36 键
 1. **服务已经在跑**（`http://localhost:3000`）。本流程不重启、不 kill、不改源码。
 2. `DATA_DIR` **必须与服务进程一致**。当前 `keybr-server.bat` 里是：
    ```
-   set DATA_DIR=%USERPROFILE%\keybr.com\data
+   set DATA_DIR=%REPO%\data
    ```
    脚本自己不会去读别的进程的环境变量，所以它按 `--data-dir` → `$DATA_DIR` → `/var/lib/keybr` 的顺序解析。**如果你在 shell 里没设 `DATA_DIR`，脚本会解析到 `C:\var\lib\keybr`，那里不存在，脚本会直接报错退出** —— 这是故意的：路径错了，重复导入守卫就形同虚设。
 3. **一个账号**。本地库 `user` 表现在是空的，第一次登录会创建 `id = 1`，对应的 stats 文件是：
@@ -73,13 +73,13 @@ length 6654 / time 4410580ms / errors 34 / speed 90.5 CPM / complexity 36 键
 
 ## 3. 操作步骤
 
-以下命令都在 `C:\Users\Gordo\keybr.com` 下、用 Git Bash 执行。
+以下命令都在 `<仓库根目录>` 下、用 Git Bash 执行。
 
 ### Step 1 — dry run（默认行为，不发请求）
 
 ```bash
-cd /c/Users/Gordo/keybr.com
-DATA_DIR="/c/Users/Gordo/keybr.com/data" \
+cd /c/Users/<you>/keytrace-web
+DATA_DIR="/c/Users/<you>/keytrace-web/data" \
   node --import @keybr/tsl scripts/import-keytrace.ts
 ```
 
@@ -127,7 +127,7 @@ grep -i session cookies.txt        # 第 7 列就是值
 ### Step 3 — 真正上传
 
 ```bash
-DATA_DIR="/c/Users/Gordo/keybr.com/data" \
+DATA_DIR="/c/Users/<you>/keytrace-web/data" \
 KEYBR_COOKIE="session=<粘贴的值>" \
   node --import @keybr/tsl scripts/import-keytrace.ts --send
 ```
@@ -165,7 +165,7 @@ GET  校验结果     : ok（文件里共 1 条记录，最后一条就是本次
 2. **文件大小**：`data\user_stats\000\000\000000001` 应该存在，大小为 **225 字节**（= 8 header + 217 记录；脚本会打印"文件增长"那一行）。没登录过的话这个文件是新建的，大小正好等于载荷字节数 233 减去 scramble 的 8 字节。
 
    ```bash
-   find /c/Users/Gordo/keybr.com/data/user_stats -type f -exec ls -l {} \;
+   find /c/Users/<you>/keytrace-web/data/user_stats -type f -exec ls -l {} \;
    ```
 
 3. **`/practice` 的选键变了**（最直观）：
@@ -195,7 +195,7 @@ GET  校验结果     : ok（文件里共 1 条记录，最后一条就是本次
 ```json
 {
   "importedAt": "2026-11-18T...",
-  "statsFile": "C:\\Users\\Gordo\\.keytrace\\stats.json",
+  "statsFile": "C:\\Users\\<you>\\.keytrace\\stats.json",
   "record": { "length": 6654, "time": 4410580, "errors": 34, "complexity": 36, "speed": 90.5 },
   "userStats": [ { "file": "C:\\...\\data\\user_stats\\000\\000\\000000001", "previousSize": null } ],
   "verification": "ok（...）"
@@ -209,7 +209,7 @@ GET  校验结果     : ok（文件里共 1 条记录，最后一条就是本次
 删文件即可：
 
 ```bash
-rm "C:/Users/Gordo/keybr.com/data/user_stats/000/000/000000001"
+rm "C:/Users/<you>/keytrace-web/data/user_stats/000/000/000000001"
 ```
 
 ### 情况 B：`previousSize` 是数字（导入前已有练习记录）
@@ -218,7 +218,7 @@ rm "C:/Users/Gordo/keybr.com/data/user_stats/000/000/000000001"
 
 ```bash
 node -e "require('node:fs').truncateSync(process.argv[1], Number(process.argv[2]))" \
-  "C:/Users/Gordo/keybr.com/data/user_stats/000/000/000000001" 1234
+  "C:/Users/<you>/keytrace-web/data/user_stats/000/000/000000001" 1234
 ```
 
 不要直接删：那会把导入前的练习记录一起丢掉。
@@ -226,7 +226,7 @@ node -e "require('node:fs').truncateSync(process.argv[1], Number(process.argv[2]
 ### 最后一定要做的
 
 ```bash
-rm "C:/Users/Gordo/keybr.com/data/user_stats/keytrace-import.marker"
+rm "C:/Users/<you>/keytrace-web/data/user_stats/keytrace-import.marker"
 ```
 
 删掉标记，守卫才会放行下一次导入（**只在数据已经回滚之后删**，否则等于绕过保护）。
@@ -281,8 +281,8 @@ bestTimeToType = min(历史所有平滑值)      // 只降不升
 ## 8. 命令速查
 
 ```bash
-cd /c/Users/Gordo/keybr.com
-export DATA_DIR="/c/Users/Gordo/keybr.com/data"
+cd /c/Users/<you>/keytrace-web
+export DATA_DIR="/c/Users/<you>/keytrace-web/data"
 
 # dry run
 node --import @keybr/tsl scripts/import-keytrace.ts
@@ -309,7 +309,7 @@ rm "data/user_stats/keytrace-import.marker"
 ## 9. 中文双拼词表（words-zh-sp.json）是怎么来的
 
 `packages/keybr-content-words/lib/data/words-zh-sp.json` 不是手写的，由
-`C:\Users\Gordo\keytrace\tools\gen_zh_words.py` 生成。
+`C:\Users\<you>\keytrace\tools\gen_zh_words.py` 生成。
 
 ### 一个元素对应几个汉字
 
@@ -370,12 +370,12 @@ curl -sSL --ssl-no-revoke -o /tmp/phrase-pinyin.txt \
   https://raw.githubusercontent.com/mozillazg/phrase-pinyin-data/master/pinyin.txt
 
 # 3. 生成（在 keytrace 仓库根目录）
-cd /c/Users/Gordo/keytrace
+cd /c/Users/<you>/keytrace
 python tools/gen_zh_words.py \
   --hanzi data/zh-hanzi.tsv \
   --dict /tmp/dict.txt \
   --phrase-pinyin /tmp/phrase-pinyin.txt \
-  --out /c/Users/Gordo/keybr.com/packages/keybr-content-words/lib/data/words-zh-sp.json \
+  --out /c/Users/<you>/keytrace-web/packages/keybr-content-words/lib/data/words-zh-sp.json \
   --words 4000 --idioms 1500
 ```
 

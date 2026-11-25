@@ -160,7 +160,7 @@
         },
 ```
 
-**为什么**：webpack 的 `test` 拿到的是**绝对路径**，Windows 上是 `C:\Users\Gordo\keybr.com\packages\keybr-phonetic-model\assets\model-zh-sp.data`。
+**为什么**：webpack 的 `test` 拿到的是**绝对路径**，Windows 上是 `C:\Users\<you>\keytrace-web\packages\keybr-phonetic-model\assets\model-zh-sp.data`。
 原来只匹配正斜杠，整条规则失效 → `.data` 模型文件被当成 JS 解析，报 `Module parse failed`。
 改成 `[\\/]` 双分隔符兼容；browser 侧再补一组扩展名兜底，让不在 `assets/` 目录下的 svg/音频/字体也能走 `asset/resource`。
 

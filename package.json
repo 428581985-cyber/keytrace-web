@@ -1,14 +1,14 @@
 {
   "private": true,
-  "name": "keybr.com",
+  "name": "keytrace-web",
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://www.keybr.com",
-  "license": "GPL-3",
+  "homepage": "https://github.com/428581985-cyber/keytrace-web",
+  "license": "AGPL-3.0-only",
   "author": "Aliaksandr Radzivanovich <aradzivanovich@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git@github.com:aradzie/keybr.com.git"
+    "url": "https://github.com/428581985-cyber/keytrace-web.git"
   },
   "workspaces": [
     "packages/*",
