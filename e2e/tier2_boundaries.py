@@ -136,7 +136,7 @@ def t2_f1_04_profile_zh_sp_ms_semicolon_key_rendered_and_calibrated(
     with open_context(
         browser,
         base_url,
-        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp-ms", "lesson.targetSpeed": 175},
+        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp-ms", "lesson.zhTargetSpeed": 175},
     ) as (_, page, _, _):
         page.goto(f"{base_url}/profile", wait_until="domcontentloaded")
         rec = make_result_json(
@@ -679,7 +679,11 @@ def t2_f7_01_zh_sp_ms_semicolon_key_with_stop_on_error_false(
     with open_context(
         browser,
         base_url,
-        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp-ms"},
+        settings={
+            "keyboard.language": "zh-sp",
+            "keyboard.layout": "zh-sp-ms",
+            "lesson.keytraceMode": "keytrace",
+        },
     ) as (_, page, _, _):
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         ensure_practice_language(page, "zh")
@@ -821,7 +825,7 @@ def t2_f7_05_zh_qp_forgive_errors_nasal_fuzzy_and_ng_g_boundary(
     with open_context(
         browser,
         base_url,
-        settings={"keyboard.language": "zh-qp", "keyboard.layout": "zh-qp", "lesson.targetSpeed": 175},
+        settings={"keyboard.language": "zh-qp", "keyboard.layout": "zh-qp", "lesson.zhTargetSpeed": 175},
     ) as (_, page, _, _):
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         seed_indexeddb_results(
@@ -932,7 +936,9 @@ def t2_f8_01_all_zh_schemes_keep_ciyu_label_at_exact_fieldset_path(
         open_settings(page)
         for pat in schemes:
             select_zh_scheme(page, pat)
-            lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+            lbl = page.locator(
+                'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+            )
             txt = (lbl.inner_text() or "").strip()
             assert txt == "重复每个词语：", f"Scheme {pat} expected '重复每个词语：', got {txt!r}"
 
@@ -948,7 +954,9 @@ def t2_f8_02_zh_ui_en_practice_mode_still_uses_ciyu_wording(
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         ensure_practice_language(page, "en")
         open_settings(page)
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(5) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         txt = (lbl.inner_text() or "").strip()
         assert txt == "重复每个词语：", f"Expected '重复每个词语：' in EN-practice ZH-UI, got {txt!r}"
 
@@ -965,7 +973,9 @@ def t2_f8_03_reset_settings_preserves_ciyu_wording(
         ensure_practice_language(page, "zh")
         open_settings(page)
         reset_settings(page)
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         assert (lbl.inner_text() or "").strip() == "重复每个词语："
 
 
@@ -984,7 +994,9 @@ def t2_f8_04_ciyu_wording_consistent_in_both_dark_and_light_themes(
             get_theme_button(page).click()
             expect(page.locator("html")).to_have_attribute("data-color", expected_color)
             open_settings(page)
-            lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+            lbl = page.locator(
+                'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+            )
             assert (lbl.inner_text() or "").strip() == "重复每个词语："
             save_settings(page)
 
@@ -1003,7 +1015,9 @@ def t2_f8_05_en_to_zh_nav_language_toggle_shows_ciyu_in_settings(
         page.wait_for_function("() => document.documentElement.getAttribute('lang') === 'zh-hans'", timeout=10000)
         ensure_practice_language(page, "zh")
         open_settings(page)
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         assert (lbl.inner_text() or "").strip() == "重复每个词语："
 
 

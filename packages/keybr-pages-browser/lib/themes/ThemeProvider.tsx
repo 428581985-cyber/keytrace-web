@@ -83,6 +83,7 @@ function readPrefs() {
 function storePrefs(prefs: ThemePrefs) {
   document.cookie = String(
     new SetCookie(ThemePrefs.cookieKey, ThemePrefs.serialize(prefs), {
+      path: "/",
       maxAge: 100 * 24 * 60 * 60,
       sameSite: "Lax",
     }),

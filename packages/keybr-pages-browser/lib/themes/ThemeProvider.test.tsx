@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { useTheme } from "@keybr/themes";
 import { render } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
-import { equal } from "rich-assert";
+import { equal, includes } from "rich-assert";
 import { ThemeProvider } from "./ThemeProvider.tsx";
 
 test.beforeEach(() => {
@@ -92,6 +92,37 @@ test("ignore invalid cookie value", () => {
   // Cleanup.
 
   r.unmount();
+});
+
+test("writes prefs cookie with root Path=/ so theme persists across /en/* and / routes", async () => {
+  const desc = Object.getOwnPropertyDescriptor(Document.prototype, "cookie")!;
+  const writes: string[] = [];
+  Object.defineProperty(document, "cookie", {
+    configurable: true,
+    get() {
+      return desc.get!.call(this);
+    },
+    set(value: string) {
+      writes.push(value);
+      desc.set!.call(this, value);
+    },
+  });
+
+  const r = render(
+    <ThemeProvider>
+      <Switcher />
+    </ThemeProvider>,
+  );
+
+  try {
+    await userEvent.click(r.getByText("light"));
+    equal(writes.length, 1);
+    includes(writes[0], "Path=/");
+    includes(writes[0], "SameSite=Lax");
+  } finally {
+    r.unmount();
+    delete (document as unknown as Record<string, unknown>).cookie;
+  }
 });
 
 function Switcher() {

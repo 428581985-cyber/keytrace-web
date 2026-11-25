@@ -46,7 +46,7 @@ def t3_01_f1_f7_zh_sp_live_lesson_stop_on_error_false_to_profile(
     with open_context(
         browser,
         base_url,
-        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp", "lesson.targetSpeed": 175},
+        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp", "lesson.zhTargetSpeed": 175},
     ) as (_, page, _, _):
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         ensure_practice_language(page, "zh")
@@ -86,7 +86,7 @@ def t3_02_f1_f7_zh_qp_live_lesson_forgive_errors_to_profile(
     with open_context(
         browser,
         base_url,
-        settings={"keyboard.language": "zh-qp", "keyboard.layout": "zh-qp", "lesson.targetSpeed": 175},
+        settings={"keyboard.language": "zh-qp", "keyboard.layout": "zh-qp", "lesson.zhTargetSpeed": 175},
     ) as (_, page, _, _):
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         ensure_practice_language(page, "zh")
@@ -242,7 +242,9 @@ def t3_07_f6_f8_settings_ciyu_wording_and_font_selector_together(
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         ensure_practice_language(page, "zh")
         open_settings(page)
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         assert (lbl.inner_text() or "").strip() == "重复每个词语："
         select_settings_font(page, r"^仿宋$")
         save_settings(page)
@@ -264,7 +266,9 @@ def t3_08_f7_f8_settings_ciyu_plus_all_three_typing_options_live_zh(
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         ensure_practice_language(page, "zh")
         open_settings(page)
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         assert (lbl.inner_text() or "").strip() == "重复每个词语："
         set_typing_options(page, stop_on_error=False, forgive_errors=False, space_skips_words=True)
         save_settings(page)

@@ -69,7 +69,9 @@ def t4_01_daily_zh_shuangpin_user_session_settings_to_profile(
 
         ensure_practice_language(page, "zh")
         open_settings(page)
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         assert (lbl.inner_text() or "").strip() == "重复每个词语："
         set_typing_options(page, stop_on_error=False, forgive_errors=False, space_skips_words=True)
         save_settings(page)
@@ -113,7 +115,9 @@ def t4_02_bilingual_learner_font_and_layout_stability_across_views(
         ensure_practice_language(page, "zh")
 
         open_settings(page)
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         assert (lbl.inner_text() or "").strip() == "重复每个词语："
         select_settings_font(page, r"^楷体$")
         save_settings(page)
@@ -209,7 +213,7 @@ def t4_04_zh_qp_fuzzy_and_forgive_errors_practice_to_profile(
     with open_context(
         browser,
         base_url,
-        settings={"keyboard.language": "zh-qp", "keyboard.layout": "zh-qp", "lesson.targetSpeed": 175},
+        settings={"keyboard.language": "zh-qp", "keyboard.layout": "zh-qp", "lesson.zhTargetSpeed": 175},
     ) as (_, page, _, _):
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         ensure_practice_language(page, "zh")

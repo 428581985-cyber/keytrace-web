@@ -135,7 +135,7 @@ def t1_f1_03_profile_zh_realtime_mastery_regression_not_green(
     with open_context(
         browser,
         base_url,
-        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp", "lesson.targetSpeed": 175},
+        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp", "lesson.zhTargetSpeed": 175},
     ) as (_, page, _, _):
         page.goto(f"{base_url}/profile", wait_until="domcontentloaded")
         # Session 0: fast 'j' at 200ms (sets bestTimeToType = 200ms).
@@ -1041,7 +1041,9 @@ def t1_f8_01_zh_settings_repeat_each_word_label_uses_ciyu(
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         ensure_practice_language(page, "zh")
         open_settings(page)
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         expect(lbl).to_be_visible(timeout=5000)
         txt = (lbl.inner_text() or "").strip()
         assert txt == "重复每个词语：", f"Expected '重复每个词语：', got {txt!r}"
@@ -1076,7 +1078,9 @@ def t1_f8_03_zh_settings_ciyu_wording_in_quanpin_mode(
         ensure_practice_language(page, "zh")
         open_settings(page)
         select_zh_scheme(page, r"^(全拼|Full Pinyin)$")
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         assert (lbl.inner_text() or "").strip() == "重复每个词语："
 
 
@@ -1093,7 +1097,9 @@ def t1_f8_04_zh_settings_ciyu_wording_persists_after_save_and_reopen(
         open_settings(page)
         save_settings(page)
         open_settings(page)
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         assert (lbl.inner_text() or "").strip() == "重复每个词语："
 
 
@@ -1109,7 +1115,9 @@ def t1_f8_05_en_ui_keeps_repeat_each_word_label(
         assert get_html_attrs(page)["lang"] == "en"
         ensure_practice_language(page, "zh")
         open_settings(page)
-        lbl = page.locator("main fieldset:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)")
+        lbl = page.locator(
+            'main fieldset:nth-of-type(1) > div:has(input[type="range"][min="1"][max="10"]) > span:nth-of-type(1)'
+        )
         assert (lbl.inner_text() or "").strip() == "Repeat each word:"
 
 
