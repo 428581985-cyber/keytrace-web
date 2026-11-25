@@ -6,7 +6,7 @@ import { names } from "@keybr/lesson-ui";
 import { FakePhoneticModel } from "@keybr/phonetic-model";
 import { FakeSettingsContext, Settings } from "@keybr/settings";
 import { PortalContainer } from "@keybr/widget";
-import { fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { equal, includes, isNotNull, isNull } from "rich-assert";
 import { Presenter } from "./Presenter.tsx";
 import { LessonState, Progress } from "./state/index.ts";
@@ -258,6 +258,73 @@ test("isNew auto-open from Bare view switches to Normal and restores Bare on clo
         isNull(r.container.querySelector(`#${names.indicators}`));
         isNull(r.container.querySelector(`#${names.keyboard}`));
         equal(window.scrollY, 180);
+      } finally {
+        r.unmount();
+      }
+    });
+  } finally {
+    cleanupPortal();
+    window.localStorage.clear();
+  }
+});
+
+test("batched double-close of help tutorial preserves saved Compact view and scroll", () => {
+  window.localStorage.clear();
+  const cleanupPortal = ensurePortalContainer();
+  const state = makeState(false);
+  const keyboard = state.lesson.keyboard;
+
+  try {
+    withMockedWindowScroll(18, 420, () => {
+      const r = render(
+        <FakeIntlProvider>
+          <FakeSettingsContext initialSettings={state.settings}>
+            <KeyboardContext.Provider value={keyboard}>
+              <Presenter
+                state={state}
+                lines={state.lines}
+                depressedKeys={[]}
+                onResetLesson={() => {}}
+                onSkipLesson={() => {}}
+                onKeyDown={() => {}}
+                onKeyUp={() => {}}
+                onInput={() => {}}
+              />
+            </KeyboardContext.Provider>
+          </FakeSettingsContext>
+        </FakeIntlProvider>,
+      );
+
+      try {
+        // Switch from Normal -> Compact.
+        fireEvent.click(r.getByTitle("Switch the current interface layout."));
+        isNotNull(r.container.querySelector(`#${names.indicators}`));
+        isNull(r.container.querySelector(`#${names.keyboard}`));
+
+        // Open Help tutorial -> NormalLayout + scroll (0, 0).
+        fireEvent.click(r.getByTitle("Show a guided tour with help slides."));
+        isNotNull(r.container.querySelector(`#${names.keyboard}`));
+        equal(window.scrollX, 0);
+        equal(window.scrollY, 0);
+
+        const portalEl = document.getElementById(PortalContainer.id)!;
+        const closeButton = Array.from(portalEl.querySelectorAll("a")).find(
+          (el) => el.textContent?.trim() === "",
+        )!;
+        isNotNull(closeButton);
+
+        // Trigger Close click and Escape in a single React batch before commit.
+        act(() => {
+          fireEvent.click(closeButton);
+          fireEvent.keyDown(document, { key: "Escape" });
+        });
+
+        // Must restore Compact view (#id_keyboard absent) and original scroll.
+        isNull(r.container.querySelector(`#${names.keyboard}`));
+        isNotNull(r.container.querySelector(`#${names.indicators}`));
+        equal(portalEl.textContent!.trim(), "");
+        equal(window.scrollX, 18);
+        equal(window.scrollY, 420);
       } finally {
         r.unmount();
       }

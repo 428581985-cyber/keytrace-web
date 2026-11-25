@@ -112,6 +112,16 @@ export function Zoomer({
   const effectiveHover = isSuspended ? false : hover;
   const effectiveMoving = isSuspended ? false : moving;
 
+  const [suspendHoverTasks] = useState(() => new Tasks());
+  const [suspendMovingTasks] = useState(() => new Tasks());
+
+  useEffect(() => {
+    return () => {
+      suspendHoverTasks.cancelAll();
+      suspendMovingTasks.cancelAll();
+    };
+  }, [suspendHoverTasks, suspendMovingTasks]);
+
   useEffect(() => {
     if (!isSuspended) {
       return;
@@ -119,20 +129,21 @@ export function Zoomer({
     if (globalMoving.current === rootRef.current) {
       globalMoving.current = null;
     }
-    const tasks = new Tasks();
-    tasks.delayed(0, () => {
+    suspendHoverTasks.cancelAll();
+    suspendMovingTasks.cancelAll();
+    suspendHoverTasks.delayed(0, () => {
       setHover(false);
+    });
+    suspendMovingTasks.delayed(0, () => {
       setMoving(false);
     });
-    return () => {
-      tasks.cancelAll();
-    };
-  }, [isSuspended]);
+  }, [isSuspended, suspendHoverTasks, suspendMovingTasks]);
 
   useMouseWheel(rootEl, (ev) => {
     if (isSuspended) {
       return;
     }
+    suspendHoverTasks.cancelAll();
     setPosition({ x, y, zoom: zoom - Math.sign(ev.deltaY) * 0.05 });
     setHover(true);
     ev.preventDefault();
@@ -143,6 +154,8 @@ export function Zoomer({
     }
     const root = rootRef.current;
     if (root != null && !moving && contains(root, ev.target)) {
+      suspendHoverTasks.cancelAll();
+      suspendMovingTasks.cancelAll();
       setMoving(true);
       setHover(false);
       globalMoving.current = root;
@@ -152,6 +165,10 @@ export function Zoomer({
   useDocumentEvent("mouseup", (ev) => {
     const root = rootRef.current;
     if (root != null && moving) {
+      if (!isSuspended) {
+        suspendHoverTasks.cancelAll();
+        suspendMovingTasks.cancelAll();
+      }
       setMoving(false);
       setHover(!isSuspended);
       globalMoving.current = null;
@@ -218,6 +235,7 @@ export function Zoomer({
       }}
       onMouseEnter={() => {
         if (!isSuspended) {
+          suspendHoverTasks.cancelAll();
           setHover(globalMoving.current == null);
         }
       }}

@@ -140,3 +140,88 @@ test("suspended prop resets style to 0,0,1 without writing localStorage on first
     window.localStorage.clear();
   }
 });
+
+test("mid-drag synchronous suspend and resume resets moving to false without touching localStorage", async () => {
+  window.localStorage.clear();
+
+  try {
+    const r = render(
+      <ZoomerSuspendedContext.Provider value={false}>
+        <Zoomer id="test-zoomer-quick-toggle">
+          <TestChild />
+        </Zoomer>
+      </ZoomerSuspendedContext.Provider>,
+    );
+
+    const child = r.getByTestId("child");
+    const root = child.parentElement!;
+
+    // Start dragging without releasing mouseup.
+    fireEvent.mouseDown(child);
+    fireEvent.mouseMove(document, { movementX: 20, movementY: 10 });
+    equal(child.getAttribute("data-moving"), "true");
+    equal(root.style.left, "20px");
+    equal(root.style.top, "10px");
+
+    const savedBefore = window.localStorage.getItem(STORAGE_KEY);
+
+    // Toggle ZoomerSuspendedContext true -> false synchronously within the same tick.
+    r.rerender(
+      <ZoomerSuspendedContext.Provider value={true}>
+        <Zoomer id="test-zoomer-quick-toggle">
+          <TestChild />
+        </Zoomer>
+      </ZoomerSuspendedContext.Provider>,
+    );
+    r.rerender(
+      <ZoomerSuspendedContext.Provider value={false}>
+        <Zoomer id="test-zoomer-quick-toggle">
+          <TestChild />
+        </Zoomer>
+      </ZoomerSuspendedContext.Provider>,
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    equal(child.getAttribute("data-moving"), "false");
+    equal(root.style.left, "20px");
+    equal(root.style.top, "10px");
+    equal(window.localStorage.getItem(STORAGE_KEY), savedBefore);
+
+    // A genuine new drag started right after quick toggle (after releasing old drag) is not cleared by the old task.
+    fireEvent.mouseDown(child);
+    equal(child.getAttribute("data-moving"), "true");
+
+    r.rerender(
+      <ZoomerSuspendedContext.Provider value={true}>
+        <Zoomer id="test-zoomer-quick-toggle">
+          <TestChild />
+        </Zoomer>
+      </ZoomerSuspendedContext.Provider>,
+    );
+    fireEvent.mouseUp(document);
+    r.rerender(
+      <ZoomerSuspendedContext.Provider value={false}>
+        <Zoomer id="test-zoomer-quick-toggle">
+          <TestChild />
+        </Zoomer>
+      </ZoomerSuspendedContext.Provider>,
+    );
+    fireEvent.mouseDown(child);
+    equal(child.getAttribute("data-moving"), "true");
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    equal(child.getAttribute("data-moving"), "true");
+
+    fireEvent.mouseUp(document);
+    equal(child.getAttribute("data-moving"), "false");
+
+    r.unmount();
+  } finally {
+    window.localStorage.clear();
+  }
+});

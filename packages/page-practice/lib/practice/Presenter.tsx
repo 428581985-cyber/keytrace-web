@@ -326,10 +326,10 @@ export class Presenter extends PureComponent<Props, State> {
   };
 
   handleTourClose = () => {
-    if (!this.state.tour) {
+    if (!this.state.tour || this.savedView == null) {
       return;
     }
-    const view = this.savedView ?? View.Normal;
+    const view = this.savedView;
     const scroll = this.savedScroll;
     this.savedView = null;
     this.savedScroll = null;
