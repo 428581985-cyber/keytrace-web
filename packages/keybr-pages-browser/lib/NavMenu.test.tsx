@@ -56,7 +56,7 @@ test("render default zh-hans locale when KeyTrace is available", () => {
     const githubLink = r.getByRole("link", { name: "GitHub" });
     equal(
       githubLink.getAttribute("href"),
-      "https://github.com/428581985-cyber/keytrace",
+      "https://github.com/428581985-cyber/keytrace-web",
     );
     equal(githubLink.getAttribute("target"), "_blank");
     equal(githubLink.getAttribute("rel"), "noopener noreferrer");
@@ -96,7 +96,7 @@ test("render en locale when KeyTrace is available", () => {
     const githubLink = r.getByRole("link", { name: "GitHub" });
     equal(
       githubLink.getAttribute("href"),
-      "https://github.com/428581985-cyber/keytrace",
+      "https://github.com/428581985-cyber/keytrace-web",
     );
     equal(githubLink.getAttribute("target"), "_blank");
     equal(githubLink.getAttribute("rel"), "noopener noreferrer");

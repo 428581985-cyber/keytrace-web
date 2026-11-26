@@ -81,14 +81,15 @@ const DEFAULT_ZH_TARGET_SPEED = 125;
 
 const USAGE = `用法: npx tsnode scripts/import-keytrace.ts [选项]
 
-  --send            真正上传（默认只做 dry run）
-  --dry-run         只打印将要发送的内容（默认行为）
-  --stats <path>    KeyTrace 统计文件，默认 %USERPROFILE%\\.keytrace\\stats.json
-  --layout <id>     目标键盘布局，默认 en-us（中文小鹤双拼用 zh-sp，中文全拼用 zh-qp）
-  --force           忽略已导入标记，用于换布局再导一次
-  --data-dir <path> 服务端 DATA_DIR，默认取 $DATA_DIR，再退回 /var/lib/keybr
-  --url <url>       keybr 地址，默认 $KEYBR_URL 或 http://localhost:3000
-  -h, --help        显示帮助`;
+  --send              真正上传（默认只做 dry run）
+  --dry-run           只打印将要发送的内容（默认行为）
+  --stats <path>      KeyTrace 统计文件，默认 %USERPROFILE%\\.keytrace\\stats.json
+  --layout <id>       目标键盘布局，默认 en-us（中文小鹤双拼用 zh-sp，中文全拼用 zh-qp）
+  --error-weight <k>  错误率惩罚权重，默认 0（仅映射 ikiP50Ms）；k>0 时按 clamp(ikiP50Ms*(1+k*typoRate)) 折算
+  --force             忽略已导入标记，用于换布局再导一次
+  --data-dir <path>   服务端 DATA_DIR，默认取 $DATA_DIR，再退回 /var/lib/keybr
+  --url <url>         keybr 地址，默认 $KEYBR_URL 或 http://localhost:3000
+  -h, --help          显示帮助`;
 
 type Options = {
   readonly send: boolean;
@@ -97,6 +98,8 @@ type Options = {
   readonly baseUrl: string;
   /** 目标键盘布局，默认 en-us。中文小鹤双拼用 zh-sp，中文全拼用 zh-qp。 */
   readonly layout: string;
+  /** 错误率惩罚权重 k（>= 0），默认 0 表示不折算错误率。 */
+  readonly errorWeight: number;
   /** 忽略「已导入」标记，用于换布局再导一次 */
   readonly force: boolean;
 };
@@ -160,11 +163,10 @@ type Snapshot = Map<string, number>;
 async function main(): Promise<void> {
   const options = parseOptions(process.argv);
 
-  // The running server pins DATA_DIR in keybr-server.bat. This process cannot
-  // read the environment of another process, so the value has to be supplied
-  // again here; a wrong value would silently defeat the duplicate guard.
-  // TODO: 用一次实测确认服务端真实使用的 DATA_DIR，见 docs/IMPORT-HOWTO.md
-  //       的「未确认项」一节（判据：导入后 user_stats 下哪个文件变大）。
+  // The running server pins DATA_DIR in keybr-server.bat (<repo>\data). This
+  // process cannot read the environment of another process, so the value has
+  // to be supplied again here; a wrong value would silently defeat the
+  // duplicate guard.
   if (!existsSync(options.dataDir)) {
     throw new Error(
       [
@@ -191,7 +193,7 @@ async function main(): Promise<void> {
   }
 
   const stats = readStats(options.statsFile);
-  const conversion = convert(stats, options.layout);
+  const conversion = convert(stats, options.layout, options.errorWeight);
   const { result } = conversion;
 
   if (!result.validate()) {
@@ -269,6 +271,7 @@ async function main(): Promise<void> {
     statsFile: options.statsFile,
     statsGeneratedAt: stats.generatedAt,
     window: stats.window,
+    errorWeight: options.errorWeight,
     record: {
       layout: result.layout.id,
       textType: result.textType.id,
@@ -321,6 +324,7 @@ function parseOptions(argv: readonly string[]): Options {
   let dataDir: string | null = null;
   let baseUrl = process.env.KEYBR_URL ?? "http://localhost:3000";
   let layout = "en-us";
+  let errorWeight = 0;
   let force = false;
 
   const args = argv.slice(2);
@@ -345,6 +349,17 @@ function parseOptions(argv: readonly string[]): Options {
       case "--layout":
         layout = nextValue(args, ++i, arg);
         break;
+      case "--error-weight": {
+        const raw = nextValue(args, ++i, arg);
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed) || parsed < 0) {
+          throw new Error(
+            `参数 --error-weight 需要非负有限数值，收到: ${raw}\n\n${USAGE}`,
+          );
+        }
+        errorWeight = parsed;
+        break;
+      }
       case "--force":
         force = true;
         break;
@@ -370,6 +385,7 @@ function parseOptions(argv: readonly string[]): Options {
     dataDir: resolveDataDir(dataDir),
     baseUrl: baseUrl.replace(/\/+$/, ""),
     layout,
+    errorWeight,
     force,
   };
 }
@@ -450,7 +466,11 @@ function toCodePoint(vk: number): number | null {
   return null;
 }
 
-function convert(stats: KeyTraceStats, layoutId: string): Conversion {
+function convert(
+  stats: KeyTraceStats,
+  layoutId: string,
+  errorWeight: number = 0,
+): Conversion {
   const rows: Row[] = [];
   const skipped: KeyTraceKey[] = [];
   const withoutTiming: string[] = [];
@@ -469,12 +489,19 @@ function convert(stats: KeyTraceStats, layoutId: string): Conversion {
     const sourceTimeToType = Math.round(key.ikiP50Ms);
     let timeToType = 0;
     if (sourceTimeToType > 0) {
+      // Optional error-rate weighting (`docs/IMPORT.md` §1.5):
+      // when `errorWeight > 0`, inflate effective time by `1 + k * typoRate`.
+      const typoRate = missCount / hitCount;
+      const effectiveTimeToType =
+        errorWeight > 0
+          ? Math.round(key.ikiP50Ms * (1 + errorWeight * typoRate))
+          : sourceTimeToType;
       timeToType = Math.min(
         MAX_TIME_TO_TYPE,
-        Math.max(MIN_TIME_TO_TYPE, sourceTimeToType),
+        Math.max(MIN_TIME_TO_TYPE, effectiveTimeToType),
       );
-      if (timeToType !== sourceTimeToType) {
-        clamped.push(`${key.name} ${sourceTimeToType}→${timeToType}ms`);
+      if (timeToType !== effectiveTimeToType) {
+        clamped.push(`${key.name} ${effectiveTimeToType}→${timeToType}ms`);
       }
     } else {
       // 0 is allowed by keybr and means "no timing samples for this key".
@@ -530,10 +557,6 @@ function convert(stats: KeyTraceStats, layoutId: string): Conversion {
       })),
     ),
   );
-
-  // TODO: 若要让高错误率键变成 focus 键，需要把 typoRate 折算进 timeToType
-  //       （docs/IMPORT.md §1.5，`timeToType_effective = tt * (1 + k * rate)`）。
-  //       本轮按约定只映射 ikiP50Ms，因此 keybr 只能看到速度，看不到错误率。
 
   return { result, rows, skipped, withoutTiming, clamped };
 }
@@ -605,6 +628,9 @@ function printReport(
   console.log(`DATA_DIR        : ${options.dataDir}`);
   console.log(`标记文件        : ${markerFile}（不存在）`);
   console.log(`目标地址        : ${options.baseUrl}/_/sync/data`);
+  console.log(
+    `错误率权重      : ${options.errorWeight}${options.errorWeight > 0 ? "（clamp(ikiP50Ms * (1 + k * typoRate))）" : "（未启用，仅映射 ikiP50Ms）"}`,
+  );
   console.log(
     `cookie          : ${process.env.KEYBR_COOKIE ? "已设置 KEYBR_COOKIE" : "未设置（--send 前必须设置）"}`,
   );
@@ -723,9 +749,6 @@ function summarizeSkipped(skipped: readonly KeyTraceKey[]): string {
 // --------------------------------------------------------------------------
 
 function readCookie(): string {
-  // TODO: cookie 名来自代码（COOKIE_NAME 默认 "session"），还没有在真实响应头里
-  //       观察过。若服务端改过 COOKIE_NAME，直接传整段 "名字=值" 即可绕过这里的补全；
-  //       实测方法见 docs/IMPORT-HOWTO.md 第 7 节（curl -i 看 Set-Cookie）。
   const value = (process.env.KEYBR_COOKIE ?? "").trim();
   if (value === "") {
     throw new Error(

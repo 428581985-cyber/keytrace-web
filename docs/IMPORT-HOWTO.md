@@ -39,12 +39,12 @@ DATA_DIR\user_stats\<id 前3>\<id 中3>\<id 补零9位>
 | `codePoint` | `vk` → a-z 用 `97 + (vk - 65)`，主键盘 0-9 直接用 `vk` | 其它键（Backspace/Enter/符号/小键盘数字）跳过 |
 | `hitCount` | `keys[].presses` | |
 | `missCount` | `keys[].typos` | 只算"确认的纠错"；`typosUnreplaced` 不计 |
-| `timeToType` | `keys[].ikiP50Ms` | 越界的会被夹到 `[40, 12000]`，越界会让整条记录被丢弃 |
+| `timeToType` | `keys[].ikiP50Ms`（或经 `--error-weight <k>` 折算） | 默认直接取 `ikiP50Ms`；传入 `--error-weight <k>`（`k > 0`）时计算 `ikiP50Ms * (1 + k * typoRate)`，随后统一夹到 `[40, 12000]`，越界会让整条记录被丢弃 |
 | `length` | `Σ hitCount` | |
 | `time` | `baseline.textActiveMs` | |
 | `errors` | `Σ missCount` | |
 | `speed` | `length / time * 60000` | `Result` 自己会算，等价 |
-| `layout` / `textType` | 固定 `en-us` / `generated` | 布局族必须是 `qwerty`，否则练习页过滤掉 |
+| `layout` / `textType` | `--layout`（默认 `en-us`，中文可用 `zh-sp` / `zh-qp`） / 固定 `keytrace`（`TextType.KEYTRACE`） | 布局族须与当前练习布局一致；`TextType.KEYTRACE` 用于区分 KeyTrace 样本与独立网页练习记录 |
 
 本次真实数据的 dry run 结果（供对照）：
 
@@ -170,11 +170,10 @@ GET  校验结果     : ok（文件里共 1 条记录，最后一条就是本次
 
 3. **`/practice` 的选键变了**（最直观）：
 
-   - 页面顶部 `CurrentKey` 区域：`keybr-lesson-ui/lib/CurrentKey.tsx`。没数据时它显示的是 guided 默认的前 6 个字母里的某个 focus 键；导入后：
-     - 若某个已纳入的键 `confidence < 1`，会 focus 到其中最弱（最慢）的一个。按本次数据，A–Z 里 21/26 达速（阈值 343ms），未达速的只有 **C(505ms)、V(391ms)、Y(353ms)、X(350ms)、Q(347ms)**，所以 focus 应该落在这些键里（优先 C）。
-     - 若全部达速，则显示 `All keys are unlocked.`。
-   - 练习文本里出现的字母集合会从"按频率顺序的前 6 个"扩大到"所有 `timeToType <= 343ms` 的键"（`packages/keybr-lesson/lib/guided.ts:42-107`，`confidence = speedToTime(175) / timeToType`）。
-   - 注意：**keybr 只用 `timeToType` 选键，不看错误率**。所以 A/E/I/K 这些打了错但打得快的键不会因此被重点练（脚本里留了 `TODO:`，见第 7 节）。
+   - 导入记录携带 `TextType.KEYTRACE`（xid `5`）。在默认的 `auto`（KeyTrace 联动）模式下，检测到 KeyTrace 记录后自动进入**全键解锁弱键驱动**模式（不再显示待解锁字母）；若在设置中切到 `standalone`（独立网页模式），则自动隔离 `TextType.KEYTRACE` 记录并保留原版 6 键起步渐进解锁课程。
+   - 页面顶部 `CurrentKey` 区域（`keybr-lesson-ui/lib/CurrentKey.tsx`）：若存在 `confidence < 1` 的弱键，会 focus 到其中最弱（最慢）的一个；按示例数据（英文目标 175 CPM ≈ 343ms；中文默认 125 CPM ≈ 480ms），未达速的键会被优先针对训练。
+   - 若全部达速，则显示 `All keys are unlocked.`。
+   - **错误率折算（可选）**：keybr 原生选键只看 `timeToType`，不直接看错误率。若希望把高错误率但速度较快的键（例如高频 typo 键）也纳入弱键重点练习，可在导入时传入 `--error-weight <k>`（如 `--error-weight 3`，详见第 7 节）。
 
 4. **`/profile` 有数据了**：`All time` 摘要出现速度/准确率，日历上出现 `2026-11-17` 这一天，`Key Speed Chart` / `Key Frequency Heatmap` 出现 26 个字母的柱子。
 
@@ -259,22 +258,37 @@ bestTimeToType = min(历史所有平滑值)      // 只降不升
 
 ---
 
-## 7. 未确认项与怎么实测
+## 7. 技术细节与可选错误率加权
 
-| # | 事项 | 现状 | 怎么实测 |
-| --- | --- | --- | --- |
-| 1 | 服务进程实际使用的 `DATA_DIR` | 代码默认 `/var/lib/keybr`；`keybr-server.bat` 里显式设为 `data\`。进程环境读不到，属**推断** | 导入后 `find data/user_stats -type f -mmin -5 2>/dev/null`，看是不是 `data\` 下的文件变了。变了 = 一致；没变 = 脚本写错了目录，按标记文件里 `userStats[]` 与实际不符处理 |
-| 2 | cookie 名与值的格式 | 代码确认：名默认 `session`，值是 `[a-zA-Z0-9]+`。**没有在真实响应头里观察过** | `curl -i http://localhost:3000/login/xyz` 看 `Set-Cookie`。名字不同就把 `COOKIE_NAME` 设成实际值（脚本支持传整段 `KEYBR_COOKIE=名字=值`） |
-| 3 | `POST /_/sync/data` 的端到端行为 | 代码确认 204/403/400/415；本文与脚本都未实跑 | 第一次 `--send` 时观察；脚本已内置回读校验，204 但没写进去会报出来 |
-| 4 | user id / publicId | 未知（库空，首登应为 1） | 脚本用导入前后的目录快照反查，标记文件里记的是真实路径 |
-| 5 | 加扰二进制布局 | 由 `formatMessage()` 生成，不手写字节。已做内存往返验证：`formatMessage → parseMessage` 后 layout/textType/直方图逐字段一致 | 不需要再验；若要追字节：`packages/keybr-binary/lib/secret.ts` 显示 XOR 从第 4 字节开始（连 crc32 字段一起异或），与 `IMPORT.md` 里"8 字节前缀 + 整段 XOR"的表述略有差异，但**不影响本脚本**（它不自己拼字节） |
-| 6 | 时间戳精度 | `writeResult` 里是 `round(timeStamp / 1000)`，只存到秒 | 导入后 `/profile` 上那天的日期如果差一秒属正常 |
+### 已验证的运行时行为
 
-### 一个已知的功能缺口（不是 bug）
+- **`DATA_DIR`**：`keybr-server.bat` 固定将 `DATA_DIR` 设为 `<仓库根目录>\data`，用户统计落在 `data\user_stats\000\000\<9位id>`；脚本会在导入前后扫描该目录并把真实写入路径记录进 `keytrace-import.marker`。
+- **会话 Cookie**：服务端默认 `COOKIE_NAME = "session"`，值格式为 `[a-zA-Z0-9]+`；若自定义了 `COOKIE_NAME`，直接在 `KEYBR_COOKIE` 里传整段 `名字=值` 即可。
+- **端到端写入与校验**：`POST /_/sync/data` 接受 `application/octet-stream`（`formatMessage()` 输出的加扰二进制），并在写入后立即执行 `GET /_/sync/data` 回读解析校验。
+- **记录标识（`TextType.KEYTRACE`）**：导入脚本写入的记录固定标记为 `TextType.KEYTRACE`（`textType = "keytrace"`，xid `5`），以便前端在 `auto` 模式中识别为 KeyTrace 弱键数据源，在 `standalone` 模式中将其完全隔离而不污染独立网页进度。
+- **加扰二进制布局**：由 `@keybr/result-io` 的 `formatMessage()` 统一生成（`packages/keybr-binary/lib/secret.ts` 从第 4 字节起 XOR 覆盖 crc32 与载荷），无需手工拼字节。
+- **时间戳精度**：二进制格式 `writeResult` 以秒为单位存储（`round(timeStamp / 1000)`），`/profile` 上相差 1 秒属正常行为。
 
-`timeToType = ikiP50Ms`，**错误率完全没有进入 keybr 的模型**。keybr 选键只看速度，所以 `C`（505ms）会被练，但 `A`（4 次 typo、157ms）不会。
+### 可选错误率加权（`--error-weight <k>`）
 
-脚本里对应的 `TODO:` 注释说明了改法：`timeToType_effective = tt * (1 + k * typoRate)`，k 取 2–4（`docs/IMPORT.md` §1.5）。这一轮不实现，因为它是业务决策，不是格式问题。
+keybr 原生 `KeyStats` / `GuidedLesson` 选键模型只使用 `timeToType`，不直接根据 `missCount` 触发弱键练习。
+
+- 默认 `--error-weight 0`：保持纯速度映射（`timeToType = clamp(round(ikiP50Ms), 40, 12000)`），与历史行为完全一致。
+- 启用 `--error-weight <k>`（`k > 0`，推荐 `2`–`4`，对应 `docs/IMPORT.md` §1.5）：按公式
+
+  ```
+  typoRate            = missCount / hitCount
+  timeToType_effective = clamp(round(ikiP50Ms * (1 + k * typoRate)), 40, 12000)
+  ```
+
+  放大高错误率键的等效耗时，使高频误触键的 `confidence` 落到 `< 1`，从而被 `/practice` 自动选为重点练习键。
+
+示例（中文双拼 + 错误率权重 `3` 的 dry run）：
+
+```bash
+DATA_DIR="/c/Users/<you>/keytrace-web/data" \
+  node --import @keybr/tsl scripts/import-keytrace.ts --layout zh-sp --error-weight 3
+```
 
 ---
 
@@ -284,8 +298,11 @@ bestTimeToType = min(历史所有平滑值)      // 只降不升
 cd /c/Users/<you>/keytrace-web
 export DATA_DIR="/c/Users/<you>/keytrace-web/data"
 
-# dry run
+# dry run（默认 en-us，--error-weight 0）
 node --import @keybr/tsl scripts/import-keytrace.ts
+
+# dry run（中文小鹤双拼 + 错误率加权）
+node --import @keybr/tsl scripts/import-keytrace.ts --layout zh-sp --error-weight 3
 
 # 登录（拿到 cookie 后从 cookies.txt 或 DevTools 复制 session 值）
 curl -s -i -c cookies.txt http://localhost:3000/login/xyz | head
@@ -301,7 +318,7 @@ rm "data/user_stats/000/000/000000001"
 rm "data/user_stats/keytrace-import.marker"
 ```
 
-参数：`--send` / `--dry-run` / `--stats <path>` / `--data-dir <path>` / `--url <url>` / `--help`。
+参数：`--send` / `--dry-run` / `--stats <path>` / `--layout <id>` / `--error-weight <k>` / `--force` / `--data-dir <path>` / `--url <url>` / `--help`。
 环境变量：`KEYBR_COOKIE`、`KEYBR_URL`、`DATA_DIR`。
 
 ---

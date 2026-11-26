@@ -130,7 +130,7 @@ function GitHubLink() {
   return (
     <a
       className={styles.link}
-      href="https://github.com/428581985-cyber/keytrace"
+      href="https://github.com/428581985-cyber/keytrace-web"
       target="_blank"
       rel="noopener noreferrer"
       title={formatMessage({
