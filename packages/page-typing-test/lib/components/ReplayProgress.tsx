@@ -33,18 +33,22 @@ export function ReplayProgress({ stepper }: { stepper: ReplayState }) {
 
 function useReplayProgress(stepper: ReplayState) {
   const { state, progress } = stepper;
-  const [time, setTime] = useState(0);
+  const [record, setRecord] = useState({ progress, time: 0 });
   useEffect(() => {
-    setTime(0);
     const frames = new AnimationFrames();
     frames.start(() => {
       if (state === "running" || state === "finished") {
-        setTime(progress.time);
+        setRecord({ progress, time: progress.time });
       }
     });
     return () => {
       frames.cancel();
     };
   }, [state, progress]);
+  const time =
+    record.progress === progress &&
+    (state === "running" || state === "finished")
+      ? record.time
+      : 0;
   return { progress, time };
 }

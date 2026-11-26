@@ -8,7 +8,9 @@ export function useMouseWheel(
   handler: (event: WheelEvent) => void,
 ): void {
   const ref = useRef(handler);
-  ref.current = handler;
+  useEffect(() => {
+    ref.current = handler;
+  });
   useEffect(() => {
     if (element == null) {
       return;

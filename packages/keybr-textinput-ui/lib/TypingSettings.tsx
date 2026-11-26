@@ -31,7 +31,7 @@ import {
   Range,
 } from "@keybr/widget";
 import { mdiPlayCircleOutline, mdiStopCircleOutline } from "@mdi/js";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { AnimatedText } from "./AnimatedText.tsx";
 import * as styles from "./TypingSettings.module.less";
@@ -558,30 +558,29 @@ function SoundThemePreview() {
   const { settings } = useSettings();
   const soundVolume = settings.get(soundProps.soundVolume);
   const soundTheme = settings.get(soundProps.soundTheme);
-  const player = useMemo(() => {
-    if (process.env.NODE_ENV === "test") {
-      // Do not load sound assets in tests.
-      return () => {};
-    }
-    return makeSoundPlayer(
-      new Settings()
-        .set(soundProps.playSounds, PlaySounds.All)
-        .set(soundProps.soundVolume, soundVolume)
-        .set(soundProps.soundTheme, soundTheme),
-    );
-  }, [soundVolume, soundTheme]);
   const [playing, setPlaying] = useState(false);
   useEffect(() => {
-    const tasks = new Tasks();
-    if (playing) {
-      tasks.repeated(300, () => {
-        player(Feedback.Succeeded);
-      });
+    if (!playing) {
+      return;
     }
+    const player =
+      process.env.NODE_ENV === "test"
+        ? // Do not load sound assets in tests.
+          () => {}
+        : makeSoundPlayer(
+            new Settings()
+              .set(soundProps.playSounds, PlaySounds.All)
+              .set(soundProps.soundVolume, soundVolume)
+              .set(soundProps.soundTheme, soundTheme),
+          );
+    const tasks = new Tasks();
+    tasks.repeated(300, () => {
+      player(Feedback.Succeeded);
+    });
     return () => {
       tasks.cancelAll();
     };
-  }, [player, playing]);
+  }, [playing, soundVolume, soundTheme]);
   return (
     <IconButton
       icon={

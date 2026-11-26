@@ -41,9 +41,11 @@ function useAnimatedTextState(text: string): readonly Char[] {
       }),
     [text],
   );
-  const [chars, setChars] = useState<readonly Char[]>([]);
+  const [state, setState] = useState<{
+    readonly textInput: TextInput;
+    readonly chars: readonly Char[];
+  }>(() => ({ textInput, chars: textInput.chars }));
   useEffect(() => {
-    setChars(textInput.chars);
     const tasks = new Tasks();
     tasks.repeated(500, () => {
       if (textInput.completed) {
@@ -51,11 +53,11 @@ function useAnimatedTextState(text: string): readonly Char[] {
       } else {
         textInput.appendChar(0, textInput.at(textInput.pos).codePoint, 0);
       }
-      setChars(textInput.chars);
+      setState({ textInput, chars: textInput.chars });
     });
     return () => {
       tasks.cancelAll();
     };
   }, [textInput]);
-  return chars;
+  return state.textInput === textInput ? state.chars : textInput.chars;
 }

@@ -2,7 +2,7 @@ import {
   type FocusEventHandler,
   type KeyboardEventHandler,
   type MouseEventHandler,
-  type RefObject,
+  type Ref,
   type WheelEventHandler,
 } from "react";
 import { type Anchor } from "../floating/index.ts";
@@ -45,6 +45,6 @@ export type KeyboardProps = {
 };
 
 export type AnchorProps = {
-  readonly anchor?: RefObject<Anchor | null>;
+  readonly anchor?: Ref<Anchor | null>;
   readonly disabled?: boolean;
 };

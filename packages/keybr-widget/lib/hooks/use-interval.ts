@@ -1,5 +1,5 @@
 import { type Task } from "@keybr/lang";
-import { useRef } from "react";
+import { useState } from "react";
 import { useTasks } from "./use-tasks.ts";
 
 export type IntervalScheduler = {
@@ -10,27 +10,27 @@ export type IntervalScheduler = {
 
 export const useInterval = () => {
   const tasks = useTasks();
-  const ref = useRef<IntervalScheduler>(null!);
-  if (ref.current == null) {
-    ref.current = new (class implements IntervalScheduler {
-      #task: Task | null = null;
+  const [scheduler] = useState<IntervalScheduler>(
+    () =>
+      new (class implements IntervalScheduler {
+        #task: Task | null = null;
 
-      get pending() {
-        return this.#task != null;
-      }
-
-      cancel() {
-        if (this.#task != null) {
-          this.#task.cancel();
-          this.#task = null;
+        get pending() {
+          return this.#task != null;
         }
-      }
 
-      schedule(callback: () => void, timeout: number) {
-        this.cancel();
-        this.#task = tasks.repeated(timeout, callback);
-      }
-    })();
-  }
-  return ref.current;
+        cancel() {
+          if (this.#task != null) {
+            this.#task.cancel();
+            this.#task = null;
+          }
+        }
+
+        schedule(callback: () => void, timeout: number) {
+          this.cancel();
+          this.#task = tasks.repeated(timeout, callback);
+        }
+      })(),
+  );
+  return scheduler;
 };

@@ -1,9 +1,9 @@
 import { Screen } from "@keybr/pages-shared";
-import { type LineList, makeStats } from "@keybr/textinput";
+import { makeStats } from "@keybr/textinput";
 import { useSoundPlayer } from "@keybr/textinput-sounds";
 import { TextArea } from "@keybr/textinput-ui";
 import { Box, type Focusable, Spacer, useView } from "@keybr/widget";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   type TextGenerator,
   TextGeneratorLoader,
@@ -37,15 +37,26 @@ function Controller({
   const settings = useCompositeSettings();
   const focusRef = useRef<Focusable>(null);
   const player = useSoundPlayer();
-  const [session, setSession] = useState(() => nextTest(settings, generator));
-  const [lines, setLines] = useState<LineList>(Session.emptyLines);
+  const [state, setState] = useState(() => ({
+    settings,
+    generator,
+    mark,
+    ...createTestSession(settings, generator, mark),
+  }));
+  if (
+    state.settings !== settings ||
+    state.generator !== generator ||
+    state.mark !== mark
+  ) {
+    setState({
+      settings,
+      generator,
+      mark,
+      ...createTestSession(settings, generator, mark),
+    });
+  }
+  const { session, lines } = state;
   const [progress, setProgress] = useState(Session.emptyProgress);
-  useEffect(() => {
-    generator.reset(mark);
-    const session = nextTest(settings, generator);
-    setSession(session);
-    setLines(session.getLines());
-  }, [settings, generator, mark]);
   return (
     <Screen>
       <Toolbar
@@ -65,17 +76,19 @@ function Controller({
             lines={lines}
             wrap={false}
             onFocus={() => {
-              generator.reset(mark);
-              const session = nextTest(settings, generator);
-              setSession(session);
-              setLines(session.getLines());
+              setState({
+                settings,
+                generator,
+                mark,
+                ...createTestSession(settings, generator, mark),
+              });
             }}
             onKeyDown={session.handleKeyDown}
             onKeyUp={session.handleKeyUp}
             onInput={(event) => {
               const { feedback, progress, completed } =
                 session.handleInput(event);
-              setLines(session.getLines());
+              setState((prev) => ({ ...prev, lines: session.getLines() }));
               setProgress(progress);
               player(feedback);
               if (completed) {
@@ -89,6 +102,16 @@ function Controller({
       </Box>
     </Screen>
   );
+}
+
+function createTestSession(
+  settings: CompositeSettings,
+  generator: TextGenerator,
+  mark: unknown,
+) {
+  generator.reset(mark);
+  const session = nextTest(settings, generator);
+  return { session, lines: session.getLines() };
 }
 
 function nextTest(settings: CompositeSettings, generator: TextGenerator) {

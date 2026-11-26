@@ -1,15 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { AnimationFrames } from "../utils/index.ts";
 
 export const useAnimationFrames = () => {
-  const ref = useRef<AnimationFrames>(null!);
-  if (ref.current == null) {
-    ref.current = new AnimationFrames();
-  }
+  const [frames] = useState(() => new AnimationFrames());
   useEffect(() => {
     return () => {
-      ref.current.cancel();
+      frames.cancel();
     };
-  }, []);
-  return ref.current;
+  }, [frames]);
+  return frames;
 };

@@ -1,6 +1,7 @@
 import { clsx } from "clsx";
 import { type ReactNode, useImperativeHandle, useRef } from "react";
 import { getBoundingBox } from "../../utils/index.ts";
+import { useAnchor } from "../popover/anchor.ts";
 import * as styles from "./IconButton.module.less";
 import { type IconButtonProps } from "./IconButton.types.ts";
 
@@ -24,7 +25,8 @@ export function IconButton({
       element.current?.blur();
     },
   }));
-  useImperativeHandle(anchor, () => ({
+  const anchorRef = useAnchor(anchor);
+  useImperativeHandle(anchorRef, () => ({
     getBoundingBox() {
       return getBoundingBox(element.current!);
     },

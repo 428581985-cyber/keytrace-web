@@ -6,7 +6,9 @@ export const useWindowEvent = <K extends keyof WindowEventMap>(
   options?: boolean | AddEventListenerOptions,
 ): void => {
   const listenerRef = useRef(listener);
-  listenerRef.current = listener;
+  useEffect(() => {
+    listenerRef.current = listener;
+  });
   useEffect(() => {
     const listener = (ev: any): void => {
       listenerRef.current.call(window, ev);

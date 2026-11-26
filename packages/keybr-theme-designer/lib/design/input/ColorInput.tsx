@@ -7,6 +7,7 @@ import {
   Popover,
   sizeClassName,
   type SizeName,
+  useAnchor,
   useOnClickOutside,
 } from "@keybr/widget";
 import { clsx } from "clsx";
@@ -98,7 +99,8 @@ function SwatchButton({
       element.current?.blur();
     },
   }));
-  useImperativeHandle(anchor, () => ({
+  const anchorRef = useAnchor(anchor);
+  useImperativeHandle(anchorRef, () => ({
     getBoundingBox() {
       return getBoundingBox(element.current!);
     },

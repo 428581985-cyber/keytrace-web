@@ -46,25 +46,54 @@ function useReplayState(
     [settings, steps, events],
   );
   const visible = useDocumentVisibility();
-  const [lines, setLines] = useState<LineList>(Session.emptyLines);
-  const [depressedKeys, setDepressedKeys] = useState<KeyId[]>([]);
+  const [snapshot, setSnapshot] = useState<{
+    readonly stepper: ReplayState;
+    readonly visible: boolean;
+    readonly lines: LineList;
+    readonly depressedKeys: KeyId[];
+  }>(() => ({
+    stepper,
+    visible,
+    lines: visible ? stepper.lines : Session.emptyLines,
+    depressedKeys: [],
+  }));
   useEffect(() => {
     const tasks = new Tasks();
     const step = () => {
       stepper.step();
-      setLines(stepper.lines);
-      setDepressedKeys(stepper.depressedKeys);
+      setSnapshot({
+        stepper,
+        visible,
+        lines: stepper.lines,
+        depressedKeys: stepper.depressedKeys,
+      });
       tasks.delayed(stepper.delay, step);
     };
     if (visible) {
-      stepper.reset();
-      setLines(stepper.lines);
-      setDepressedKeys(stepper.depressedKeys);
-      tasks.delayed(stepper.delay, step);
+      tasks.delayed(0, () => {
+        stepper.reset();
+        setSnapshot({
+          stepper,
+          visible,
+          lines: stepper.lines,
+          depressedKeys: stepper.depressedKeys,
+        });
+        tasks.delayed(stepper.delay, step);
+      });
     }
     return () => {
       tasks.cancelAll();
     };
   }, [stepper, visible]);
+  const lines =
+    snapshot.stepper === stepper && snapshot.visible === visible
+      ? snapshot.lines
+      : visible
+        ? stepper.lines
+        : Session.emptyLines;
+  const depressedKeys =
+    snapshot.stepper === stepper && snapshot.visible === visible
+      ? snapshot.depressedKeys
+      : [];
   return { stepper, lines, depressedKeys };
 }

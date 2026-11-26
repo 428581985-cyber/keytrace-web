@@ -4,7 +4,7 @@ import {
   createContext,
   type ReactNode,
   useContext,
-  useEffect,
+  useMemo,
   useState,
 } from "react";
 
@@ -36,16 +36,13 @@ export function CustomLayoutProvider({
   const [customLayout, setCustomLayout] = useState(() =>
     fix(new LayoutBuilder()),
   );
-  const [keyboard, setKeyboard] = useState(() => loadKeyboard(layout));
-  useEffect(() => {
+  const keyboard = useMemo(() => {
     const { geometry, geometryDict } = loadKeyboard(layout);
-    setKeyboard(
-      new Keyboard(
-        Layout.custom(layout.language),
-        geometry,
-        customLayout.dict(),
-        geometryDict,
-      ),
+    return new Keyboard(
+      Layout.custom(layout.language),
+      geometry,
+      customLayout.dict(),
+      geometryDict,
     );
   }, [layout, customLayout]);
   return (

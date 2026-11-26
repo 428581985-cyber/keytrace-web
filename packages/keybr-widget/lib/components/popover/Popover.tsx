@@ -1,6 +1,6 @@
 import {
-  cloneElement,
   type ReactNode,
+  useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -8,6 +8,7 @@ import {
 import { type Anchor, place } from "../../floating/index.ts";
 import { useScreenSize } from "../../hooks/index.ts";
 import { Portal } from "../portal/index.ts";
+import { AnchorContext } from "./anchor.ts";
 import { type PopoverProps } from "./Popover.types.ts";
 
 export function Popover({
@@ -38,11 +39,15 @@ export function Popover({
         .alignToAnchor(anchorBox, screenSize);
     }
   }, [open, options, width, height, screenSize]);
+  const setAnchor = useCallback((value: Anchor | null) => {
+    anchorRef.current = value;
+  }, []);
   const { disabled } = anchor.props;
-  const clone = cloneElement(anchor, { ...anchor.props, anchor: anchorRef });
   return (
     <>
-      {clone}
+      <AnchorContext.Provider value={setAnchor}>
+        {anchor}
+      </AnchorContext.Provider>
       {open && !disabled && (
         <Portal>
           <div ref={popoverRef} style={{ position: "fixed", zIndex: 1 }}>

@@ -1,15 +1,12 @@
 import { Tasks } from "@keybr/lang";
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 
 export const useTasks = () => {
-  const ref = useRef<Tasks>(null!);
-  if (ref.current == null) {
-    ref.current = new Tasks();
-  }
+  const [tasks] = useState(() => new Tasks());
   useEffect(() => {
     return () => {
-      ref.current.cancelAll();
+      tasks.cancelAll();
     };
-  }, []);
-  return ref.current;
+  }, [tasks]);
+  return tasks;
 };

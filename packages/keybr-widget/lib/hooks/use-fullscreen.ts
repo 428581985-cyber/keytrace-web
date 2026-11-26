@@ -1,49 +1,55 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import { querySelector } from "../utils/query.ts";
 import { useDocumentEvent } from "./use-document-event.ts";
+
+function subscribeFullscreen(onStoreChange: () => void): () => void {
+  document.addEventListener("fullscreenchange", onStoreChange);
+  document.addEventListener("fullscreenerror", onStoreChange);
+  return () => {
+    document.removeEventListener("fullscreenchange", onStoreChange);
+    document.removeEventListener("fullscreenerror", onStoreChange);
+  };
+}
 
 export function useFullscreen(
   element: Element | string,
 ): [boolean | null, () => void] {
-  if (typeof element === "string") {
-    element = querySelector(element);
-  }
+  const target = typeof element === "string" ? querySelector(element) : element;
+  const [errorForTarget, setErrorForTarget] = useState<Element | null>(null);
 
-  const [fullscreenState, setFullscreenState] = useState<boolean | null>(null);
+  const fullscreenState = useSyncExternalStore(
+    subscribeFullscreen,
+    () =>
+      document.fullscreenEnabled
+        ? document.fullscreenElement === target
+        : null,
+    () => null,
+  );
 
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenEnabled) {
-      if (document.fullscreenElement !== element) {
-        element.requestFullscreen().catch(() => {
-          setFullscreenState(null);
+      if (document.fullscreenElement !== target) {
+        target.requestFullscreen().catch(() => {
+          setErrorForTarget(target);
         });
       } else {
         document.exitFullscreen().catch(() => {
-          setFullscreenState(null);
+          setErrorForTarget(target);
         });
       }
     }
-  }, [element]);
+  }, [target]);
 
   useDocumentEvent("fullscreenchange", () => {
-    setFullscreenState(
-      document.fullscreenEnabled
-        ? document.fullscreenElement === element
-        : null,
-    );
+    setErrorForTarget(null);
   });
 
   useDocumentEvent("fullscreenerror", () => {
-    setFullscreenState(null);
+    setErrorForTarget(target);
   });
 
-  useEffect(() => {
-    setFullscreenState(
-      document.fullscreenEnabled
-        ? document.fullscreenElement === element
-        : null,
-    );
-  }, [element]);
-
-  return [fullscreenState, toggleFullscreen];
+  return [
+    errorForTarget === target ? null : fullscreenState,
+    toggleFullscreen,
+  ];
 }

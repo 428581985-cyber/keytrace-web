@@ -3,6 +3,7 @@ import { type ReactNode, useImperativeHandle, useRef } from "react";
 import { sizeClassName } from "../../styles/index.ts";
 import { getBoundingBox } from "../../utils/index.ts";
 import * as iconStyles from "../icon/Icon.module.less";
+import { useAnchor } from "../popover/anchor.ts";
 import * as styles from "./Button.module.less";
 import { type ButtonProps } from "./Button.types.ts";
 
@@ -27,7 +28,8 @@ export function Button({
       element.current?.blur();
     },
   }));
-  useImperativeHandle(anchor, () => ({
+  const anchorRef = useAnchor(anchor);
+  useImperativeHandle(anchorRef, () => ({
     getBoundingBox() {
       return getBoundingBox(element.current!);
     },

@@ -1,5 +1,5 @@
 import { type Task } from "@keybr/lang";
-import { useRef } from "react";
+import { useState } from "react";
 import { useTasks } from "./use-tasks.ts";
 
 export type TimeoutScheduler = {
@@ -10,27 +10,27 @@ export type TimeoutScheduler = {
 
 export const useTimeout = () => {
   const tasks = useTasks();
-  const ref = useRef<TimeoutScheduler>(null!);
-  if (ref.current == null) {
-    ref.current = new (class implements TimeoutScheduler {
-      #task: Task | null = null;
+  const [scheduler] = useState<TimeoutScheduler>(
+    () =>
+      new (class implements TimeoutScheduler {
+        #task: Task | null = null;
 
-      get pending() {
-        return this.#task != null;
-      }
-
-      cancel() {
-        if (this.#task != null) {
-          this.#task.cancel();
-          this.#task = null;
+        get pending() {
+          return this.#task != null;
         }
-      }
 
-      schedule(callback: () => void, timeout: number) {
-        this.cancel();
-        this.#task = tasks.delayed(timeout, callback);
-      }
-    })();
-  }
-  return ref.current;
+        cancel() {
+          if (this.#task != null) {
+            this.#task.cancel();
+            this.#task = null;
+          }
+        }
+
+        schedule(callback: () => void, timeout: number) {
+          this.cancel();
+          this.#task = tasks.delayed(timeout, callback);
+        }
+      })(),
+  );
+  return scheduler;
 };
