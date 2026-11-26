@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import re
 import time
-from typing import Callable
+from pathlib import Path
+from typing import Callable, Iterator
 
 from playwright.sync_api import Browser, expect
 
@@ -14,6 +16,7 @@ from harness import (
     VIEW_COMPACT,
     VIEW_NORMAL,
     build_realistic_keytrace_events,
+    count_keytrace_practice_chrome,
     dismiss_tour_if_open,
     ensure_practice_language,
     focus_en_input,
@@ -26,7 +29,9 @@ from harness import (
     get_theme_button,
     get_toolbar_buttons,
     get_zoomer_positions,
+    has_keytrace_mode_setting,
     http_get_json,
+    install_toast_recorder,
     is_tour_open,
     make_result_json,
     max_box_delta,
@@ -35,23 +40,34 @@ from harness import (
     open_context,
     open_settings,
     press_char,
+    read_en_cursor_error_state,
+    read_en_lesson_text,
+    read_indexeddb_results,
     read_key_selector_tiles,
     read_mastery_legend,
     read_mastery_tiles,
+    read_practice_key_set,
+    read_recorded_toasts,
     read_summary_stats,
+    read_target_speed_setting,
     read_zh_lesson_tokens,
     read_zoomer_styles,
     rgb_brightness,
     rgb_close,
+    run_isolated_server,
     save_settings,
     seed_indexeddb_results,
+    select_keytrace_mode_setting,
     select_profile_grouper,
     select_settings_font,
     select_zh_scheme,
+    set_target_speed_setting,
     set_typing_options,
     skip_lesson,
     type_key_stream,
+    wait_for_indexeddb_count,
     wait_for_practice_ready,
+    wait_for_recorded_toast,
     write_keytrace_jsonl,
 )
 
@@ -1121,6 +1137,797 @@ def t1_f8_05_en_ui_keeps_repeat_each_word_label(
         assert (lbl.inner_text() or "").strip() == "Repeat each word:"
 
 
+@contextlib.contextmanager
+def _ensure_empty_keytrace_server(base_url: str) -> Iterator[str]:
+    """Reuse base_url when its KeyTrace dir is empty; otherwise spin up a clean isolated server."""
+    is_empty = False
+    try:
+        _, summary = http_get_json(f"{base_url}/_/keytrace/summary?days=1")
+        is_empty = not summary.get("status", {}).get("available", False)
+    except Exception:  # noqa: BLE001
+        is_empty = False
+    if is_empty:
+        yield base_url
+        return
+    with run_isolated_server() as (iso_url, _):
+        yield iso_url
+
+
+@contextlib.contextmanager
+def _with_synthetic_keytrace_jsonl(
+    base_url: str, keytrace_dir: str | None
+) -> Iterator[tuple[str, Path]]:
+    """Write synthetic .jsonl KeyTrace events into keytrace_dir (or a temp isolated server) and clean up."""
+    today_str = time.strftime("%Y-%m-%d", time.localtime())
+    now_ms = int(time.time() * 1000) - 30_000
+    events = build_realistic_keytrace_events(
+        base_ts=now_ms,
+        tokens=[
+            ("enter ", 240.0, 0),
+            ("intent ", 250.0, 0),
+            ("entire ", 260.0, 1),
+            ("inert ", 245.0, 0),
+            ("tenet ", 235.0, 0),
+            ("retire ", 255.0, 0),
+            ("trite ", 240.0, 0),
+        ],
+    )
+    if keytrace_dir is not None:
+        created = write_keytrace_jsonl(Path(keytrace_dir), today_str, events)
+        try:
+            yield base_url, created
+        finally:
+            if created.exists():
+                created.unlink(missing_ok=True)
+    else:
+        with run_isolated_server() as (iso_url, iso_kt):
+            created = write_keytrace_jsonl(iso_kt, today_str, events)
+            try:
+                yield iso_url, created
+            finally:
+                if created.exists():
+                    created.unlink(missing_ok=True)
+
+
+# ===========================================================================
+# F9: Standalone ZH 6-Key Progressive Curriculum & Zero-KeyTrace Decoupling — 3 tests
+# ===========================================================================
+
+
+def t1_f9_01_standalone_zh_sp_6key_curriculum_and_zero_keytrace_chrome(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    with _ensure_empty_keytrace_server(base_url) as target_url:
+        with open_context(
+            browser,
+            target_url,
+            settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp"},
+        ) as (_, page, _, _):
+            kt_requests: list[str] = []
+
+            def _track_req(req) -> None:
+                if "/_/keytrace/" in req.url or "/_/sync/keytrace" in req.url:
+                    kt_requests.append(req.url)
+
+            page.on("request", _track_req)
+            page.goto(f"{target_url}/", wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+            page.wait_for_timeout(200)
+
+            ks = read_practice_key_set(page)
+            assert ks["unlocked"] == list("iujdgs"), (
+                f"Expected zh-sp standalone 6 unlocked keys ['i','u','j','d','g','s'], got {ks['unlocked']}"
+            )
+            assert len(ks["locked"]) == 20, f"Expected 20 locked keys in zh-sp, got {len(ks['locked'])}"
+            assert len(ks["forced"]) == 0, f"Expected 0 forced keys in zh-sp, got {ks['forced']}"
+
+            chrome = count_keytrace_practice_chrome(page)
+            assert chrome == {"navLinks": 0, "pillLinks": 0, "pillTexts": 0}, (
+                f"Standalone mode must have 0 KeyTrace nav/pill chrome, got {chrome}"
+            )
+
+            # Settings in standalone mode hides KeytraceModeProp when no KeyTrace exists
+            open_settings(page)
+            assert not has_keytrace_mode_setting(page), "KeytraceModeProp should stay hidden in pure standalone mode"
+            save_settings(page)
+
+            # /profile hides KeyTraceSyncBar in standalone mode
+            page.goto(f"{target_url}/profile", wait_until="domcontentloaded")
+            page.locator("main h2").first.wait_for(state="visible", timeout=10000)
+            page.wait_for_timeout(200)
+            sync_btn = page.locator('main button:has-text("同步日常数据"), main button:has-text("Sync KeyTrace")')
+            expect(sync_btn).to_have_count(0)
+            assert count_keytrace_practice_chrome(page)["navLinks"] == 0
+
+            assert kt_requests == [], f"Standalone mode must make 0 KeyTrace API requests, saw {kt_requests}"
+
+
+def t1_f9_02_standalone_zh_qp_6key_curriculum(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    with _ensure_empty_keytrace_server(base_url) as target_url:
+        with open_context(
+            browser,
+            target_url,
+            settings={"keyboard.language": "zh-qp", "keyboard.layout": "zh-qp"},
+        ) as (_, page, _, _):
+            kt_requests: list[str] = []
+            page.on(
+                "request",
+                lambda req: kt_requests.append(req.url)
+                if ("/_/keytrace/" in req.url or "/_/sync/keytrace" in req.url)
+                else None,
+            )
+            page.goto(f"{target_url}/", wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+            page.wait_for_timeout(200)
+
+            ks = read_practice_key_set(page)
+            assert ks["unlocked"] == list("inagjd"), (
+                f"Expected zh-qp standalone 6 unlocked keys ['i','n','a','g','j','d'], got {ks['unlocked']}"
+            )
+            assert len(ks["locked"]) == 20, f"Expected 20 locked keys in zh-qp, got {len(ks['locked'])}"
+            assert len(ks["forced"]) == 0, f"Expected 0 forced keys in zh-qp, got {ks['forced']}"
+            assert count_keytrace_practice_chrome(page) == {"navLinks": 0, "pillLinks": 0, "pillTexts": 0}
+            assert kt_requests == [], f"Standalone zh-qp must make 0 KeyTrace requests, saw {kt_requests}"
+
+
+def t1_f9_03_standalone_keytrace_route_renders_disconnected_onboarding_card(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    with _ensure_empty_keytrace_server(base_url) as target_url:
+        with open_context(
+            browser,
+            target_url,
+            settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp"},
+        ) as (_, page, _, _):
+            page.goto(f"{target_url}/keytrace", wait_until="domcontentloaded")
+            expect(page.locator("main h2", has_text="未检测到本地 KeyTrace 数据")).to_be_visible(timeout=10000)
+            expect(page.locator('main button:has-text("重新检测")')).to_be_visible()
+            go_btn = page.locator('main button:has-text("前往网页练习")')
+            expect(go_btn).to_be_visible()
+
+            page.goto(f"{target_url}/en/keytrace", wait_until="domcontentloaded")
+            expect(page.locator("main h2", has_text="Local KeyTrace data not detected")).to_be_visible(timeout=10000)
+            expect(page.locator('main button:has-text("Refresh")')).to_be_visible()
+            go_en_btn = page.locator('main button:has-text("Go to Practice")')
+            expect(go_en_btn).to_be_visible()
+            go_en_btn.click()
+            wait_for_practice_ready(page)
+
+
+# ===========================================================================
+# F10: KeyTrace Connected / Imported Mode & Standalone Data Isolation — 3 tests
+# ===========================================================================
+
+
+def t1_f10_01_keytrace_connected_unlocks_all_en_and_zh_keys_with_chrome(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    with _with_synthetic_keytrace_jsonl(base_url, keytrace_dir) as (target_url, _):
+        with open_context(
+            browser,
+            target_url,
+            settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp"},
+        ) as (_, page, _, _):
+            page.goto(f"{target_url}/", wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+
+            zh_ks = read_practice_key_set(page)
+            assert len(zh_ks["unlocked"]) == 26, f"Connected KeyTrace ZH must unlock all 26 keys: {zh_ks}"
+            assert len(zh_ks["locked"]) == 0, f"Connected KeyTrace ZH must have 0 locked keys: {zh_ks['locked']}"
+            assert len(zh_ks["forced"]) == 0, f"Connected KeyTrace ZH must have 0 forced keys: {zh_ks['forced']}"
+
+            # KeyTrace nav link and practice pill must both appear
+            expect(page.locator('nav a[href="/keytrace"]')).to_be_visible(timeout=10000)
+            expect(page.locator('main a[href="/keytrace"]')).to_be_visible(timeout=10000)
+
+            # Switch to EN -> also 26/26 unlocked, 0 locked, 0 forced
+            ensure_practice_language(page, "en")
+            en_ks = read_practice_key_set(page)
+            assert len(en_ks["unlocked"]) == 26, f"Connected KeyTrace EN must unlock all 26 keys: {en_ks}"
+            assert len(en_ks["locked"]) == 0
+            assert len(en_ks["forced"]) == 0
+
+            # /profile shows KeyTraceSyncBar
+            page.goto(f"{target_url}/profile", wait_until="domcontentloaded")
+            sync_btn = page.locator('main button:has-text("同步日常数据"), main button:has-text("Sync KeyTrace")').first
+            expect(sync_btn).to_be_visible(timeout=10000)
+
+
+def t1_f10_02_keytrace_mode_standalone_isolates_data_without_deleting(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    now = int(time.time() * 1000)
+    with _with_synthetic_keytrace_jsonl(base_url, keytrace_dir) as (target_url, _):
+        with open_context(
+            browser,
+            target_url,
+            settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp"},
+        ) as (_, page, _, _):
+            page.goto(f"{target_url}/", wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+            # Seed 2 explicit TextType.KEYTRACE records with fast non-Stage-1 keys (q, w, e, r, t, y)
+            kt_seed = [
+                make_result_json(
+                    "zh-sp",
+                    ts=now - 20_000 + idx * 3000,
+                    length=60,
+                    time_ms=12000,
+                    errors=0,
+                    mode="keytrace",
+                    histogram={cp: (20, 0, 200) for cp in map(ord, "qwerty")},
+                )
+                for idx in range(2)
+            ]
+            seed_indexeddb_results(page, kt_seed)
+            page.reload(wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+
+            # Wait for auto-sync + seeded records to settle
+            wait_for_indexeddb_count(page, 2)
+            kt_count_before = sum(1 for r in read_indexeddb_results(page) if r.get("m") == "keytrace")
+            assert kt_count_before >= 2
+
+            ks_auto = read_practice_key_set(page)
+            assert len(ks_auto["unlocked"]) == 26 and len(ks_auto["locked"]) == 0 and len(ks_auto["forced"]) == 0
+            expect(page.locator('nav a[href="/keytrace"]')).to_be_visible(timeout=10000)
+
+            # Toggle keytraceMode "auto" -> "standalone"
+            open_settings(page)
+            assert has_keytrace_mode_setting(page)
+            select_keytrace_mode_setting(page, "standalone")
+            save_settings(page)
+
+            ks_standalone = read_practice_key_set(page)
+            assert ks_standalone["unlocked"] == list("iujdgs"), (
+                f"Standalone isolation must drop back to 6-key iujdgs even with fast KEYTRACE records, got {ks_standalone['unlocked']}"
+            )
+            assert len(ks_standalone["locked"]) == 20
+            assert len(ks_standalone["forced"]) == 0
+            assert count_keytrace_practice_chrome(page) == {"navLinks": 0, "pillLinks": 0, "pillTexts": 0}
+
+            # Verify TextType.KEYTRACE records were NOT deleted from IndexedDB
+            kt_count_isolated = sum(1 for r in read_indexeddb_results(page) if r.get("m") == "keytrace")
+            assert kt_count_isolated == kt_count_before, (
+                f"Standalone mode must not delete IndexedDB KEYTRACE records: before={kt_count_before}, after={kt_count_isolated}"
+            )
+
+            # Toggle back "standalone" -> "auto": restores 26/26 unlocked immediately without reload
+            open_settings(page)
+            select_keytrace_mode_setting(page, "auto")
+            save_settings(page)
+
+            ks_restored = read_practice_key_set(page)
+            assert len(ks_restored["unlocked"]) == 26 and len(ks_restored["locked"]) == 0 and len(ks_restored["forced"]) == 0
+            expect(page.locator('nav a[href="/keytrace"]')).to_be_visible(timeout=10000)
+
+
+def t1_f10_03_imported_keytrace_indexeddb_without_jsonl_unlocks_and_isolates(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    now = int(time.time() * 1000)
+    with _ensure_empty_keytrace_server(base_url) as target_url:
+        with open_context(
+            browser,
+            target_url,
+            settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp"},
+        ) as (_, page, _, _):
+            page.goto(f"{target_url}/", wait_until="domcontentloaded")
+            seed_indexeddb_results(
+                page,
+                [
+                    make_result_json(
+                        "zh-sp",
+                        ts=now - 10_000,
+                        length=60,
+                        time_ms=14000,
+                        errors=0,
+                        mode="keytrace",
+                        histogram={ord("q"): (20, 0, 210), ord("w"): (20, 0, 210), ord("e"): (20, 0, 210)},
+                    )
+                ],
+            )
+            page.reload(wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+
+            # Imported TextType.KEYTRACE unlocks all 26 keys even without live .jsonl files
+            ks = read_practice_key_set(page)
+            assert len(ks["unlocked"]) == 26 and len(ks["locked"]) == 0 and len(ks["forced"]) == 0
+            # Live monitor chrome remains hidden because keytraceAvailable is false
+            assert count_keytrace_practice_chrome(page) == {"navLinks": 0, "pillLinks": 0, "pillTexts": 0}
+
+            open_settings(page)
+            assert has_keytrace_mode_setting(page)
+            select_keytrace_mode_setting(page, "standalone")
+            save_settings(page)
+
+            ks_iso = read_practice_key_set(page)
+            assert ks_iso["unlocked"] == list("iujdgs") and len(ks_iso["locked"]) == 20
+            assert sum(1 for r in read_indexeddb_results(page) if r.get("m") == "keytrace") == 1
+
+            open_settings(page)
+            select_keytrace_mode_setting(page, "auto")
+            save_settings(page)
+            ks_back = read_practice_key_set(page)
+            assert len(ks_back["unlocked"]) == 26 and len(ks_back["locked"]) == 0
+
+
+# ===========================================================================
+# F11: Independent EN / ZH Target Speeds — 2 tests
+# ===========================================================================
+
+
+def t1_f11_01_settings_en_zh_target_speed_defaults_bounds_and_persistence(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    with open_context(
+        browser,
+        base_url,
+        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp"},
+    ) as (_, page, _, _):
+        page.goto(f"{base_url}/", wait_until="domcontentloaded")
+        ensure_practice_language(page, "zh")
+
+        # Chinese default: 125 CPM (25 WPM), min 50 CPM (10 WPM)
+        open_settings(page)
+        zh_ts = read_target_speed_setting(page)
+        assert ("中文" in zh_ts["label"]) or ("Chinese" in zh_ts["label"]), f"Expected Chinese target label: {zh_ts}"
+        assert zh_ts["min"] == 50, f"Expected ZH min 50 CPM (10 WPM), got {zh_ts}"
+        assert zh_ts["valueCpm"] == 125, f"Expected ZH default 125 CPM (25 WPM), got {zh_ts}"
+        assert "25" in zh_ts["displayText"], f"Expected 25 WPM display, got {zh_ts}"
+
+        # Set ZH target speed = 20 WPM (100 CPM)
+        set_target_speed_setting(page, 100)
+        save_settings(page)
+
+        # Toggle to EN -> English default: 175 CPM (35 WPM), min 75 CPM (15 WPM)
+        ensure_practice_language(page, "en")
+        open_settings(page)
+        en_ts = read_target_speed_setting(page)
+        assert ("英文" in en_ts["label"]) or ("English" in en_ts["label"]), f"Expected English target label: {en_ts}"
+        assert en_ts["min"] == 75, f"Expected EN min 75 CPM (15 WPM), got {en_ts}"
+        assert en_ts["valueCpm"] == 175, f"Expected EN default 175 CPM (35 WPM), got {en_ts}"
+        assert "35" in en_ts["displayText"], f"Expected 35 WPM display, got {en_ts}"
+
+        # Set EN target speed = 45 WPM (225 CPM)
+        set_target_speed_setting(page, 225)
+        save_settings(page)
+
+        stored = get_settings_storage(page) or {}
+        assert stored.get("lesson.targetSpeed") == 225, f"Unexpected stored EN targetSpeed: {stored}"
+        assert stored.get("lesson.zhTargetSpeed") == 100, f"Unexpected stored ZH targetSpeed: {stored}"
+
+        # Reload & verify EN=45 WPM persists, then toggle back to ZH & verify ZH=20 WPM persists
+        page.reload(wait_until="domcontentloaded")
+        wait_for_practice_ready(page)
+        open_settings(page)
+        assert read_target_speed_setting(page)["valueCpm"] == 225
+        save_settings(page)
+
+        ensure_practice_language(page, "zh")
+        open_settings(page)
+        zh_after = read_target_speed_setting(page)
+        assert zh_after["valueCpm"] == 100 and "20" in zh_after["displayText"], f"ZH speed lost after toggle/reload: {zh_after}"
+
+
+def t1_f11_02_profile_result_grouper_grades_en_and_zh_against_own_target_speed(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    now = int(time.time() * 1000)
+    # 400ms per key = 150 CPM = 30 WPM:
+    #   - Against ZH target 20 WPM (100 CPM -> 600ms): 30 WPM >= 20 WPM -> DONE GREEN!
+    #   - Against EN target 45 WPM (225 CPM -> 266.7ms): 30 WPM < 45 WPM -> NOT GREEN!
+    with open_context(
+        browser,
+        base_url,
+        settings={
+            "keyboard.language": "zh-sp",
+            "keyboard.layout": "zh-sp",
+            "lesson.targetSpeed": 225,
+            "lesson.zhTargetSpeed": 100,
+        },
+    ) as (_, page, _, _):
+        page.goto(f"{base_url}/profile", wait_until="domcontentloaded")
+        seed_indexeddb_results(
+            page,
+            [
+                make_result_json(
+                    "zh-sp",
+                    ts=now - 10_000,
+                    length=75,
+                    time_ms=30_000,
+                    errors=0,
+                    histogram={
+                        ord("a"): (25, 0, 400),
+                        ord("i"): (25, 0, 400),
+                        ord("u"): (25, 0, 400),
+                    },
+                ),
+                make_result_json(
+                    "en-us",
+                    ts=now - 5_000,
+                    length=75,
+                    time_ms=30_000,
+                    errors=0,
+                    histogram={
+                        ord("a"): (25, 0, 400),
+                        ord("e"): (25, 0, 400),
+                        ord("n"): (25, 0, 400),
+                    },
+                ),
+            ],
+        )
+        page.reload(wait_until="domcontentloaded")
+
+        select_profile_grouper(page, layout_pattern=r"小鹤双拼|Xiaohe")
+        legend_zh = read_mastery_legend(page)
+        tiles_zh = read_mastery_tiles(page)
+        assert rgb_close(tiles_zh["A"]["bg"], legend_zh["done"]), (
+            f"30 WPM ZH key A must be done green against 20 WPM ZH target: {tiles_zh['A']}"
+        )
+
+        select_profile_grouper(page, layout_pattern=r"英语|English")
+        legend_en = read_mastery_legend(page)
+        tiles_en = read_mastery_tiles(page)
+        assert not rgb_close(tiles_en["A"]["bg"], legend_en["done"]), (
+            f"30 WPM EN key A must NOT be done green against 45 WPM EN target: {tiles_en['A']}"
+        )
+
+
+# ===========================================================================
+# F12: Focus-Key Change Alerts — 2 tests
+# ===========================================================================
+
+
+def t1_f12_01_focus_key_shift_emits_focus_letter_toast_and_reload_switch_silent(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    now = int(time.time() * 1000)
+    with _ensure_empty_keytrace_server(base_url) as target_url:
+        with open_context(
+            browser,
+            target_url,
+            settings={
+                "keyboard.language": "zh-sp",
+                "keyboard.layout": "zh-sp",
+                "lesson.zhTargetSpeed": 125,
+            },
+        ) as (_, page, _, _):
+            page.goto(f"{target_url}/", wait_until="domcontentloaded")
+            # Seed u, j, d, g fast (220ms >= target 480ms), s slow (900ms), i omitted (confidence=0 -> initial focus i).
+            seed_indexeddb_results(
+                page,
+                [
+                    make_result_json(
+                        "zh-sp",
+                        ts=now - 30_000,
+                        length=100,
+                        time_ms=20_000,
+                        errors=0,
+                        histogram={
+                            ord("u"): (20, 0, 220),
+                            ord("j"): (20, 0, 220),
+                            ord("d"): (20, 0, 220),
+                            ord("g"): (20, 0, 220),
+                            ord("s"): (20, 0, 900),
+                        },
+                    )
+                ],
+            )
+            page.reload(wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+
+            # Page reload must stay silent (0 toasts)
+            install_toast_recorder(page)
+            page.wait_for_timeout(200)
+            assert read_recorded_toasts(page) == [], f"Reload should not emit toasts: {read_recorded_toasts(page)}"
+
+            ks_before = read_practice_key_set(page)
+            assert ks_before["unlocked"] == list("iujdgs")
+            assert ks_before["focusedChar"] == "i", f"Expected initial focus 'i', got {ks_before['focusedChar']}"
+
+            # EN <-> ZH switch must also stay silent
+            ensure_practice_language(page, "en")
+            ensure_practice_language(page, "zh")
+            page.wait_for_timeout(200)
+            assert read_recorded_toasts(page) == [], (
+                f"EN<->ZH switch must not emit toasts: {read_recorded_toasts(page)}"
+            )
+
+            # Complete 1 clean lesson containing 'i' (after index 0 so Histogram.from(steps.slice(1)) records 'i')
+            focus_zh_input(page)
+            tok = read_zh_lesson_tokens(page)
+            for _ in range(5):
+                if "i" in tok["fullStream"][1:]:
+                    break
+                skip_lesson(page)
+                focus_zh_input(page)
+                tok = read_zh_lesson_tokens(page)
+            assert "i" in tok["fullStream"][1:], f"Expected focused key 'i' in lesson stream: {tok['fullStream']}"
+
+            type_key_stream(page, tok["fullStream"], per_key_ms=52.0, min_total_ms=1400.0)
+            wait_for_indexeddb_count(page, 2)
+            toasts = wait_for_recorded_toast(page, [r"练习键位已切换！|Practice key switched!"])
+
+            ks_after = read_practice_key_set(page)
+            assert len(ks_after["unlocked"]) == 6, f"Expected no new unlock when 's' is still weak: {ks_after['unlocked']}"
+            assert ks_after["focusedChar"] == "s", f"Expected focus to shift to 's', got {ks_after['focusedChar']}"
+            assert not any(re.search(r"解锁了一个新的字母！|New letter unlocked!", t) for t in toasts), (
+                f"Focus shift must NOT emit new-letter toast: {toasts}"
+            )
+
+
+def t1_f12_02_unlock_new_key_emits_new_letter_without_duplicate_focus_toast(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    now = int(time.time() * 1000)
+    with _ensure_empty_keytrace_server(base_url) as target_url:
+        with open_context(
+            browser,
+            target_url,
+            settings={
+                "keyboard.language": "zh-sp",
+                "keyboard.layout": "zh-sp",
+                "lesson.zhTargetSpeed": 125,
+            },
+        ) as (_, page, _, _):
+            page.goto(f"{target_url}/", wait_until="domcontentloaded")
+            # Seed u, j, d, g, s all fast (220ms); i omitted -> finishing i fast unlocks 7th key 'v'.
+            seed_indexeddb_results(
+                page,
+                [
+                    make_result_json(
+                        "zh-sp",
+                        ts=now - 30_000,
+                        length=100,
+                        time_ms=20_000,
+                        errors=0,
+                        histogram={
+                            ord("u"): (20, 0, 220),
+                            ord("j"): (20, 0, 220),
+                            ord("d"): (20, 0, 220),
+                            ord("g"): (20, 0, 220),
+                            ord("s"): (20, 0, 220),
+                        },
+                    )
+                ],
+            )
+            page.reload(wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+
+            install_toast_recorder(page)
+            page.wait_for_timeout(200)
+            assert read_recorded_toasts(page) == []
+
+            ks_before = read_practice_key_set(page)
+            assert ks_before["unlocked"] == list("iujdgs")
+            assert ks_before["focusedChar"] == "i"
+
+            focus_zh_input(page)
+            tok = read_zh_lesson_tokens(page)
+            for _ in range(5):
+                if "i" in tok["fullStream"][1:]:
+                    break
+                skip_lesson(page)
+                focus_zh_input(page)
+                tok = read_zh_lesson_tokens(page)
+            assert "i" in tok["fullStream"][1:]
+
+            type_key_stream(page, tok["fullStream"], per_key_ms=52.0, min_total_ms=1400.0)
+            wait_for_indexeddb_count(page, 2)
+            wait_for_recorded_toast(page, [r"解锁了一个新的字母！|New letter unlocked!"])
+            page.wait_for_timeout(250)
+            toasts = read_recorded_toasts(page)
+
+            ks_after = read_practice_key_set(page)
+            assert ks_after["unlocked"] == list("iujdgsv"), (
+                f"Expected 7th key 'v' unlocked, got {ks_after['unlocked']}"
+            )
+            assert ks_after["focusedChar"] == "v", f"Expected newly unlocked 'v' to be focused: {ks_after}"
+            assert not any(re.search(r"练习键位已切换！|Practice key switched!", t) for t in toasts), (
+                f"Unlocking a new key must NOT emit a duplicate focus-letter toast: {toasts}"
+            )
+
+
+# ===========================================================================
+# F13: Consecutive Error Count Badge (2..10) Near Cursor — 4 tests
+# ===========================================================================
+
+
+def _assert_en_consecutive_error_badge_flow(
+    browser: Browser,
+    base_url: str,
+    *,
+    stop_on_error: bool,
+) -> None:
+    with open_context(
+        browser,
+        base_url,
+        settings={"keyboard.language": "en", "keyboard.layout": "en-us"},
+    ) as (_, page, _, _):
+        page.goto(f"{base_url}/", wait_until="domcontentloaded")
+        ensure_practice_language(page, "en")
+        open_settings(page)
+        set_typing_options(page, stop_on_error=stop_on_error, forgive_errors=False, space_skips_words=False)
+        save_settings(page)
+        focus_en_input(page)
+
+        lesson_text = read_en_lesson_text(page)
+        expected = lesson_text[0]
+        wrong = "z" if expected.lower() != "z" else "q"
+
+        # 0 errors initially
+        st0 = read_en_cursor_error_state(page)
+        assert st0["errorCount"] == 0 and st0["badgeCount"] == 0 and not st0["cursorError"]
+
+        # 1st error: highlights red WITHOUT showing "1" badge
+        press_char(page, wrong)
+        st1 = read_en_cursor_error_state(page)
+        assert st1["errorCount"] == 1, f"Expected errorCount=1, got {st1}"
+        assert st1["cursorError"], f"Expected red cursor error on 1st error: {st1}"
+        assert "--textinput--miss__color" in st1["cursorColorStyle"], f"Expected miss color style on 1st error: {st1}"
+        assert st1["badgeCount"] == 0 and st1["badgeText"] is None, f"1st error must NOT render badge: {st1}"
+
+        # 2nd..10th consecutive errors show "2".."10"
+        for n in range(2, 11):
+            press_char(page, wrong)
+            st = read_en_cursor_error_state(page)
+            assert st["errorCount"] == n and st["badgeCount"] == 1 and st["badgeText"] == str(n), (
+                f"Expected EN badge '{n}' (stopOnError={stop_on_error}), got {st}"
+            )
+
+        # 11th & 12th errors remain capped at "10"
+        for _ in range(2):
+            press_char(page, wrong)
+            st = read_en_cursor_error_state(page)
+            assert st["errorCount"] == 10 and st["badgeCount"] == 1 and st["badgeText"] == "10", (
+                f"EN badge must cap at '10' (stopOnError={stop_on_error}), got {st}"
+            )
+
+        # Backspace decrements: 10 -> 9 -> ... -> 2 -> 1 (hides badge) -> 0 (clears error)
+        page.keyboard.press("Backspace")
+        st9 = read_en_cursor_error_state(page)
+        assert st9["errorCount"] == 9 and st9["badgeText"] == "9", f"Expected Backspace 10->9: {st9}"
+
+        for _ in range(7):
+            page.keyboard.press("Backspace")
+        st2 = read_en_cursor_error_state(page)
+        assert st2["errorCount"] == 2 and st2["badgeText"] == "2", f"Expected decrement to 2: {st2}"
+
+        page.keyboard.press("Backspace")
+        st1_bs = read_en_cursor_error_state(page)
+        assert st1_bs["errorCount"] == 1 and st1_bs["badgeCount"] == 0 and st1_bs["cursorError"], (
+            f"Backspace 2->1 must hide badge while retaining error tint: {st1_bs}"
+        )
+
+        if stop_on_error:
+            # Re-trigger badge "2", then pressing right key clears badge & advances directly
+            press_char(page, wrong)
+            assert read_en_cursor_error_state(page)["badgeText"] == "2"
+            press_char(page, expected)
+            st_clear = read_en_cursor_error_state(page)
+            assert st_clear["errorCount"] == 0 and st_clear["badgeCount"] == 0 and not st_clear["cursorError"], (
+                f"Right key must clear EN badge & error (stopOnError=True): {st_clear}"
+            )
+        else:
+            # Final Backspace 1->0 clears garbage & error, then right key advances cleanly
+            page.keyboard.press("Backspace")
+            st_zero = read_en_cursor_error_state(page)
+            assert st_zero["errorCount"] == 0 and st_zero["badgeCount"] == 0 and not st_zero["cursorError"], (
+                f"Backspace 1->0 must clear EN error (stopOnError=False): {st_zero}"
+            )
+            press_char(page, expected)
+            st_clear = read_en_cursor_error_state(page)
+            assert st_clear["errorCount"] == 0 and st_clear["badgeCount"] == 0 and not st_clear["cursorError"]
+
+
+def _assert_zh_consecutive_error_badge_flow(
+    browser: Browser,
+    base_url: str,
+    *,
+    stop_on_error: bool,
+) -> None:
+    with open_context(
+        browser,
+        base_url,
+        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp"},
+    ) as (_, page, _, _):
+        page.goto(f"{base_url}/", wait_until="domcontentloaded")
+        ensure_practice_language(page, "zh")
+        open_settings(page)
+        set_typing_options(page, stop_on_error=stop_on_error, forgive_errors=False, space_skips_words=False)
+        save_settings(page)
+        focus_zh_input(page)
+
+        tok0 = read_zh_lesson_tokens(page)
+        w0 = tok0["words"][0]
+        expected_hanzi = w0["fullHanzi"]
+        expected = w0["bodyCode"][0]
+        wrong = "z" if expected != "z" else "q"
+
+        assert w0["units"][0]["errorCount"] == 0 and w0["units"][0]["badgeText"] is None and not tok0["cursorError"]
+
+        # 1st error: highlights red WITHOUT showing "1" badge
+        press_char(page, wrong)
+        tok1 = read_zh_lesson_tokens(page)
+        u0 = tok1["words"][0]["units"][0]
+        assert u0["errorCount"] == 1 and tok1["cursorError"] and tok1["hasMissAnywhere"], (
+            f"Expected ZH 1st error red highlight (stopOnError={stop_on_error}): {u0}, cursorError={tok1['cursorError']}"
+        )
+        assert u0["badgeText"] is None, f"ZH 1st error must NOT show badge '1': {u0}"
+        assert tok1["words"][0]["fullHanzi"] == expected_hanzi
+
+        # 2nd..10th consecutive errors show "2".."10"
+        for n in range(2, 11):
+            press_char(page, wrong)
+            tok = read_zh_lesson_tokens(page)
+            u = tok["words"][0]["units"][0]
+            assert u["errorCount"] == n and u["badgeText"] == str(n), (
+                f"Expected ZH badge '{n}' (stopOnError={stop_on_error}), got {u}"
+            )
+
+        # 11th & 12th errors remain capped at "10"
+        for _ in range(2):
+            press_char(page, wrong)
+            tok = read_zh_lesson_tokens(page)
+            u = tok["words"][0]["units"][0]
+            assert u["errorCount"] == 10 and u["badgeText"] == "10", (
+                f"ZH badge must cap at '10' (stopOnError={stop_on_error}), got {u}"
+            )
+            assert tok["words"][0]["fullHanzi"] == expected_hanzi
+
+        # Backspace decrements: 10 -> 9 -> ... -> 2 -> 1 (hides badge)
+        page.keyboard.press("Backspace")
+        assert read_zh_lesson_tokens(page)["words"][0]["units"][0]["badgeText"] == "9"
+
+        for _ in range(7):
+            page.keyboard.press("Backspace")
+        assert read_zh_lesson_tokens(page)["words"][0]["units"][0]["badgeText"] == "2"
+
+        page.keyboard.press("Backspace")
+        tok_bs1 = read_zh_lesson_tokens(page)
+        u_bs1 = tok_bs1["words"][0]["units"][0]
+        assert u_bs1["errorCount"] == 1 and u_bs1["badgeText"] is None and tok_bs1["cursorError"], (
+            f"ZH Backspace 2->1 must hide badge while retaining error tint: {u_bs1}"
+        )
+
+        # Re-trigger badge "2", then press right key -> clears badge & advances active segment
+        press_char(page, wrong)
+        assert read_zh_lesson_tokens(page)["words"][0]["units"][0]["badgeText"] == "2"
+        press_char(page, expected)
+        tok_ok = read_zh_lesson_tokens(page)
+        u_ok = tok_ok["words"][0]["units"][0]
+        assert u_ok["errorCount"] == 0 and u_ok["badgeText"] is None and not tok_ok["cursorError"], (
+            f"Right key must clear ZH badge & error (stopOnError={stop_on_error}): {u_ok}"
+        )
+        assert tok_ok["cursorActiveIndex"] == 1 or not u_ok["cursor"]
+
+
+def t1_f13_01_en_error_badge_stop_on_error_true(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    _assert_en_consecutive_error_badge_flow(browser, base_url, stop_on_error=True)
+
+
+def t1_f13_02_en_error_badge_stop_on_error_false(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    _assert_en_consecutive_error_badge_flow(browser, base_url, stop_on_error=False)
+
+
+def t1_f13_03_zh_error_badge_stop_on_error_true(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    _assert_zh_consecutive_error_badge_flow(browser, base_url, stop_on_error=True)
+
+
+def t1_f13_04_zh_error_badge_stop_on_error_false(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    _assert_zh_consecutive_error_badge_flow(browser, base_url, stop_on_error=False)
+
+
 TIER1_TESTS: list[tuple[str, Callable[..., None]]] = [
     ("t1_f1_01_profile_high_error_fast_key_not_green", t1_f1_01_profile_high_error_fast_key_not_green),
     ("t1_f1_02_profile_low_sample_fast_key_not_green", t1_f1_02_profile_low_sample_fast_key_not_green),
@@ -1162,4 +1969,18 @@ TIER1_TESTS: list[tuple[str, Callable[..., None]]] = [
     ("t1_f8_03_zh_settings_ciyu_wording_in_quanpin_mode", t1_f8_03_zh_settings_ciyu_wording_in_quanpin_mode),
     ("t1_f8_04_zh_settings_ciyu_wording_persists_after_save_and_reopen", t1_f8_04_zh_settings_ciyu_wording_persists_after_save_and_reopen),
     ("t1_f8_05_en_ui_keeps_repeat_each_word_label", t1_f8_05_en_ui_keeps_repeat_each_word_label),
+    ("t1_f9_01_standalone_zh_sp_6key_curriculum_and_zero_keytrace_chrome", t1_f9_01_standalone_zh_sp_6key_curriculum_and_zero_keytrace_chrome),
+    ("t1_f9_02_standalone_zh_qp_6key_curriculum", t1_f9_02_standalone_zh_qp_6key_curriculum),
+    ("t1_f9_03_standalone_keytrace_route_renders_disconnected_onboarding_card", t1_f9_03_standalone_keytrace_route_renders_disconnected_onboarding_card),
+    ("t1_f10_01_keytrace_connected_unlocks_all_en_and_zh_keys_with_chrome", t1_f10_01_keytrace_connected_unlocks_all_en_and_zh_keys_with_chrome),
+    ("t1_f10_02_keytrace_mode_standalone_isolates_data_without_deleting", t1_f10_02_keytrace_mode_standalone_isolates_data_without_deleting),
+    ("t1_f10_03_imported_keytrace_indexeddb_without_jsonl_unlocks_and_isolates", t1_f10_03_imported_keytrace_indexeddb_without_jsonl_unlocks_and_isolates),
+    ("t1_f11_01_settings_en_zh_target_speed_defaults_bounds_and_persistence", t1_f11_01_settings_en_zh_target_speed_defaults_bounds_and_persistence),
+    ("t1_f11_02_profile_result_grouper_grades_en_and_zh_against_own_target_speed", t1_f11_02_profile_result_grouper_grades_en_and_zh_against_own_target_speed),
+    ("t1_f12_01_focus_key_shift_emits_focus_letter_toast_and_reload_switch_silent", t1_f12_01_focus_key_shift_emits_focus_letter_toast_and_reload_switch_silent),
+    ("t1_f12_02_unlock_new_key_emits_new_letter_without_duplicate_focus_toast", t1_f12_02_unlock_new_key_emits_new_letter_without_duplicate_focus_toast),
+    ("t1_f13_01_en_error_badge_stop_on_error_true", t1_f13_01_en_error_badge_stop_on_error_true),
+    ("t1_f13_02_en_error_badge_stop_on_error_false", t1_f13_02_en_error_badge_stop_on_error_false),
+    ("t1_f13_03_zh_error_badge_stop_on_error_true", t1_f13_03_zh_error_badge_stop_on_error_true),
+    ("t1_f13_04_zh_error_badge_stop_on_error_false", t1_f13_04_zh_error_badge_stop_on_error_false),
 ]

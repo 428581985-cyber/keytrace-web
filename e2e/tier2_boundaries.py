@@ -816,16 +816,22 @@ def t2_f7_04_zh_sp_stop_on_error_false_forgive_errors_true_multiple_typos_bounde
 def t2_f7_05_zh_qp_forgive_errors_nasal_fuzzy_and_ng_g_boundary(
     browser: Browser, base_url: str, keytrace_dir: str | None = None
 ) -> None:
-    # Seed unlocked zh-qp keys so words containing (-n/-ng) + g- (e.g., quanguo, yinggai, jingguo, chenggong) draw quickly.
+    # Seed all 26 zh-qp keys fast except 'g' (slow), so GuidedLesson focuses on 'g' and
+    # words containing (-n/-ng) + g- (e.g., quanguo, yinggai, jingguo, chenggong) draw immediately.
     now = int(time.time() * 1000)
     seed_hist = {
-        cp: (20, 0, 210)
-        for cp in map(ord, "aeiouncgsjklmfbdptwxyzqh")
+        cp: (20, 0, 700 if cp == ord("g") else 210)
+        for cp in range(ord("a"), ord("z") + 1)
     }
     with open_context(
         browser,
         base_url,
-        settings={"keyboard.language": "zh-qp", "keyboard.layout": "zh-qp", "lesson.zhTargetSpeed": 175},
+        settings={
+            "keyboard.language": "zh-qp",
+            "keyboard.layout": "zh-qp",
+            "lesson.zhTargetSpeed": 175,
+            "lesson.keytraceMode": "keytrace",
+        },
     ) as (_, page, _, _):
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         seed_indexeddb_results(

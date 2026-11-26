@@ -19,7 +19,7 @@ from playwright.sync_api import Browser, BrowserContext, Locator, Page, expect
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVER_ENTRY = REPO_ROOT / "root" / "index.js"
 
-GITHUB_URL = "https://github.com/428581985-cyber/keytrace"
+GITHUB_URL = "https://github.com/428581985-cyber/keytrace-web"
 
 COLOR_TODO_RGB = "rgb(138, 133, 124)"
 COLOR_HIT_RGB = "rgb(127, 174, 143)"
@@ -115,8 +115,29 @@ def run_isolated_server() -> Iterator[tuple[str, Path]]:
             }
         )
 
+        # Raise Node's default 5s HTTP keepAliveTimeout in the ephemeral test server so
+        # long typing sessions (e.g. 8s Quanpin drills) never race with Chromium's keep-alive
+        # socket pool and emit spurious net::ERR_CONNECTION_CLOSED console errors.
+        keepalive_preload = tmp_path / "_e2e_keepalive.cjs"
+        keepalive_preload.write_text(
+            "const http = require('node:http');\n"
+            "const origListen = http.Server.prototype.listen;\n"
+            "http.Server.prototype.listen = function (...args) {\n"
+            "  this.keepAliveTimeout = 65000;\n"
+            "  this.headersTimeout = 66000;\n"
+            "  return origListen.apply(this, args);\n"
+            "};\n",
+            encoding="utf-8",
+        )
+
         proc = subprocess.Popen(
-            ["node", "--experimental-sqlite", str(SERVER_ENTRY)],
+            [
+                "node",
+                "--experimental-sqlite",
+                "--require",
+                str(keepalive_preload),
+                str(SERVER_ENTRY),
+            ],
             cwd=str(tmp_path),
             env=env,
             stdout=subprocess.PIPE,
@@ -218,13 +239,14 @@ def open_context(
 
     context = browser.new_context(**ctx_kwargs)
 
-    # Stub external analytics & Cookiebot beacons so offline/ephemeral hosts never cause 404/CORS console errors.
+    # Stub external analytics, Cookiebot, and thirdparties-ads (pub.network) beacons so
+    # offline/ephemeral hosts never hit external CDNs or emit spurious net::ERR_CONNECTION_CLOSED.
     def _stub_204(route: Any) -> None:
         route.fulfill(status=204, body="")
 
     context.route(
         re.compile(
-            r"^https?://([^/]+\.)?(cloudflareinsights\.com|consent\.cookiebot\.com|consentcdn\.cookiebot\.com)/"
+            r"^https?://([^/]+\.)?(cloudflareinsights\.com|googletagmanager\.com|google-analytics\.com|consent\.cookiebot\.com|consentcdn\.cookiebot\.com|pub\.network|cdn-vitals\.com)/"
         ),
         _stub_204,
     )
@@ -279,13 +301,15 @@ def open_context(
     page = context.new_page()
     console_errors: list[str] = []
     page_errors: list[str] = []
+    closing = False
 
     def _on_console(msg: Any) -> None:
-        if msg.type == "error":
+        if not closing and msg.type == "error":
             console_errors.append(msg.text)
 
     def _on_pageerror(err: Any) -> None:
-        page_errors.append(str(err))
+        if not closing:
+            page_errors.append(str(err))
 
     page.on("console", _on_console)
     page.on("pageerror", _on_pageerror)
@@ -297,6 +321,8 @@ def open_context(
         failed = True
         raise
     finally:
+        # Stop recording errors emitted solely by context.close() aborting lingering fetches.
+        closing = True
         with contextlib.suppress(Exception):
             context.close()
         if assert_clean and not failed:
@@ -649,6 +675,9 @@ def read_zh_lesson_tokens(page: Page) -> dict[str, Any]:
                             const segs = parseInt(u.getAttribute('data-segments') || '0', 10);
                             const isCursor = u.getAttribute('data-cursor') === '1';
                             const garbage = parseInt(u.getAttribute('data-garbage') || '0', 10);
+                            const errorCount = parseInt(u.getAttribute('data-error-count') || '0', 10);
+                            const badgeEl = u.querySelector('[data-garbage-badge="1"]');
+                            const badgeText = badgeEl ? (badgeEl.textContent || '').trim() : null;
                             const cs = hanziEl ? window.getComputedStyle(hanziEl) : null;
                             return {
                                 code,
@@ -656,6 +685,8 @@ def read_zh_lesson_tokens(page: Page) -> dict[str, Any]:
                                 segments: segs,
                                 cursor: isCursor,
                                 garbage,
+                                errorCount,
+                                badgeText,
                                 hanziColor: cs ? cs.color : null,
                                 hanziBgImage: cs ? cs.backgroundImage : null,
                                 fontFamily: cs ? cs.fontFamily : null,
@@ -665,6 +696,9 @@ def read_zh_lesson_tokens(page: Page) -> dict[str, Any]:
                         const hasSpace = Boolean(spEl);
                         const spaceCursor = spEl ? spEl.getAttribute('data-cursor') === '1' : false;
                         const spaceGarbage = spEl ? parseInt(spEl.getAttribute('data-garbage') || '0', 10) : 0;
+                        const spaceErrorCount = spEl ? parseInt(spEl.getAttribute('data-error-count') || '0', 10) : 0;
+                        const spBadgeEl = spEl ? spEl.querySelector('[data-garbage-badge="1"]') : null;
+                        const spaceBadgeText = spBadgeEl ? (spBadgeEl.textContent || '').trim() : null;
                         const spaceColor = spEl ? window.getComputedStyle(spEl).color : null;
                         const bodyCode = units.map(u => u.code).join('');
                         const fullHanzi = units.map(u => u.hanzi).join('');
@@ -675,6 +709,8 @@ def read_zh_lesson_tokens(page: Page) -> dict[str, Any]:
                             hasSpace,
                             spaceCursor,
                             spaceGarbage,
+                            spaceErrorCount,
+                            spaceBadgeText,
                             spaceColor,
                         });
                         tokens.push(bodyCode + (hasSpace ? ' ' : ''));
@@ -1242,4 +1278,245 @@ def select_profile_grouper(
     page.wait_for_function(
         "() => document.querySelectorAll('main span[data-code-point]').length >= 5 || document.querySelectorAll('main div[style*=\"width: 58px\"]').length >= 10",
         timeout=15000,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Practice KeySet, Settings target-speed / keytrace-mode, EN error badge, and Toast helpers
+# ---------------------------------------------------------------------------
+
+
+def read_practice_key_set(page: Page) -> dict[str, Any]:
+    """Read unlocked/locked/forced/focused state from Practice Indicators KeySet & CurrentKey rows."""
+    page.wait_for_function(
+        """() => {
+            const spans = Array.from(document.querySelectorAll('main section span'));
+            for (const sp of spans) {
+                const clean = (sp.textContent || '').trim().replace(/[:：]\\s*$/, '');
+                if (clean === '所有键位' || clean === 'All keys') {
+                    const ks = sp.nextElementSibling;
+                    return Boolean(ks && ks.querySelectorAll('span[data-code-point]').length >= 26);
+                }
+            }
+            return false;
+        }""",
+        timeout=15000,
+    )
+    return page.evaluate(
+        """() => {
+            const spans = Array.from(document.querySelectorAll('main section span'));
+            let keySetEl = null;
+            let currentKeyEl = null;
+            for (const sp of spans) {
+                const clean = (sp.textContent || '').trim().replace(/[:：]\\s*$/, '');
+                if (!keySetEl && (clean === '所有键位' || clean === 'All keys')) {
+                    keySetEl = sp.nextElementSibling;
+                } else if (!currentKeyEl && (clean === '当前字符' || clean === 'Current key')) {
+                    currentKeyEl = sp.nextElementSibling;
+                }
+            }
+            const keys = [];
+            const unlocked = [];
+            const locked = [];
+            const forced = [];
+            if (keySetEl) {
+                for (const el of Array.from(keySetEl.querySelectorAll('span[data-code-point]'))) {
+                    const cp = parseInt(el.getAttribute('data-code-point') || '0', 10);
+                    const ch = String.fromCodePoint(cp);
+                    const isLocked = el.querySelector('svg') !== null;
+                    const cs = window.getComputedStyle(el);
+                    const td = (cs.textDecorationLine || cs.textDecoration || '').toLowerCase();
+                    const isForced = td.includes('underline');
+                    keys.push({
+                        codePoint: cp,
+                        char: ch,
+                        label: (el.textContent || '').trim(),
+                        locked: isLocked,
+                        unlocked: !isLocked,
+                        forced: isForced,
+                        bg: cs.backgroundColor,
+                    });
+                    if (isLocked) locked.push(ch);
+                    else unlocked.push(ch);
+                    if (isForced) forced.push(ch);
+                }
+            }
+            let focusedChar = null;
+            let currentKeyText = '';
+            if (currentKeyEl) {
+                currentKeyText = (currentKeyEl.textContent || '').trim();
+                const curSpan = currentKeyEl.querySelector('span[data-code-point]');
+                if (curSpan) {
+                    const cp = parseInt(curSpan.getAttribute('data-code-point') || '0', 10);
+                    focusedChar = String.fromCodePoint(cp);
+                }
+            }
+            return {
+                keys,
+                unlocked,
+                locked,
+                forced,
+                focusedChar,
+                currentKeyText,
+            };
+        }"""
+    )
+
+
+def read_target_speed_setting(page: Page) -> dict[str, Any]:
+    """Read TargetSpeedProp label, bounds, CPM value, and formatted display text in Settings fieldset 1."""
+    row = page.locator('main fieldset:nth-of-type(1) > div:has(input[type="range"][max="750"])').first
+    row.wait_for(state="visible", timeout=10000)
+    return row.evaluate(
+        """(el) => {
+            const labelEl = el.querySelector(':scope > span:nth-of-type(1)');
+            const slider = el.querySelector('input[type="range"]');
+            const spans = Array.from(el.querySelectorAll(':scope > span'));
+            const lastSpan = spans[spans.length - 1];
+            return {
+                label: labelEl ? (labelEl.textContent || '').trim() : '',
+                min: slider ? parseInt(slider.min || '0', 10) : 0,
+                max: slider ? parseInt(slider.max || '0', 10) : 0,
+                valueCpm: slider ? parseInt(slider.value || '0', 10) : 0,
+                displayText: lastSpan ? (lastSpan.textContent || '').trim() : '',
+            };
+        }"""
+    )
+
+
+def set_target_speed_setting(page: Page, cpm: int) -> None:
+    """Set TargetSpeedProp range slider to exact CPM value in Settings fieldset 1."""
+    slider = page.locator('main fieldset:nth-of-type(1) input[type="range"][max="750"]').first
+    slider.wait_for(state="visible", timeout=10000)
+    slider.fill(str(int(cpm)))
+    expect(slider).to_have_value(str(int(cpm)), timeout=5000)
+
+
+def has_keytrace_mode_setting(page: Page) -> bool:
+    """Return True if KeytraceModeProp ('练习模式：' / 'Practice mode:') is rendered in Settings fieldset 1."""
+    row = page.locator("main fieldset:nth-of-type(1) > div").filter(
+        has_text=re.compile(r"练习模式|Practice mode")
+    )
+    return row.count() > 0
+
+
+def select_keytrace_mode_setting(page: Page, mode: str) -> None:
+    """Select KeytraceModeProp ('auto' | 'keytrace' | 'standalone') in Settings fieldset 1."""
+    patterns = {
+        "auto": r"自动检测|Auto detect",
+        "keytrace": r"KeyTrace 联动全解锁|KeyTrace linked",
+        "standalone": r"独立网页课程|Standalone web course",
+    }
+    if mode not in patterns:
+        raise ValueError(f"Unsupported keytrace mode {mode!r}; expected one of {tuple(patterns)}")
+    row = page.locator("main fieldset:nth-of-type(1) > div").filter(
+        has_text=re.compile(r"练习模式|Practice mode")
+    ).first
+    row.wait_for(state="visible", timeout=10000)
+    opt = row.locator('span[tabindex="0"]').first
+    opt.click()
+    page.locator('ul[role="menu"]').wait_for(state="visible", timeout=5000)
+    page.locator('ul[role="menu"] li[role="menuitem"]').filter(
+        has_text=re.compile(patterns[mode])
+    ).first.click()
+
+
+def read_en_cursor_error_state(page: Page) -> dict[str, Any]:
+    """Read EN cursor error count, red miss tint, caret error attribute, and consecutive error badge."""
+    return page.evaluate(
+        """() => {
+            const ltrLines = Array.from(document.querySelectorAll('main div[dir="ltr"]'));
+            const container = ltrLines.length > 0 ? ltrLines[0].parentElement : document.querySelector('main');
+            const errChar = container ? container.querySelector('[data-error-count]') : null;
+            const badges = container ? Array.from(container.querySelectorAll('[data-error-badge="1"]')) : [];
+            const caretErr = container ? container.querySelector('[data-cursor-error="1"]') : null;
+            const cs = errChar ? window.getComputedStyle(errChar) : null;
+            return {
+                errorCount: errChar ? parseInt(errChar.getAttribute('data-error-count') || '0', 10) : 0,
+                badgeCount: badges.length,
+                badgeText: badges.length > 0 ? (badges[0].textContent || '').trim() : null,
+                cursorError: caretErr !== null,
+                cursorColorStyle: errChar ? (errChar.style.color || '') : '',
+                cursorComputedColor: cs ? cs.color : null,
+            };
+        }"""
+    )
+
+
+def install_toast_recorder(page: Page) -> None:
+    """Install a MutationObserver on <Toaster /> (main > div:last-child) to record every rendered toast message."""
+    page.evaluate(
+        """() => {
+            if (window.__e2eToastObserver) {
+                try { window.__e2eToastObserver.disconnect(); } catch {}
+            }
+            window.__e2eToasts = [];
+            const seen = new WeakSet();
+            const captureNode = (node) => {
+                if (!(node instanceof HTMLElement)) return;
+                if (seen.has(node)) return;
+                seen.add(node);
+                const msgEl = node.children.length >= 2 ? node.children[1] : node;
+                const txt = (msgEl.textContent || '').trim();
+                if (txt) {
+                    window.__e2eToasts.push(txt);
+                }
+            };
+            const toaster = document.querySelector('main > div:last-child');
+            if (!toaster) return;
+            for (const ch of Array.from(toaster.children)) {
+                captureNode(ch);
+            }
+            const obs = new MutationObserver((mutations) => {
+                for (const m of mutations) {
+                    for (const n of Array.from(m.addedNodes)) {
+                        captureNode(n);
+                    }
+                }
+            });
+            obs.observe(toaster, { childList: true });
+            window.__e2eToastObserver = obs;
+        }"""
+    )
+
+
+def read_recorded_toasts(page: Page) -> list[str]:
+    return page.evaluate("() => Array.isArray(window.__e2eToasts) ? [...window.__e2eToasts] : []")
+
+
+def wait_for_recorded_toast(
+    page: Page,
+    patterns: list[str],
+    timeout_ms: int = 8000,
+) -> list[str]:
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    compiled = [re.compile(p) for p in patterns]
+    while time.monotonic() < deadline:
+        toasts = read_recorded_toasts(page)
+        if any(r.search(t) for t in toasts for r in compiled):
+            return toasts
+        time.sleep(0.08)
+    toasts = read_recorded_toasts(page)
+    raise TimeoutError(f"Expected toast matching {patterns!r}, recorded={toasts!r}")
+
+
+def count_keytrace_practice_chrome(page: Page) -> dict[str, int]:
+    """Count internal KeyTrace nav links and practice pill elements currently in DOM."""
+    return page.evaluate(
+        """() => {
+            const isKeytraceRoute = (href) => /^(\\/[a-z-]+)?\\/keytrace$/i.test(href || '');
+            const navLinks = Array.from(document.querySelectorAll('nav a')).filter(a =>
+                isKeytraceRoute(a.getAttribute('href'))
+            ).length;
+            const mainLinks = Array.from(document.querySelectorAll('main a')).filter(a => {
+                const href = a.getAttribute('href') || '';
+                const txt = (a.textContent || '').trim();
+                return isKeytraceRoute(href) && (txt.includes('监控') || txt.includes('Monitor'));
+            }).length;
+            const pillTexts = Array.from(document.querySelectorAll('main section span')).filter(sp => {
+                const txt = (sp.textContent || '').trim();
+                return txt.includes('日常监控') || txt.startsWith('KeyTrace');
+            }).length;
+            return { navLinks, pillLinks: mainLinks, pillTexts };
+        }"""
     )

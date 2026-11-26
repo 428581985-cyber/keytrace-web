@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import re
 import time
 from pathlib import Path
 from typing import Callable
@@ -11,6 +13,7 @@ from harness import (
     VIEW_COMPACT,
     VIEW_NORMAL,
     build_realistic_keytrace_events,
+    count_keytrace_practice_chrome,
     dismiss_tour_if_open,
     ensure_practice_language,
     focus_zh_input,
@@ -21,6 +24,8 @@ from harness import (
     get_toolbar_buttons,
     get_view_switch_button,
     get_zoomer_positions,
+    http_get_json,
+    install_toast_recorder,
     is_tour_open,
     make_result_json,
     max_box_delta,
@@ -29,24 +34,32 @@ from harness import (
     open_context,
     open_settings,
     press_char,
+    read_indexeddb_results,
     read_key_selector_tiles,
     read_mastery_legend,
     read_mastery_tiles,
+    read_practice_key_set,
+    read_recorded_toasts,
     read_summary_stats,
+    read_target_speed_setting,
     read_zh_lesson_tokens,
     read_zoomer_styles,
     rgb_close,
+    run_isolated_server,
     save_settings,
     seed_indexeddb_results,
+    select_keytrace_mode_setting,
     select_profile_grouper,
     select_settings_font,
     select_zh_scheme,
     set_fuzzy_options,
+    set_target_speed_setting,
     set_typing_options,
     skip_lesson,
     type_key_stream,
     wait_for_indexeddb_count,
     wait_for_practice_ready,
+    wait_for_recorded_toast,
     write_keytrace_jsonl,
 )
 
@@ -345,6 +358,212 @@ def t4_06_keytrace_sync_calibrated_profile_back_to_practice_drill(
             created_file.unlink(missing_ok=True)
 
 
+def t4_07_v01_keytrace_mode_isolation_and_independent_speeds_to_profile(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    """Scenario 7 (F10, F11): KeyTrace connected 26/26 -> set ZH=20/EN=45 WPM -> standalone isolation -> restore -> /profile grading."""
+    today_str = time.strftime("%Y-%m-%d", time.localtime())
+    now_ms = int(time.time() * 1000) - 30_000
+    events = build_realistic_keytrace_events(
+        base_ts=now_ms,
+        tokens=[
+            ("enter ", 230.0, 0),
+            ("tenet ", 240.0, 0),
+            ("retire ", 250.0, 1),
+            ("entire ", 245.0, 0),
+        ],
+    )
+
+    with contextlib.ExitStack() as stack:
+        if keytrace_dir is not None:
+            target_url = base_url
+            created = write_keytrace_jsonl(Path(keytrace_dir), today_str, events)
+        else:
+            iso_url, iso_kt = stack.enter_context(run_isolated_server())
+            target_url = iso_url
+            created = write_keytrace_jsonl(iso_kt, today_str, events)
+        stack.callback(lambda p=created: p.unlink(missing_ok=True) if p.exists() else None)
+
+        with open_context(
+            browser,
+            target_url,
+            settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp"},
+        ) as (_, page, _, _):
+            page.goto(f"{target_url}/", wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+
+            # Connected KeyTrace: 26/26 unlocked (0 locked, 0 forced) and nav/pill visible
+            ks0 = read_practice_key_set(page)
+            assert len(ks0["unlocked"]) == 26 and len(ks0["locked"]) == 0 and len(ks0["forced"]) == 0
+            expect(page.locator('nav a[href="/keytrace"]')).to_be_visible(timeout=10000)
+            expect(page.locator('main a[href="/keytrace"]')).to_be_visible(timeout=10000)
+
+            # Seed identical 30 WPM (400ms) records for ZH and EN + explicit KEYTRACE record
+            seed_indexeddb_results(
+                page,
+                [
+                    make_result_json(
+                        "zh-sp",
+                        ts=now_ms - 15_000,
+                        length=75,
+                        time_ms=30_000,
+                        errors=0,
+                        mode="keytrace",
+                        histogram={ord("a"): (25, 0, 400), ord("i"): (25, 0, 400), ord("u"): (25, 0, 400)},
+                    ),
+                    make_result_json(
+                        "en-us",
+                        ts=now_ms - 10_000,
+                        length=75,
+                        time_ms=30_000,
+                        errors=0,
+                        histogram={ord("a"): (25, 0, 400), ord("e"): (25, 0, 400), ord("n"): (25, 0, 400)},
+                    ),
+                ],
+            )
+            page.reload(wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+            wait_for_indexeddb_count(page, 2)
+            kt_before = sum(1 for r in read_indexeddb_results(page) if r.get("m") == "keytrace")
+            assert kt_before >= 1
+
+            # Set ZH target speed = 20 WPM (100 CPM) and toggle to standalone mode
+            open_settings(page)
+            assert read_target_speed_setting(page)["valueCpm"] == 125
+            set_target_speed_setting(page, 100)
+            select_keytrace_mode_setting(page, "standalone")
+            save_settings(page)
+
+            # Immediately isolated to 6-key zh-sp curriculum with 0 KeyTrace chrome and 0 data loss
+            ks_iso = read_practice_key_set(page)
+            assert ks_iso["unlocked"] == list("iujdgs") and len(ks_iso["locked"]) == 20 and len(ks_iso["forced"]) == 0
+            assert count_keytrace_practice_chrome(page) == {"navLinks": 0, "pillLinks": 0, "pillTexts": 0}
+            assert sum(1 for r in read_indexeddb_results(page) if r.get("m") == "keytrace") == kt_before
+
+            # Switch to EN, set EN target speed = 45 WPM (225 CPM), restore keytraceMode = "auto"
+            ensure_practice_language(page, "en")
+            open_settings(page)
+            assert read_target_speed_setting(page)["valueCpm"] == 175
+            set_target_speed_setting(page, 225)
+            select_keytrace_mode_setting(page, "auto")
+            save_settings(page)
+
+            # Both EN and ZH restore 26/26 unlocked immediately
+            ks_en = read_practice_key_set(page)
+            assert len(ks_en["unlocked"]) == 26 and len(ks_en["locked"]) == 0 and len(ks_en["forced"]) == 0
+            ensure_practice_language(page, "zh")
+            ks_zh = read_practice_key_set(page)
+            assert len(ks_zh["unlocked"]) == 26 and len(ks_zh["locked"]) == 0 and len(ks_zh["forced"]) == 0
+
+            # Navigate to /profile and verify ResultGrouper grades 30 WPM green for ZH (20 WPM) and non-green for EN (45 WPM)
+            page.goto(f"{target_url}/profile", wait_until="domcontentloaded")
+            select_profile_grouper(page, layout_pattern=r"小鹤双拼|Xiaohe")
+            zh_legend = read_mastery_legend(page)
+            zh_tiles = read_mastery_tiles(page)
+            assert rgb_close(zh_tiles["A"]["bg"], zh_legend["done"])
+
+            select_profile_grouper(page, layout_pattern=r"英语|English")
+            en_legend = read_mastery_legend(page)
+            en_tiles = read_mastery_tiles(page)
+            assert not rgb_close(en_tiles["A"]["bg"], en_legend["done"])
+
+
+def t4_08_v01_standalone_zh_error_badge_and_unlock_alert_session(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    """Scenario 8 (F9, F12, F13): Standalone ZH 6-key session with consecutive error badge recovery -> unlock toast without duplicate focus toast."""
+    now_ms = int(time.time() * 1000)
+
+    with contextlib.ExitStack() as stack:
+        target_url = base_url
+        try:
+            _, summary = http_get_json(f"{base_url}/_/keytrace/summary?days=1")
+            if summary.get("status", {}).get("available", False):
+                target_url, _ = stack.enter_context(run_isolated_server())
+        except Exception:  # noqa: BLE001
+            target_url, _ = stack.enter_context(run_isolated_server())
+
+        with open_context(
+            browser,
+            target_url,
+            settings={
+                "keyboard.language": "zh-sp",
+                "keyboard.layout": "zh-sp",
+                "lesson.zhTargetSpeed": 125,
+            },
+        ) as (_, page, _, _):
+            page.goto(f"{target_url}/", wait_until="domcontentloaded")
+            seed_indexeddb_results(
+                page,
+                [
+                    make_result_json(
+                        "zh-sp",
+                        ts=now_ms - 30_000,
+                        length=100,
+                        time_ms=20_000,
+                        errors=0,
+                        histogram={
+                            ord("u"): (20, 0, 220),
+                            ord("j"): (20, 0, 220),
+                            ord("d"): (20, 0, 220),
+                            ord("g"): (20, 0, 220),
+                            ord("s"): (20, 0, 220),
+                        },
+                    )
+                ],
+            )
+            page.reload(wait_until="domcontentloaded")
+            ensure_practice_language(page, "zh")
+            install_toast_recorder(page)
+            page.wait_for_timeout(150)
+            assert read_recorded_toasts(page) == []
+
+            ks0 = read_practice_key_set(page)
+            assert ks0["unlocked"] == list("iujdgs") and len(ks0["locked"]) == 20 and ks0["focusedChar"] == "i"
+            assert count_keytrace_practice_chrome(page) == {"navLinks": 0, "pillLinks": 0, "pillTexts": 0}
+
+            focus_zh_input(page)
+            tok = read_zh_lesson_tokens(page)
+            for _ in range(5):
+                if "i" in tok["fullStream"][1:]:
+                    break
+                skip_lesson(page)
+                focus_zh_input(page)
+                tok = read_zh_lesson_tokens(page)
+            stream = tok["fullStream"]
+            assert "i" in stream[1:]
+
+            # Exercise consecutive error badge on first character (index 0, ignored by Histogram.from(steps.slice(1)))
+            wrong = "z" if stream[0] != "z" else "q"
+            press_char(page, wrong)
+            t1 = read_zh_lesson_tokens(page)
+            assert t1["words"][0]["units"][0]["errorCount"] == 1 and t1["words"][0]["units"][0]["badgeText"] is None
+            press_char(page, wrong)
+            assert read_zh_lesson_tokens(page)["words"][0]["units"][0]["badgeText"] == "2"
+            press_char(page, wrong)
+            assert read_zh_lesson_tokens(page)["words"][0]["units"][0]["badgeText"] == "3"
+            page.keyboard.press("Backspace")
+            assert read_zh_lesson_tokens(page)["words"][0]["units"][0]["badgeText"] == "2"
+            page.keyboard.press("Backspace")
+            assert read_zh_lesson_tokens(page)["words"][0]["units"][0]["badgeText"] is None
+            page.keyboard.press("Backspace")
+            assert read_zh_lesson_tokens(page)["words"][0]["units"][0]["errorCount"] == 0
+
+            # Complete the lesson cleanly and verify unlock toast without duplicate focus-key toast
+            time.sleep(0.06)
+            type_key_stream(page, stream, per_key_ms=52.0, min_total_ms=1400.0)
+            wait_for_indexeddb_count(page, 2)
+            wait_for_recorded_toast(page, [r"解锁了一个新的字母！|New letter unlocked!"])
+            page.wait_for_timeout(200)
+            toasts = read_recorded_toasts(page)
+            assert not any(re.search(r"练习键位已切换！|Practice key switched!", t) for t in toasts), (
+                f"Unlock must not emit duplicate focus-letter toast: {toasts}"
+            )
+
+            ks1 = read_practice_key_set(page)
+            assert ks1["unlocked"] == list("iujdgsv") and ks1["focusedChar"] == "v"
+
+
 TIER4_TESTS: list[tuple[str, Callable[..., None]]] = [
     ("t4_01_daily_zh_shuangpin_user_session_settings_to_profile", t4_01_daily_zh_shuangpin_user_session_settings_to_profile),
     ("t4_02_bilingual_learner_font_and_layout_stability_across_views", t4_02_bilingual_learner_font_and_layout_stability_across_views),
@@ -352,4 +571,6 @@ TIER4_TESTS: list[tuple[str, Callable[..., None]]] = [
     ("t4_04_zh_qp_fuzzy_and_forgive_errors_practice_to_profile", t4_04_zh_qp_fuzzy_and_forgive_errors_practice_to_profile),
     ("t4_05_multi_route_chrome_theme_and_github_nav_invariance", t4_05_multi_route_chrome_theme_and_github_nav_invariance),
     ("t4_06_keytrace_sync_calibrated_profile_back_to_practice_drill", t4_06_keytrace_sync_calibrated_profile_back_to_practice_drill),
+    ("t4_07_v01_keytrace_mode_isolation_and_independent_speeds_to_profile", t4_07_v01_keytrace_mode_isolation_and_independent_speeds_to_profile),
+    ("t4_08_v01_standalone_zh_error_badge_and_unlock_alert_session", t4_08_v01_standalone_zh_error_badge_and_unlock_alert_session),
 ]
