@@ -97,6 +97,7 @@ const styles = {
   // 所有行的容器，光标相对它定位
   board: {
     position: "relative" as const,
+    isolation: "isolate" as const,
     display: "flex",
     flexDirection: "column" as const,
     // 双拼拼音悬在字上方 19px，留出空间别顶到容器边框；
@@ -1252,6 +1253,8 @@ export function ZhLines({
         !layoutModeChanged;
       placeCursor(board, cursorEl, caretShapeStyle, activeIndex, smooth);
       mountedRef.current = true;
+    } else {
+      mountedRef.current = false;
     }
   });
 
@@ -1288,9 +1291,11 @@ export function ZhLines({
 
       <div
         ref={boardRef}
+        data-zh-board="1"
         style={{
           ...styles.board,
           paddingTop: boardPaddingTop,
+          filter: focus ? "none" : "blur(3px)",
         }}
       >
         {groupsByLine.map((groups, lineIndex) => {
@@ -1300,7 +1305,6 @@ export function ZhLines({
               style={{
                 ...styles.line,
                 rowGap: lineRowGap,
-                opacity: focus ? 1 : 0.55,
               }}
             >
               {groups.map((group, groupIndex) => {

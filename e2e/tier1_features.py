@@ -2209,6 +2209,83 @@ def t1_f14_03_custom_text_en_zh_isolation_and_unlocked_indicator(
         assert stored.get("lesson.customText.zhContent") == zh_custom
 
 
+def _assert_zh_unfocused_blur_state(page: Page) -> None:
+    board = page.locator("main [data-zh-board='1']").first
+    board.wait_for(state="visible", timeout=10000)
+    board_styles = board.evaluate(
+        "el => { const cs = window.getComputedStyle(el); return { filter: cs.filter, isolation: cs.isolation }; }"
+    )
+    assert "blur(3px)" in (board_styles["filter"] or ""), f"Expected blur(3px) when unfocused: {board_styles}"
+    assert board_styles["isolation"] == "isolate", f"Expected isolation=isolate on zh board: {board_styles}"
+    assert page.locator("main [data-caret-shape]").count() == 0, "Caret must be hidden when ZH input is unfocused"
+
+    toggle_filter = page.locator("main [data-scheme] label").first.evaluate(
+        "el => window.getComputedStyle(el).filter"
+    )
+    assert toggle_filter == "none", f"Expected sharp toggle label filter='none', got {toggle_filter!r}"
+
+    prompt = page.locator("main").get_by_text(
+        re.compile(r"单击或按 Enter 键激活|Click or press Enter to activate")
+    )
+    expect(prompt).to_be_visible(timeout=5000)
+
+    # Activation overlay must sit above ZhLines (positive z-index over the isolated board).
+    overlay_z = prompt.evaluate("el => window.getComputedStyle(el.parentElement).zIndex")
+    assert overlay_z == "1", f"Expected activation overlay zIndex='1', got {overlay_z!r}"
+
+
+def _assert_zh_focused_sharp_state(page: Page) -> None:
+    board = page.locator("main [data-zh-board='1']").first
+    board.wait_for(state="visible", timeout=10000)
+    assert board.evaluate("el => window.getComputedStyle(el).filter") == "none"
+    expect(page.locator("main [data-caret-shape]").first).to_be_visible(timeout=5000)
+    assert (
+        page.locator("main")
+        .get_by_text(re.compile(r"单击或按 Enter 键激活|Click or press Enter to activate"))
+        .count()
+        == 0
+    )
+
+
+def t1_f14_04_zh_unfocused_blur_hides_caret_and_clears_on_focus(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    with open_context(
+        browser,
+        base_url,
+        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp"},
+    ) as (_, page, _, _):
+        page.goto(f"{base_url}/", wait_until="domcontentloaded")
+        ensure_practice_language(page, "zh")
+
+        # 1) Initial mount auto-focuses TextEvents -> sharp board + caret visible.
+        _assert_zh_focused_sharp_state(page)
+
+        # 2) Blurring ZH input applies blur(3px), hides caret, keeps toggle sharp, shows activation prompt above board.
+        page.locator('main [role="textbox"]').first.evaluate("el => el.blur()")
+        _assert_zh_unfocused_blur_state(page)
+
+        # 3) Clicking hanzi re-focuses, clears blur, reveals caret, and hides activation prompt.
+        focus_zh_input(page)
+        _assert_zh_focused_sharp_state(page)
+
+        # 4) Pressing Enter after blur also re-activates cleanly.
+        page.locator('main [role="textbox"]').first.evaluate("el => el.blur()")
+        _assert_zh_unfocused_blur_state(page)
+        page.keyboard.press("Enter")
+        _assert_zh_focused_sharp_state(page)
+
+        # 5) Verify Full Pinyin (zh-qp) also blurs when unfocused and clears cleanly on focus.
+        open_settings(page)
+        select_zh_scheme(page, r"^(全拼|Full Pinyin)$")
+        save_settings(page)
+        page.locator('main [role="textbox"]').first.evaluate("el => el.blur()")
+        _assert_zh_unfocused_blur_state(page)
+
+        focus_zh_input(page)
+        _assert_zh_focused_sharp_state(page)
+
+
 TIER1_TESTS: list[tuple[str, Callable[..., None]]] = [
     ("t1_f1_01_profile_high_error_fast_key_not_green", t1_f1_01_profile_high_error_fast_key_not_green),
     ("t1_f1_02_profile_low_sample_fast_key_not_green", t1_f1_02_profile_low_sample_fast_key_not_green),
@@ -2275,5 +2352,9 @@ TIER1_TESTS: list[tuple[str, Callable[..., None]]] = [
     (
         "t1_f14_03_custom_text_en_zh_isolation_and_unlocked_indicator",
         t1_f14_03_custom_text_en_zh_isolation_and_unlocked_indicator,
+    ),
+    (
+        "t1_f14_04_zh_unfocused_blur_hides_caret_and_clears_on_focus",
+        t1_f14_04_zh_unfocused_blur_hides_caret_and_clears_on_focus,
     ),
 ]

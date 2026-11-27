@@ -1426,3 +1426,123 @@ test("ZhLines renders annotated custom Chinese text verbatim across Shuangpin & 
   equal(rQp.container.querySelectorAll("[data-word='1']").length, 3);
   rQp.unmount();
 });
+
+test("ZhLines blurs board cleanly on focus=false without dimming lines or blurring toggle", () => {
+  const ti = new TextInput("dage", toTextInputSettings(new Settings()));
+  const r = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{ ...textDisplaySettings, language: Language.ZH_SP }}
+        scheme="zh-sp"
+        lines={ti.lines}
+        focus={false}
+        cursor={false}
+      />
+    </FakeIntlProvider>,
+  );
+
+  const board = r.container.querySelector<HTMLElement>("[data-zh-board='1']");
+  const toggleLabel = r.container.querySelector<HTMLElement>("label");
+  const lineDivs = r.container.querySelectorAll<HTMLElement>(
+    'div[style*="z-index: 1"]',
+  );
+  isNotNull(board);
+  isNotNull(toggleLabel);
+  isTrue(lineDivs.length > 0);
+  equal(board.style.filter, "blur(3px)");
+  equal(board.style.isolation, "isolate");
+  equal(toggleLabel.style.filter, "");
+  for (const lineDiv of lineDivs) {
+    equal(lineDiv.style.opacity, "");
+  }
+  isNull(r.container.querySelector("[data-caret-shape]"));
+
+  r.rerender(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{ ...textDisplaySettings, language: Language.ZH_SP }}
+        scheme="zh-sp"
+        lines={ti.lines}
+        focus={true}
+        cursor={true}
+      />
+    </FakeIntlProvider>,
+  );
+  equal(board.style.filter, "none");
+  isNotNull(r.container.querySelector("[data-caret-shape]"));
+
+  r.unmount();
+});
+
+test("TextArea with zh syncs blur/caret on focus/blur and keeps demo unblurred without caret", () => {
+  const ti = new TextInput("fangan", toTextInputSettings(new Settings()));
+  const r = render(
+    <FakeIntlProvider>
+      <TextArea
+        settings={{ ...textDisplaySettings, language: Language.ZH_QP }}
+        zh={true}
+        scheme="zh-qp"
+        lines={ti.lines}
+      />
+    </FakeIntlProvider>,
+  );
+
+  const textbox = r.container.querySelector<HTMLElement>("[role='textbox']");
+  const board = r.container.querySelector<HTMLElement>("[data-zh-board='1']");
+  isNotNull(textbox);
+  isNotNull(board);
+
+  // TextEvents auto-focuses on mount: sharp board, caret visible, no prompt.
+  equal(board.style.filter, "none");
+  isNotNull(r.container.querySelector("[data-caret-shape]"));
+  equal(
+    (r.container.textContent ?? "").includes(
+      "Click or press Enter to activate...",
+    ),
+    false,
+  );
+
+  // Blur: blurred board, caret hidden, activation prompt shown.
+  fireEvent.blur(textbox);
+  equal(board.style.filter, "blur(3px)");
+  isNull(r.container.querySelector("[data-caret-shape]"));
+  isTrue(
+    (r.container.textContent ?? "").includes(
+      "Click or press Enter to activate...",
+    ),
+  );
+
+  // Focus again: sharp board, caret shown, prompt hidden.
+  fireEvent.focus(textbox);
+  equal(board.style.filter, "none");
+  isNotNull(r.container.querySelector("[data-caret-shape]"));
+  equal(
+    (r.container.textContent ?? "").includes(
+      "Click or press Enter to activate...",
+    ),
+    false,
+  );
+
+  // Demo (tour) mode: sharp board, no caret, no activation prompt.
+  r.rerender(
+    <FakeIntlProvider>
+      <TextArea
+        settings={{ ...textDisplaySettings, language: Language.ZH_QP }}
+        zh={true}
+        scheme="zh-qp"
+        lines={ti.lines}
+        demo={true}
+      />
+    </FakeIntlProvider>,
+  );
+  equal(board.style.filter, "none");
+  isNull(r.container.querySelector("[data-caret-shape]"));
+  equal(
+    (r.container.textContent ?? "").includes(
+      "Click or press Enter to activate...",
+    ),
+    false,
+  );
+
+  r.unmount();
+});

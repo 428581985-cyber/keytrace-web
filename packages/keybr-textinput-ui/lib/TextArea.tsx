@@ -137,6 +137,7 @@ export function TextArea({
           settings={settings}
           scheme={zhScheme}
           lines={lines}
+          cursor={!demo && focus}
           focus={demo || focus}
         />
       ) : (
