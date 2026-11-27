@@ -281,7 +281,7 @@ def open_context(
             init_items[k] = str(v)
     if keytrace_sync_ts is not None:
         init_items["keybr.keytrace.lastSyncedTs"] = str(keytrace_sync_ts)
-        init_items["keybr.keytrace.syncVersion"] = "2"
+        init_items["keybr.keytrace.syncVersion"] = "4"
 
     if init_items:
         # Run only once on initial document load (guard with sessionStorage flag) so later in-page localStorage edits persist across reloads.
@@ -780,6 +780,7 @@ def measure_practice_boxes(page: Page) -> dict[str, Any]:
             const taInput = document.querySelector('main [role="textbox"], main textarea');
             // TextArea.tsx wraps <TextEvents> (div > input) inside <div className={styles.root}>
             const textAreaEl = taInput && taInput.parentElement ? taInput.parentElement.parentElement : null;
+            const textContentEl = document.querySelector('main [data-scheme], main div[dir="ltr"]');
             const kbSvg = document.querySelector('main section svg[height="23rem"]');
             const keyboardEl = kbSvg ? kbSvg.parentElement : null;
             return {
@@ -787,6 +788,9 @@ def measure_practice_boxes(page: Page) -> dict[str, Any]:
                 controls: rect(controlsEl),
                 indicators: rect(indicatorsEl),
                 textArea: rect(textAreaEl),
+                textContent: rect(textContentEl),
+                textAreaScrollHeight: textAreaEl ? textAreaEl.scrollHeight : null,
+                textAreaClientHeight: textAreaEl ? textAreaEl.clientHeight : null,
                 keyboard: rect(keyboardEl),
                 zhBtn: rect(grpBtn0),
                 enBtn: rect(grpBtn1),
@@ -808,6 +812,40 @@ def max_box_delta(a: dict[str, Any], b: dict[str, Any], keys: tuple[str, ...] | 
         if ra is None or rb is None:
             return 9999.0
         for field in ("x", "y", "width", "height"):
+            d = abs(float(ra[field]) - float(rb[field]))
+            if d > max_d:
+                max_d = d
+    if "clientWidth" in a and "clientWidth" in b:
+        max_d = max(max_d, abs(float(a["clientWidth"]) - float(b["clientWidth"])))
+    return max_d
+
+
+def max_chrome_delta(
+    a: dict[str, Any],
+    b: dict[str, Any],
+    chrome_keys: tuple[str, ...] = ("controls", "indicators", "zhBtn", "enBtn"),
+    anchor_keys: tuple[str, ...] = ("main", "textArea"),
+) -> float:
+    max_d = 0.0
+    for k in chrome_keys:
+        ra = a.get(k)
+        rb = b.get(k)
+        if ra is None and rb is None:
+            continue
+        if ra is None or rb is None:
+            return 9999.0
+        for field in ("x", "y", "width", "height"):
+            d = abs(float(ra[field]) - float(rb[field]))
+            if d > max_d:
+                max_d = d
+    for k in anchor_keys:
+        ra = a.get(k)
+        rb = b.get(k)
+        if ra is None and rb is None:
+            continue
+        if ra is None or rb is None:
+            return 9999.0
+        for field in ("x", "y", "width"):
             d = abs(float(ra[field]) - float(rb[field]))
             if d > max_d:
                 max_d = d

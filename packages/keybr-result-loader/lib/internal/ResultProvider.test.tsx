@@ -54,7 +54,7 @@ test("ResultProvider skips KeyTrace sync when unavailable or standalone and sync
     return new Response(
       JSON.stringify({
         available: true,
-        syncVersion: 3,
+        syncVersion: 4,
         records: [resultToJson(makeKeyTraceResult(1700000020000))],
         latestTs: 1700000020000,
         daysScanned: 1,
@@ -102,9 +102,7 @@ test("ResultProvider skips KeyTrace sync when unavailable or standalone and sync
     const storage = createMemoryStorage();
 
     const r3 = render(
-      <PageDataContext.Provider
-        value={{ keytraceAvailable: true } as PageData}
-      >
+      <PageDataContext.Provider value={{ keytraceAvailable: true } as PageData}>
         <SettingsContext.Provider
           value={{ settings: standaloneSettings, updateSettings: () => {} }}
         >
@@ -122,9 +120,7 @@ test("ResultProvider skips KeyTrace sync when unavailable or standalone and sync
 
     // Switch to auto -> sync runs once and adds synced record.
     r3.rerender(
-      <PageDataContext.Provider
-        value={{ keytraceAvailable: true } as PageData}
-      >
+      <PageDataContext.Provider value={{ keytraceAvailable: true } as PageData}>
         <SettingsContext.Provider
           value={{ settings: autoSettings, updateSettings: () => {} }}
         >
@@ -143,9 +139,7 @@ test("ResultProvider skips KeyTrace sync when unavailable or standalone and sync
     // 4. keytraceAvailable: true without SettingsContext -> defaults to "auto" and syncs.
     window.localStorage.clear();
     const r4 = render(
-      <PageDataContext.Provider
-        value={{ keytraceAvailable: true } as PageData}
-      >
+      <PageDataContext.Provider value={{ keytraceAvailable: true } as PageData}>
         <ResultProvider storage={createMemoryStorage()} initialResults={[]}>
           <ResultCount />
         </ResultProvider>

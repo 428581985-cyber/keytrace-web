@@ -28,7 +28,7 @@ from harness import (
     install_toast_recorder,
     is_tour_open,
     make_result_json,
-    max_box_delta,
+    max_chrome_delta,
     measure_practice_boxes,
     measure_tour_spotlight_and_anchor,
     open_context,
@@ -139,7 +139,7 @@ def t4_02_bilingual_learner_font_and_layout_stability_across_views(
         b_norm_0 = measure_practice_boxes(page)
         ensure_practice_language(page, "en")
         b_norm_1 = measure_practice_boxes(page)
-        assert max_box_delta(b_norm_0, b_norm_1) <= 1.0
+        assert max_chrome_delta(b_norm_0, b_norm_1) <= 1.0
 
         # Switch to Compact view and verify stability + font
         ensure_practice_language(page, "zh")
@@ -149,7 +149,7 @@ def t4_02_bilingual_learner_font_and_layout_stability_across_views(
         b_cmp_0 = measure_practice_boxes(page)
         ensure_practice_language(page, "en")
         b_cmp_1 = measure_practice_boxes(page)
-        assert max_box_delta(b_cmp_0, b_cmp_1, ("main", "controls", "indicators", "textArea", "zhBtn", "enBtn")) <= 1.0
+        assert max_chrome_delta(b_cmp_0, b_cmp_1) <= 1.0
 
         ensure_practice_language(page, "zh")
         ff = read_zh_lesson_tokens(page)["words"][0]["units"][0]["fontFamily"] or ""
@@ -352,7 +352,7 @@ def t4_06_keytrace_sync_calibrated_profile_back_to_practice_drill(
             b0 = measure_practice_boxes(page)
             ensure_practice_language(page, "zh")
             b1 = measure_practice_boxes(page)
-            assert max_box_delta(b0, b1) <= 1.0
+            assert max_chrome_delta(b0, b1) <= 1.0
     finally:
         if created_file is not None and created_file.exists():
             created_file.unlink(missing_ok=True)

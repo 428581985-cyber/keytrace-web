@@ -82,7 +82,7 @@ test("missing events directory returns empty result gracefully", async () => {
   const data = await readKeyTraceSyncData({ eventsDir: missingDir });
   deepEqual(data, {
     available: false,
-    syncVersion: 3,
+    syncVersion: 4,
     records: [],
     latestTs: 0,
     daysScanned: 0,
@@ -187,7 +187,7 @@ test("reads .jsonl and .jsonl.gz into valid zh-sp and en-us Result JSON", async 
     const data = await readKeyTraceSyncData({ eventsDir: dir });
 
     equal(data.available, true);
-    equal(data.syncVersion, 3);
+    equal(data.syncVersion, 4);
     equal(data.daysScanned, 2);
     equal(data.records.length, 2);
     equal(data.latestTs, 1700086405000);
@@ -352,7 +352,7 @@ test("GET /_/sync/keytrace endpoint responds without auth and supports since que
       daysScanned: number;
     }>();
     equal(body1.available, true);
-    equal(body1.syncVersion, 3);
+    equal(body1.syncVersion, 4);
     equal(body1.records.length, 1);
     equal(body1.latestTs, 5000);
     equal(body1.daysScanned, 1);
@@ -618,7 +618,7 @@ test("migrate=1 endpoint returns commitKeys covering legacy commits", async () =
       commitKeys: string[];
     }>();
     equal(body.available, true);
-    equal(body.syncVersion, 3);
+    equal(body.syncVersion, 4);
     equal(body.records.length, 1);
     equal(body.records[0].m, "keytrace");
     isTrue(body.commitKeys.includes("en-us:10"));
@@ -642,16 +642,91 @@ test("GET /_/keytrace/summary returns human-readable dashboard stats, apps, weak
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const baseTs = Date.now() - 2000;
     const lines = [
-      { v: 1, ts: baseTs - 1000, mono: 10, ev: "meta", exe: "keytrace", text: "ime=shuangpin/xiaohe" },
+      {
+        v: 1,
+        ts: baseTs - 1000,
+        mono: 10,
+        ev: "meta",
+        exe: "keytrace",
+        text: "ime=shuangpin/xiaohe",
+      },
       // Type 'h' (72) -> 'v' (86) -> BS (8) -> 'c' (67) -> commit "好" in msedge.exe
-      { v: 1, ts: baseTs + 100, mono: 100, ev: "kd", sc: 35, vk: 72, mods: 0, exe: "msedge.exe", sid: "s1" },
-      { v: 1, ts: baseTs + 250, mono: 250, ev: "kd", sc: 47, vk: 86, mods: 0, exe: "msedge.exe", sid: "s1" },
-      { v: 1, ts: baseTs + 400, mono: 400, ev: "kd", sc: 14, vk: 8, mods: 0, exe: "msedge.exe", sid: "s1" },
-      { v: 1, ts: baseTs + 550, mono: 550, ev: "kd", sc: 46, vk: 67, mods: 0, exe: "msedge.exe", sid: "s1" },
-      { v: 1, ts: baseTs + 600, mono: 600, ev: "commit", exe: "msedge.exe", sid: "s1", text: "好", keys: 4 },
+      {
+        v: 1,
+        ts: baseTs + 100,
+        mono: 100,
+        ev: "kd",
+        sc: 35,
+        vk: 72,
+        mods: 0,
+        exe: "msedge.exe",
+        sid: "s1",
+      },
+      {
+        v: 1,
+        ts: baseTs + 250,
+        mono: 250,
+        ev: "kd",
+        sc: 47,
+        vk: 86,
+        mods: 0,
+        exe: "msedge.exe",
+        sid: "s1",
+      },
+      {
+        v: 1,
+        ts: baseTs + 400,
+        mono: 400,
+        ev: "kd",
+        sc: 14,
+        vk: 8,
+        mods: 0,
+        exe: "msedge.exe",
+        sid: "s1",
+      },
+      {
+        v: 1,
+        ts: baseTs + 550,
+        mono: 550,
+        ev: "kd",
+        sc: 46,
+        vk: 67,
+        mods: 0,
+        exe: "msedge.exe",
+        sid: "s1",
+      },
+      {
+        v: 1,
+        ts: baseTs + 600,
+        mono: 600,
+        ev: "commit",
+        exe: "msedge.exe",
+        sid: "s1",
+        text: "好",
+        keys: 4,
+      },
       // LockApp noise must be excluded
-      { v: 1, ts: baseTs + 700, mono: 700, ev: "kd", sc: 2, vk: 49, mods: 0, exe: "LockApp.exe", sid: "s1" },
-      { v: 1, ts: baseTs + 750, mono: 750, ev: "commit", exe: "LockApp.exe", sid: "s1", text: "1", keys: 1 },
+      {
+        v: 1,
+        ts: baseTs + 700,
+        mono: 700,
+        ev: "kd",
+        sc: 2,
+        vk: 49,
+        mods: 0,
+        exe: "LockApp.exe",
+        sid: "s1",
+      },
+      {
+        v: 1,
+        ts: baseTs + 750,
+        mono: 750,
+        ev: "commit",
+        exe: "LockApp.exe",
+        sid: "s1",
+        text: "1",
+        keys: 1,
+      },
     ];
     await writeFile(join(dir, `${today}.jsonl`), jsonl(lines), "utf8");
 
@@ -671,10 +746,20 @@ test("GET /_/keytrace/summary returns human-readable dashboard stats, apps, weak
         imeName: string | null;
         todayBytes: number;
       };
-      today: { totalKeys: number; zhKeys: number; corrections: number; commits: number };
+      today: {
+        totalKeys: number;
+        zhKeys: number;
+        corrections: number;
+        commits: number;
+      };
       apps: { exe: string; totalKeys: number }[];
       weakKeys: { "zh-sp": { letter: string; misses: number }[] };
-      recentCorrections: { wrongChar: string; rightChar: string; exe: string; contextText: string }[];
+      recentCorrections: {
+        wrongChar: string;
+        rightChar: string;
+        exe: string;
+        contextText: string;
+      }[];
       recentCommits: { text: string; exe: string }[];
     }>();
 
@@ -814,7 +899,9 @@ test("isolates same-day shuangpin (zh-sp), full-pinyin (zh-qp), and en-us commit
         kd(spVks[i], 100 + i * 120, 1700000001000 + i * 120, { sid: "s10" }),
       );
     }
-    lines.push(commit("双拼练习测试", spVks.length, 1500, 1700000005000, { sid: "s10" }));
+    lines.push(
+      commit("双拼练习测试", spVks.length, 1500, 1700000005000, { sid: "s10" }),
+    );
 
     // Afternoon: Full Pinyin
     lines.push({
@@ -832,7 +919,9 @@ test("isolates same-day shuangpin (zh-sp), full-pinyin (zh-qp), and en-us commit
         kd(qpVks[i], 200 + i * 130, 1700000011000 + i * 130, { sid: "s2" }),
       );
     }
-    lines.push(commit("全拼练习测试", qpVks.length, 1800, 1700000015000, { sid: "s2" }));
+    lines.push(
+      commit("全拼练习测试", qpVks.length, 1800, 1700000015000, { sid: "s2" }),
+    );
 
     // Evening: English
     const enVks = [84, 89, 80, 69, 83, 67, 82, 73, 80, 84];
@@ -906,11 +995,60 @@ test("readKeyTraceDashboard aggregates zh-sp + zh-qp into zhKeys and isolates we
         exe: "keytrace",
         text: "ime=shuangpin/xiaohe",
       },
-      { v: 1, ts: baseTs + 100, mono: 100, ev: "kd", sc: 35, vk: 72, mods: 0, exe: "code.exe", sid: "s1" },
-      { v: 1, ts: baseTs + 220, mono: 220, ev: "kd", sc: 47, vk: 86, mods: 0, exe: "code.exe", sid: "s1" },
-      { v: 1, ts: baseTs + 340, mono: 340, ev: "kd", sc: 14, vk: 8, mods: 0, exe: "code.exe", sid: "s1" },
-      { v: 1, ts: baseTs + 460, mono: 460, ev: "kd", sc: 46, vk: 67, mods: 0, exe: "code.exe", sid: "s1" },
-      { v: 1, ts: baseTs + 500, mono: 500, ev: "commit", exe: "code.exe", sid: "s1", text: "好", keys: 4 },
+      {
+        v: 1,
+        ts: baseTs + 100,
+        mono: 100,
+        ev: "kd",
+        sc: 35,
+        vk: 72,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s1",
+      },
+      {
+        v: 1,
+        ts: baseTs + 220,
+        mono: 220,
+        ev: "kd",
+        sc: 47,
+        vk: 86,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s1",
+      },
+      {
+        v: 1,
+        ts: baseTs + 340,
+        mono: 340,
+        ev: "kd",
+        sc: 14,
+        vk: 8,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s1",
+      },
+      {
+        v: 1,
+        ts: baseTs + 460,
+        mono: 460,
+        ev: "kd",
+        sc: 46,
+        vk: 67,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s1",
+      },
+      {
+        v: 1,
+        ts: baseTs + 500,
+        mono: 500,
+        ev: "commit",
+        exe: "code.exe",
+        sid: "s1",
+        text: "好",
+        keys: 4,
+      },
 
       // 2) Full Pinyin: l(76) -> x(88) -> BS(8) -> v(86) => commit "绿" (2 surviving keys)
       {
@@ -921,17 +1059,105 @@ test("readKeyTraceDashboard aggregates zh-sp + zh-qp into zhKeys and isolates we
         exe: "keytrace",
         text: "ime=full-pinyin",
       },
-      { v: 1, ts: baseTs + 1100, mono: 1100, ev: "kd", sc: 38, vk: 76, mods: 0, exe: "code.exe", sid: "s2" },
-      { v: 1, ts: baseTs + 1220, mono: 1220, ev: "kd", sc: 45, vk: 88, mods: 0, exe: "code.exe", sid: "s2" },
-      { v: 1, ts: baseTs + 1340, mono: 1340, ev: "kd", sc: 14, vk: 8, mods: 0, exe: "code.exe", sid: "s2" },
-      { v: 1, ts: baseTs + 1460, mono: 1460, ev: "kd", sc: 47, vk: 86, mods: 0, exe: "code.exe", sid: "s2" },
-      { v: 1, ts: baseTs + 1500, mono: 1500, ev: "commit", exe: "code.exe", sid: "s2", text: "绿", keys: 4 },
+      {
+        v: 1,
+        ts: baseTs + 1100,
+        mono: 1100,
+        ev: "kd",
+        sc: 38,
+        vk: 76,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s2",
+      },
+      {
+        v: 1,
+        ts: baseTs + 1220,
+        mono: 1220,
+        ev: "kd",
+        sc: 45,
+        vk: 88,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s2",
+      },
+      {
+        v: 1,
+        ts: baseTs + 1340,
+        mono: 1340,
+        ev: "kd",
+        sc: 14,
+        vk: 8,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s2",
+      },
+      {
+        v: 1,
+        ts: baseTs + 1460,
+        mono: 1460,
+        ev: "kd",
+        sc: 47,
+        vk: 86,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s2",
+      },
+      {
+        v: 1,
+        ts: baseTs + 1500,
+        mono: 1500,
+        ev: "commit",
+        exe: "code.exe",
+        sid: "s2",
+        text: "绿",
+        keys: 4,
+      },
 
       // 3) English: a(65) -> b(66) -> d(68) => commit "abd" (3 surviving keys)
-      { v: 1, ts: baseTs + 2100, mono: 2100, ev: "kd", sc: 30, vk: 65, mods: 0, exe: "code.exe", sid: "s3" },
-      { v: 1, ts: baseTs + 2220, mono: 2220, ev: "kd", sc: 48, vk: 66, mods: 0, exe: "code.exe", sid: "s3" },
-      { v: 1, ts: baseTs + 2340, mono: 2340, ev: "kd", sc: 32, vk: 68, mods: 0, exe: "code.exe", sid: "s3" },
-      { v: 1, ts: baseTs + 2400, mono: 2400, ev: "commit", exe: "code.exe", sid: "s3", text: "abd", keys: 3 },
+      {
+        v: 1,
+        ts: baseTs + 2100,
+        mono: 2100,
+        ev: "kd",
+        sc: 30,
+        vk: 65,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s3",
+      },
+      {
+        v: 1,
+        ts: baseTs + 2220,
+        mono: 2220,
+        ev: "kd",
+        sc: 48,
+        vk: 66,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s3",
+      },
+      {
+        v: 1,
+        ts: baseTs + 2340,
+        mono: 2340,
+        ev: "kd",
+        sc: 32,
+        vk: 68,
+        mods: 0,
+        exe: "code.exe",
+        sid: "s3",
+      },
+      {
+        v: 1,
+        ts: baseTs + 2400,
+        mono: 2400,
+        ev: "commit",
+        exe: "code.exe",
+        sid: "s3",
+        text: "abd",
+        keys: 3,
+      },
     ];
 
     await writeFile(join(dir, `${today}.jsonl`), jsonl(lines), "utf8");
@@ -958,11 +1184,20 @@ test("readKeyTraceDashboard aggregates zh-sp + zh-qp into zhKeys and isolates we
 
     // weakKeys are isolated across all three layouts.
     equal(dash.weakKeys["zh-sp"].find((k) => k.letter === "C")?.misses, 1);
-    equal(dash.weakKeys["zh-sp"].find((k) => k.letter === "V"), undefined);
+    equal(
+      dash.weakKeys["zh-sp"].find((k) => k.letter === "V"),
+      undefined,
+    );
     equal(dash.weakKeys["zh-qp"].find((k) => k.letter === "V")?.misses, 1);
-    equal(dash.weakKeys["zh-qp"].find((k) => k.letter === "C"), undefined);
+    equal(
+      dash.weakKeys["zh-qp"].find((k) => k.letter === "C"),
+      undefined,
+    );
     equal(dash.weakKeys["en-us"].length, 3);
-    equal(dash.weakKeys["en-us"].find((k) => k.letter === "V"), undefined);
+    equal(
+      dash.weakKeys["en-us"].find((k) => k.letter === "V"),
+      undefined,
+    );
 
     const qpCorr = dash.recentCorrections.find((c) => c.layoutId === "zh-qp");
     const spCorr = dash.recentCorrections.find((c) => c.layoutId === "zh-sp");
@@ -973,9 +1208,17 @@ test("readKeyTraceDashboard aggregates zh-sp + zh-qp into zhKeys and isolates we
     equal(spCorr!.wrongChar, "v");
     equal(spCorr!.rightChar, "c");
 
-    isTrue(dash.recentCommits.some((c) => c.layoutId === "zh-qp" && c.text === "绿"));
-    isTrue(dash.recentCommits.some((c) => c.layoutId === "zh-sp" && c.text === "好"));
-    isTrue(dash.recentCommits.some((c) => c.layoutId === "en-us" && c.text === "abd"));
+    isTrue(
+      dash.recentCommits.some((c) => c.layoutId === "zh-qp" && c.text === "绿"),
+    );
+    isTrue(
+      dash.recentCommits.some((c) => c.layoutId === "zh-sp" && c.text === "好"),
+    );
+    isTrue(
+      dash.recentCommits.some(
+        (c) => c.layoutId === "en-us" && c.text === "abd",
+      ),
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -985,7 +1228,14 @@ test("captures VK 186 (;) as 0x003b only for Microsoft/Sogou Shuangpin and ignor
   const dir = await mkdtemp(join(tmpdir(), "keytrace-semi-"));
   try {
     const lines: Record<string, unknown>[] = [
-      { v: 1, ts: 1700000000100, mono: 10, ev: "meta", exe: "keytrace", text: "ime=shuangpin/microsoft" },
+      {
+        v: 1,
+        ts: 1700000000100,
+        mono: 10,
+        ev: "meta",
+        exe: "keytrace",
+        text: "ime=shuangpin/microsoft",
+      },
       kd(74, 100, 1700000001000, { sid: "ms" }), // j
       kd(78, 250, 1700000001150, { sid: "ms" }), // n
       kd(88, 400, 1700000001300, { sid: "ms" }), // x
@@ -998,7 +1248,14 @@ test("captures VK 186 (;) as 0x003b only for Microsoft/Sogou Shuangpin and ignor
       kd(84, 1450, 1700000002350, { sid: "ms" }), // t
       commit("进行每天一同", 10, 1500, 1700000002400, { sid: "ms" }),
 
-      { v: 1, ts: 1700000010100, mono: 10, ev: "meta", exe: "keytrace", text: "ime=shuangpin/xiaohe" },
+      {
+        v: 1,
+        ts: 1700000010100,
+        mono: 10,
+        ev: "meta",
+        exe: "keytrace",
+        text: "ime=shuangpin/xiaohe",
+      },
       kd(74, 2000, 1700000011000, { sid: "xh" }), // j
       kd(66, 2150, 1700000011150, { sid: "xh" }), // b
       kd(88, 2300, 1700000011300, { sid: "xh" }), // x
@@ -1024,8 +1281,14 @@ test("captures VK 186 (;) as 0x003b only for Microsoft/Sogou Shuangpin and ignor
     equal(xhRec!.h[0x003b], undefined);
 
     const dash = await readKeyTraceDashboard({ eventsDir: dir, days: 7 });
-    equal(dash.weakKeys["zh-sp-ms"].find((k) => k.codePoint === 0x003b)?.letter, ";");
-    equal(dash.weakKeys["zh-sp"].find((k) => k.codePoint === 0x003b), undefined);
+    equal(
+      dash.weakKeys["zh-sp-ms"].find((k) => k.codePoint === 0x003b)?.letter,
+      ";",
+    );
+    equal(
+      dash.weakKeys["zh-sp"].find((k) => k.codePoint === 0x003b),
+      undefined,
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -1050,7 +1313,10 @@ test("carries lastMono across <=3000ms same-session commits for activeMs and k1 
       kd(72, 6250, 7250, { sid: "s1", sessionStartTs: 1000 }),
       kd(73, 6400, 7400, { sid: "s1", sessionStartTs: 1000 }),
       kd(74, 6550, 7550, { sid: "s1", sessionStartTs: 1000 }),
-      commit("你我他她它啊", 6, 6560, 7600, { sid: "s1", sessionStartTs: 1000 }),
+      commit("你我他她它啊", 6, 6560, 7600, {
+        sid: "s1",
+        sessionStartTs: 1000,
+      }),
     ];
     await writeFile(join(dir, "2026-11-24.jsonl"), jsonl(lines), "utf8");
 
@@ -1253,7 +1519,7 @@ test("KEYTRACE_ENABLED=false disables FS scans and returns available: false from
     });
     deepEqual(syncDirect, {
       available: false,
-      syncVersion: 3,
+      syncVersion: 4,
       records: [],
       latestTs: 0,
       daysScanned: 0,
@@ -1284,7 +1550,7 @@ test("KEYTRACE_ENABLED=false disables FS scans and returns available: false from
       commitKeys: string[];
     }>();
     equal(syncBody.available, false);
-    equal(syncBody.syncVersion, 3);
+    equal(syncBody.syncVersion, 4);
     equal(syncBody.records.length, 0);
     equal(syncBody.daysScanned, 0);
     deepEqual(syncBody.commitKeys, []);
@@ -1340,12 +1606,64 @@ test("migrate=1 includes layout-specific commitKeys for zh-qp v2 -> v3 migration
       includeCommitKeys: true,
     });
     equal(data.available, true);
-    equal(data.syncVersion, 3);
+    equal(data.syncVersion, 4);
     equal(data.records.length, 1);
     equal(data.records[0].l, "zh-qp");
     equal(data.records[0].m, "keytrace");
     isTrue(data.commitKeys?.includes("zh-qp:1700000010") ?? false);
     isTrue(data.commitKeys?.includes("zh-sp:1700000010") ?? false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("aligns bucket.activeMs with surviving keystrokes and excludes non-eligible or abandoned keys", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-activems-align-"));
+  try {
+    const lines = [
+      // Abandoned typo burst (5x BS exceeds MAX_TYPO_BS_RUN=3 -> 0 surviving keys):
+      // slow 2000ms pauses between abandoned keys must NOT inflate activeMs.
+      kd(88, 1000, 1000, { sid: "s1" }), // x
+      kd(89, 3000, 3000, { sid: "s1" }), // y (+2000)
+      kd(8, 5000, 5000, { sid: "s1" }), // BS
+      kd(8, 7000, 7000, { sid: "s1" }), // BS
+      kd(32, 7200, 7200, { sid: "s1" }), // Space
+
+      // Word 1: "hello" at 150ms/key (4 intra-word IKIs = 600ms) + slow candidate/punctuation Space (2500ms)
+      kd(72, 7500, 7500, { sid: "s1" }), // h (300ms after Space @7200)
+      kd(69, 7650, 7650, { sid: "s1" }), // e (+150)
+      kd(76, 7800, 7800, { sid: "s1" }), // l (+150)
+      kd(76, 7950, 7950, { sid: "s1" }), // l (+150)
+      kd(79, 8100, 8100, { sid: "s1" }), // o (+150)
+      kd(32, 10600, 10600, { sid: "s1" }), // Space (+2500ms -> non-eligible, excluded from activeMs)
+
+      // Word 2: "world" at 150ms/key (200ms after Space -> 'w' gets 200ms IKI, 4*150=600ms)
+      kd(87, 10800, 10800, { sid: "s1" }), // w (+200ms after Space)
+      kd(79, 10950, 10950, { sid: "s1" }), // o (+150)
+      kd(82, 11100, 11100, { sid: "s1" }), // r (+150)
+      kd(76, 11250, 11250, { sid: "s1" }), // l (+150)
+      kd(68, 11400, 11400, { sid: "s1" }), // d (+150)
+      kd(190, 13400, 13400, { sid: "s1" }), // '.' (+2000ms -> non-eligible, excluded)
+
+      commit("hello world.", 17, 13450, 14000, { sid: "s1" }),
+    ];
+
+    await writeFile(join(dir, "2026-11-27.jsonl"), jsonl(lines), "utf8");
+
+    const sync = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(sync.syncVersion, 4);
+    equal(sync.records.length, 1);
+    const rec = sync.records[0];
+    equal(rec.n, 10);
+    // Expected activeMs: h(300) + ello(4*150) + w(200) + orld(4*150) = 1700ms
+    // Previously this included abandoned xy(4000), BS(4000), Space(200+2500), '.'(2000) = 14400ms!
+    equal(rec.t, 1700);
+
+    const dash = await readKeyTraceDashboard({ eventsDir: dir, days: 7 });
+    equal(dash.overall.totalKeys, 10);
+    equal(dash.overall.activeMs, 1700);
+    // 10 keys / 5 / (1700 / 60000) = 70.588 -> 70.6 WPM
+    equal(dash.overall.avgWpm, 70.6);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

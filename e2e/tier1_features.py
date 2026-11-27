@@ -34,7 +34,7 @@ from harness import (
     install_toast_recorder,
     is_tour_open,
     make_result_json,
-    max_box_delta,
+    max_chrome_delta,
     measure_practice_boxes,
     measure_tour_spotlight_and_anchor,
     open_context,
@@ -302,8 +302,18 @@ def t1_f2_01_zh_to_en_toggle_layout_shift_le_1px(
         ensure_practice_language(page, "en")
         page.wait_for_timeout(150)
         after = measure_practice_boxes(page)
-        delta = max_box_delta(before, after)
-        assert delta <= 1.0, f"ZH->EN layout shift {delta:.2f}px > 1.0px (before={before}, after={after})"
+        delta = max_chrome_delta(before, after)
+        assert delta <= 1.0, f"ZH->EN chrome/anchor shift {delta:.2f}px > 1.0px (before={before}, after={after})"
+        # Plan B compact-fit: EN textArea hugs its actual text (no giant empty filler box below)
+        assert after["textContent"] is not None
+        assert 40 < after["textArea"]["height"] < 180, (
+            f"Expected compact EN textArea height in (40, 180), got {after}"
+        )
+        assert after["textArea"]["height"] - after["textContent"]["height"] <= 48, (
+            f"Unexpected vertical slack inside EN textArea: {after}"
+        )
+        kb_gap = after["keyboard"]["y"] - (after["textArea"]["y"] + after["textArea"]["height"])
+        assert 0 < kb_gap < 100, f"Unexpected gap between EN textArea and keyboard: {kb_gap:.1f}px ({after})"
 
 
 def t1_f2_02_en_to_zh_toggle_layout_shift_le_1px(
@@ -320,8 +330,26 @@ def t1_f2_02_en_to_zh_toggle_layout_shift_le_1px(
         ensure_practice_language(page, "zh")
         page.wait_for_timeout(150)
         after = measure_practice_boxes(page)
-        delta = max_box_delta(before, after)
-        assert delta <= 1.0, f"EN->ZH layout shift {delta:.2f}px > 1.0px (before={before}, after={after})"
+        delta = max_chrome_delta(before, after)
+        assert delta <= 1.0, f"EN->ZH chrome/anchor shift {delta:.2f}px > 1.0px (before={before}, after={after})"
+        # Verify Plan B compact-fit in both EN (before) and ZH (after)
+        assert before["textContent"] is not None
+        assert 40 < before["textArea"]["height"] < 180, (
+            f"Expected compact EN textArea height in (40, 180), got {before}"
+        )
+        assert before["textArea"]["height"] - before["textContent"]["height"] <= 48, (
+            f"Unexpected vertical slack inside EN textArea: {before}"
+        )
+        kb_gap = before["keyboard"]["y"] - (before["textArea"]["y"] + before["textArea"]["height"])
+        assert 0 < kb_gap < 100, f"Unexpected gap between EN textArea and keyboard: {kb_gap:.1f}px ({before})"
+        assert after["textContent"] is not None
+        assert after["textArea"]["height"] >= 40
+        assert after["textArea"]["height"] - after["textContent"]["height"] <= 48, (
+            f"Unexpected vertical slack inside ZH textArea: {after}"
+        )
+        assert after["textAreaScrollHeight"] <= after["textAreaClientHeight"] + 2, (
+            f"Unexpected vertical overflow inside ZH textArea: {after}"
+        )
 
 
 def t1_f2_03_zh_en_toggle_no_zero_height_loading_collapse(
@@ -366,8 +394,8 @@ def t1_f2_03_zh_en_toggle_no_zero_height_loading_collapse(
         )
         assert stats["minSectionH"] > 150, f"Detected section collapse during toggle: {stats}"
         assert not stats["sawZeroTextArea"], f"TextArea unmounted/collapsed during toggle: {stats}"
-        delta = max_box_delta(before, after)
-        assert delta <= 1.0, f"Roundtrip shift {delta:.2f}px > 1.0px"
+        delta = max_chrome_delta(before, after)
+        assert delta <= 1.0, f"Roundtrip chrome/anchor shift {delta:.2f}px > 1.0px"
 
 
 def t1_f2_04_zh_to_en_to_zh_roundtrip_controls_and_buttons_stable(
@@ -385,8 +413,8 @@ def t1_f2_04_zh_to_en_to_zh_roundtrip_controls_and_buttons_stable(
         b1 = measure_practice_boxes(page)
         ensure_practice_language(page, "zh")
         b2 = measure_practice_boxes(page)
-        assert max_box_delta(b0, b1, ("controls", "zhBtn", "enBtn", "indicators", "keyboard")) <= 1.0
-        assert max_box_delta(b0, b2) <= 1.0
+        assert max_chrome_delta(b0, b1) <= 1.0
+        assert max_chrome_delta(b0, b2) <= 1.0
 
 
 def t1_f2_05_en_ui_zh_en_toggle_layout_shift_le_1px(
@@ -404,8 +432,8 @@ def t1_f2_05_en_ui_zh_en_toggle_layout_shift_le_1px(
         ensure_practice_language(page, "zh")
         page.wait_for_timeout(150)
         after = measure_practice_boxes(page)
-        delta = max_box_delta(before, after)
-        assert delta <= 1.0, f"EN-UI EN->ZH layout shift {delta:.2f}px > 1.0px"
+        delta = max_chrome_delta(before, after)
+        assert delta <= 1.0, f"EN-UI EN->ZH chrome/anchor shift {delta:.2f}px > 1.0px"
 
 
 # ===========================================================================
@@ -527,7 +555,7 @@ def t1_f3_04_scroll_position_reset_to_top_and_restored_after_tour(
     with open_context(
         browser,
         base_url,
-        viewport={"width": 1280, "height": 620},
+        viewport={"width": 1280, "height": 450},
         settings={"keyboard.language": "en", "keyboard.layout": "en-us"},
     ) as (_, page, _, _):
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
@@ -535,7 +563,7 @@ def t1_f3_04_scroll_position_reset_to_top_and_restored_after_tour(
         page.evaluate("() => window.scrollTo(0, 240)")
         page.wait_for_timeout(80)
         pre_scroll = page.evaluate("() => window.scrollY")
-        assert pre_scroll > 40, f"Expected scrollable viewport on 1280x620, got scrollY={pre_scroll}"
+        assert pre_scroll > 40, f"Expected scrollable viewport on 1280x450, got scrollY={pre_scroll}"
 
         # Trigger click without Playwright auto-scrolling viewport away from pre_scroll
         get_help_button(page).evaluate("el => el.click()")
@@ -1372,6 +1400,19 @@ def t1_f10_02_keytrace_mode_standalone_isolates_data_without_deleting(
             ks_auto = read_practice_key_set(page)
             assert len(ks_auto["unlocked"]) == 26 and len(ks_auto["locked"]) == 0 and len(ks_auto["forced"]) == 0
             expect(page.locator('nav a[href="/keytrace"]')).to_be_visible(timeout=10000)
+            metrics_text = page.evaluate(
+                """() => {
+                    for (const el of document.querySelectorAll('main section > div')) {
+                        const t = el.innerText || '';
+                        if (t.includes('衡量标准') || t.includes('Metrics')) return t;
+                    }
+                    return '';
+                }"""
+            )
+            assert "衡量标准" in metrics_text or "Metrics" in metrics_text
+            assert "60.0wpm" not in metrics_text and "0.0wpm" in metrics_text, (
+                f"TextType.KEYTRACE records must not overwrite top SpeedGauge: {metrics_text}"
+            )
 
             # Toggle keytraceMode "auto" -> "standalone"
             open_settings(page)

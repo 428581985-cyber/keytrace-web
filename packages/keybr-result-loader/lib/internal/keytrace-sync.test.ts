@@ -25,24 +25,29 @@ function makeValidResult(
   })!;
 }
 
-test("migrates v1/v2 KeyTrace records to v3 TextType.KEYTRACE while preserving website practice sessions", async () => {
+test("migrates v1/v2/v3 KeyTrace records to v4 TextType.KEYTRACE while preserving website practice sessions", async () => {
   window.localStorage.clear();
-  window.localStorage.setItem("keybr.keytrace.syncVersion", "2");
+  window.localStorage.setItem("keybr.keytrace.syncVersion", "3");
   window.localStorage.setItem("keybr.keytrace.lastSyncedTs", "1700000010000");
   window.localStorage.setItem(
     "keybr.keytrace.syncedKeys",
     JSON.stringify(["zh-sp:1700000010"]),
   );
 
-  const staleKeyTraceZh = makeValidResult("zh-sp", 1700000010000, 30);
-  const leakedPinyinEn = makeValidResult("en-us", 1700000005000, 15);
-  const nativeSiteResult = new ResultFaker().nextResult();
-  const v3KeyTraceZh = makeValidResult(
+  const staleKeyTraceZh = makeValidResult(
     "zh-sp",
-    1700000020000,
-    22,
+    1700000010000,
+    30,
     "keytrace",
   );
+  const leakedPinyinEn = makeValidResult(
+    "en-us",
+    1700000005000,
+    15,
+    "keytrace",
+  );
+  const nativeSiteResult = new ResultFaker().nextResult();
+  const v4KeyTraceZh = makeValidResult("zh-sp", 1700000020000, 22, "keytrace");
 
   const requestedUrls: string[] = [];
   const origFetch = globalThis.fetch;
@@ -51,8 +56,8 @@ test("migrates v1/v2 KeyTrace records to v3 TextType.KEYTRACE while preserving w
     return new Response(
       JSON.stringify({
         available: true,
-        syncVersion: 3,
-        records: [resultToJson(v3KeyTraceZh)],
+        syncVersion: 4,
+        records: [resultToJson(v4KeyTraceZh)],
         latestTs: 1700000020000,
         daysScanned: 2,
         commitKeys: ["zh-sp:1700000010", "en-us:1700000005"],
@@ -91,7 +96,7 @@ test("migrates v1/v2 KeyTrace records to v3 TextType.KEYTRACE while preserving w
       replaced!.some((r) => r.timeStamp === 1700000010000),
       false,
     );
-    equal(window.localStorage.getItem("keybr.keytrace.syncVersion"), "3");
+    equal(window.localStorage.getItem("keybr.keytrace.syncVersion"), "4");
     equal(
       window.localStorage.getItem("keybr.keytrace.lastSyncedTs"),
       "1700000020000",
@@ -106,17 +111,17 @@ test("migrates v1/v2 KeyTrace records to v3 TextType.KEYTRACE while preserving w
   }
 });
 
-test("uses incremental ?since sync when already on syncVersion 3", async () => {
+test("uses incremental ?since sync when already on syncVersion 4", async () => {
   window.localStorage.clear();
-  window.localStorage.setItem("keybr.keytrace.syncVersion", "3");
+  window.localStorage.setItem("keybr.keytrace.syncVersion", "4");
   window.localStorage.setItem("keybr.keytrace.lastSyncedTs", "1700000020000");
   window.localStorage.setItem(
     "keybr.keytrace.syncedKeys",
     JSON.stringify(["zh-sp:1700000020"]),
   );
 
-  const existingV3 = makeValidResult("zh-sp", 1700000020000, 22, "keytrace");
-  const newerV3 = makeValidResult("zh-sp", 1700000030000, 18, "keytrace");
+  const existingV4 = makeValidResult("zh-sp", 1700000020000, 22, "keytrace");
+  const newerV4 = makeValidResult("zh-sp", 1700000030000, 18, "keytrace");
 
   const requestedUrls: string[] = [];
   const origFetch = globalThis.fetch;
@@ -125,8 +130,8 @@ test("uses incremental ?since sync when already on syncVersion 3", async () => {
     return new Response(
       JSON.stringify({
         available: true,
-        syncVersion: 3,
-        records: [resultToJson(newerV3)],
+        syncVersion: 4,
+        records: [resultToJson(newerV4)],
         latestTs: 1700000030000,
         daysScanned: 2,
       }),
@@ -139,7 +144,7 @@ test("uses incremental ?since sync when already on syncVersion 3", async () => {
     let replaced: readonly Result[] | null = null;
 
     const summary = await syncKeyTraceResults(
-      [existingV3],
+      [existingV4],
       (items) => {
         appended = items;
       },
@@ -170,7 +175,7 @@ test("uses incremental ?since sync when already on syncVersion 3", async () => {
 
 test("syncs zh-qp records and isolates dedup keys from zh-sp at the same timestamp", async () => {
   window.localStorage.clear();
-  window.localStorage.setItem("keybr.keytrace.syncVersion", "3");
+  window.localStorage.setItem("keybr.keytrace.syncVersion", "4");
   window.localStorage.setItem("keybr.keytrace.lastSyncedTs", "1700000020000");
   window.localStorage.setItem(
     "keybr.keytrace.syncedKeys",
@@ -196,7 +201,7 @@ test("syncs zh-qp records and isolates dedup keys from zh-sp at the same timesta
     new Response(
       JSON.stringify({
         available: true,
-        syncVersion: 3,
+        syncVersion: 4,
         records: [
           resultToJson(existingSp),
           resultToJson(incomingQpSameTs),
@@ -275,11 +280,8 @@ test("migration preserves native zh-qp practice results alongside synced zh-sp a
     new Response(
       JSON.stringify({
         available: true,
-        syncVersion: 3,
-        records: [
-          resultToJson(freshKeyTraceSp),
-          resultToJson(freshKeyTraceQp),
-        ],
+        syncVersion: 4,
+        records: [resultToJson(freshKeyTraceSp), resultToJson(freshKeyTraceQp)],
         latestTs: 1700000025000,
         daysScanned: 2,
         commitKeys: ["zh-sp:1700000010", "zh-qp:1700000012"],
@@ -341,7 +343,7 @@ test("does not write localStorage sync markers when KeyTrace is unavailable", as
     new Response(
       JSON.stringify({
         available: false,
-        syncVersion: 3,
+        syncVersion: 4,
         records: [],
         latestTs: 0,
         daysScanned: 0,

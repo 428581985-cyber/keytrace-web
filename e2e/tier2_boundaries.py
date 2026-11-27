@@ -25,7 +25,7 @@ from harness import (
     get_zoomer_positions,
     is_tour_open,
     make_result_json,
-    max_box_delta,
+    max_chrome_delta,
     measure_practice_boxes,
     measure_tour_spotlight_and_anchor,
     open_context,
@@ -199,7 +199,7 @@ def t2_f2_01_compact_view_zh_en_toggle_layout_shift_le_1px(
         ensure_practice_language(page, "en")
         page.wait_for_timeout(120)
         after = measure_practice_boxes(page)
-        delta = max_box_delta(before, after, ("main", "controls", "indicators", "textArea", "zhBtn", "enBtn"))
+        delta = max_chrome_delta(before, after)
         assert delta <= 1.0, f"Compact view ZH->EN shift {delta:.2f}px > 1.0px"
 
 
@@ -220,7 +220,7 @@ def t2_f2_02_bare_view_zh_en_toggle_layout_shift_le_1px(
         ensure_practice_language(page, "en")
         page.wait_for_timeout(120)
         after = measure_practice_boxes(page)
-        delta = max_box_delta(before, after, ("main", "controls", "textArea", "zhBtn", "enBtn"))
+        delta = max_chrome_delta(before, after, ("controls", "zhBtn", "enBtn"), ("main", "textArea"))
         assert delta <= 1.0, f"Bare view ZH->EN shift {delta:.2f}px > 1.0px"
 
 
@@ -239,7 +239,7 @@ def t2_f2_03_narrow_960x720_viewport_zh_en_toggle_shift_le_1px(
         ensure_practice_language(page, "en")
         page.wait_for_timeout(120)
         after = measure_practice_boxes(page)
-        delta = max_box_delta(before, after)
+        delta = max_chrome_delta(before, after)
         assert delta <= 1.0, f"960x720 ZH->EN shift {delta:.2f}px > 1.0px"
 
 
@@ -254,10 +254,13 @@ def t2_f2_04_quanpin_tall_inflow_zh_en_toggle_shift_le_1px(
         page.goto(f"{base_url}/", wait_until="domcontentloaded")
         ensure_practice_language(page, "zh")
         before = measure_practice_boxes(page)
+        assert before["textAreaScrollHeight"] <= before["textAreaClientHeight"] + 2, (
+            f"Unexpected vertical overflow inside Quanpin textArea: {before}"
+        )
         ensure_practice_language(page, "en")
         page.wait_for_timeout(150)
         after = measure_practice_boxes(page)
-        delta = max_box_delta(before, after)
+        delta = max_chrome_delta(before, after)
         assert delta <= 1.0, f"Quanpin->EN shift {delta:.2f}px > 1.0px"
 
 
@@ -281,7 +284,7 @@ def t2_f2_05_rapid_double_click_lang_toggle_leaves_stable_state(
         page.locator("main [data-scheme]").wait_for(state="visible", timeout=10000)
         page.wait_for_timeout(150)
         after = measure_practice_boxes(page)
-        assert max_box_delta(before, after) <= 1.0
+        assert max_chrome_delta(before, after) <= 1.0
 
 
 # ===========================================================================

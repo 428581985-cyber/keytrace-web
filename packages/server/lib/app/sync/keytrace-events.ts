@@ -16,7 +16,7 @@ const ALNUM_RE = /[a-zA-Z0-9]/;
 const INTERNAL_APOS_TOKEN_RE = /[a-z]+(?:'[a-z]+)+/gi;
 const ENGLISH_CONTRACTION_SUFFIX_RE = /^(?:s|t|m|d|re|ve|ll)$/i;
 
-const SYNC_VERSION = 3;
+const SYNC_VERSION = 4;
 const KD_BUFFER_LIMIT = 60;
 const MAX_STEP_GAP_MS = 3000;
 const MAX_CORRECTION_MS = 6000;
@@ -97,12 +97,7 @@ export type KeyTraceWeakKey = {
 };
 
 export type KeyTraceLayoutId =
-  | "zh-sp"
-  | "zh-sp-zrm"
-  | "zh-sp-ms"
-  | "zh-sp-sg"
-  | "zh-qp"
-  | "en-us";
+  "zh-sp" | "zh-sp-zrm" | "zh-sp-ms" | "zh-sp-sg" | "zh-qp" | "en-us";
 
 export type ZhKeyTraceLayoutId = Exclude<KeyTraceLayoutId, "en-us">;
 
@@ -759,10 +754,7 @@ function toEligibleCodePoint(
   if (vk >= 65 && vk <= 90) {
     return 97 + (vk - 65);
   }
-  if (
-    (layoutId === "zh-sp-ms" || layoutId === "zh-sp-sg") &&
-    vk === 186
-  ) {
+  if ((layoutId === "zh-sp-ms" || layoutId === "zh-sp-sg") && vk === 186) {
     return 0x003b;
   }
   if (layoutId === "en-us" && vk >= 48 && vk <= 57) {
@@ -829,6 +821,7 @@ function accumulateCommit(
       }
       if (entry.iki != null) {
         stat.ikiSamples.push(entry.iki);
+        bucket.activeMs += entry.iki;
       }
     }
     stack = [];
@@ -862,10 +855,6 @@ function accumulateCommit(
         stack.push({ cp, mono: kd.mono, iki: null, isCorrected: false });
       }
       continue;
-    }
-
-    if (stepGap != null) {
-      bucket.activeMs += stepGap;
     }
 
     if (kd.vk === 8) {
@@ -1099,7 +1088,8 @@ function buildWeakKeys(
       continue;
     }
     const medianIkiMs = computeMedianIki(stat.ikiSamples);
-    const wpm = medianIkiMs > 0 ? Math.round((12000 / medianIkiMs) * 10) / 10 : 0;
+    const wpm =
+      medianIkiMs > 0 ? Math.round((12000 / medianIkiMs) * 10) / 10 : 0;
     out.push({
       letter: String.fromCodePoint(cp).toUpperCase(),
       codePoint: cp,
@@ -1307,12 +1297,10 @@ export async function readKeyTraceDashboard(options?: {
         continue;
       }
 
-      const prevBucketLen =
-        (buckets.get(`${date}:${layoutId}`)?.length ?? 0);
-      const prevBucketErr =
-        (buckets.get(`${date}:${layoutId}`)?.errors ?? 0);
+      const prevBucketLen = buckets.get(`${date}:${layoutId}`)?.length ?? 0;
+      const prevBucketErr = buckets.get(`${date}:${layoutId}`)?.errors ?? 0;
       const prevBucketActive =
-        (buckets.get(`${date}:${layoutId}`)?.activeMs ?? 0);
+        buckets.get(`${date}:${layoutId}`)?.activeMs ?? 0;
 
       const displayText = sanitizeDisplayText(cleanText);
       let dayCorr = 0;
@@ -1404,25 +1392,23 @@ export async function readKeyTraceDashboard(options?: {
   );
 
   const dayKeys = [...new Set(allBuckets.map((b) => b.day))].sort();
-  const daily: KeyTraceDailyEntry[] = dayKeys
-    .slice(-daysLimit)
-    .map((day) => {
-      const sum = mergeBucketsToSummary(
-        allBuckets.filter((b) => b.day === day),
-        commitsByDay.get(day) ?? 0,
-        correctionsByDay.get(day) ?? 0,
-      );
-      return {
-        day,
-        zhKeys: sum.zhKeys,
-        enKeys: sum.enKeys,
-        totalKeys: sum.totalKeys,
-        errors: sum.errors,
-        accuracy: sum.accuracy,
-        avgWpm: sum.avgWpm,
-        activeMs: sum.activeMs,
-      };
-    });
+  const daily: KeyTraceDailyEntry[] = dayKeys.slice(-daysLimit).map((day) => {
+    const sum = mergeBucketsToSummary(
+      allBuckets.filter((b) => b.day === day),
+      commitsByDay.get(day) ?? 0,
+      correctionsByDay.get(day) ?? 0,
+    );
+    return {
+      day,
+      zhKeys: sum.zhKeys,
+      enKeys: sum.enKeys,
+      totalKeys: sum.totalKeys,
+      errors: sum.errors,
+      accuracy: sum.accuracy,
+      avgWpm: sum.avgWpm,
+      activeMs: sum.activeMs,
+    };
+  });
 
   const apps: KeyTraceAppEntry[] = [...appMap.values()]
     .sort((a, b) => b.totalKeys - a.totalKeys)
@@ -1441,7 +1427,9 @@ export async function readKeyTraceDashboard(options?: {
 
   const now = Date.now();
   const active =
-    todayBytes > 0 && lastEventTs != null && now - lastEventTs <= 15 * 60 * 1000;
+    todayBytes > 0 &&
+    lastEventTs != null &&
+    now - lastEventTs <= 15 * 60 * 1000;
 
   const imeName =
     imeTimeline.length > 0 ? imeTimeline[imeTimeline.length - 1].ime : null;

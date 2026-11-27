@@ -26,7 +26,7 @@ import {
   SettingsContext,
 } from "@keybr/settings";
 import { Histogram } from "@keybr/textinput";
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { type ReactNode, useState } from "react";
 import { equal, includes, isNotNull, isNull } from "rich-assert";
 import { PracticeScreen } from "./PracticeScreen.tsx";
@@ -313,10 +313,32 @@ test("live-sync append and replaceResults update PracticeScreen immediately with
       r.container.querySelector(`#${names.indicators}`)!.textContent ?? "";
     equal(indicators().includes("60.0wpm"), false);
 
-    // Simulate async KeyTrace sync appending a 60 WPM (300 CPM) result.
-    const synced60 = faker.nextResult({
+    // Simulate async KeyTrace sync appending a low-speed result:
+    // SummaryStats (top speed gauge) must ignore KEYTRACE records.
+    const syncedKeytrace = faker.nextResult({
       layout: Layout.EN_US,
       textType: TextType.KEYTRACE,
+      length: 100,
+      time: 70_588, // ~17.0 WPM
+      errors: 0,
+      histogram: new Histogram([
+        {
+          codePoint: 0x0061,
+          hitCount: 20,
+          missCount: 0,
+          timeToType: speedToTime(300),
+        },
+      ]),
+    });
+    await act(async () => {
+      pushResults([syncedKeytrace]);
+    });
+    equal(indicators().includes("17.0wpm"), false);
+
+    // Push a native 60 WPM (300 CPM) web practice result -> appears in SpeedGauge.
+    const native60 = faker.nextResult({
+      layout: Layout.EN_US,
+      textType: TextType.GENERATED,
       length: 100,
       time: 20_000,
       errors: 0,
@@ -330,14 +352,14 @@ test("live-sync append and replaceResults update PracticeScreen immediately with
       ]),
     });
     await act(async () => {
-      pushResults([synced60]);
+      pushResults([native60]);
     });
     await r.findByText("60.0wpm");
 
-    // Simulate v2->v3 migration replacing results with a 40 WPM (200 CPM) record.
-    const replaced40 = faker.nextResult({
+    // Replacing results with native 40 WPM + KEYTRACE 17 WPM shows 40.0wpm (not 60.0 or 17.0).
+    const native40 = faker.nextResult({
       layout: Layout.EN_US,
-      textType: TextType.KEYTRACE,
+      textType: TextType.GENERATED,
       length: 100,
       time: 30_000,
       errors: 0,
@@ -351,10 +373,11 @@ test("live-sync append and replaceResults update PracticeScreen immediately with
       ]),
     });
     await act(async () => {
-      swapResults([replaced40]);
+      swapResults([native40, syncedKeytrace]);
     });
     await r.findByText("40.0wpm");
     equal(indicators().includes("60.0wpm"), false);
+    equal(indicators().includes("17.0wpm"), false);
   } finally {
     PhoneticModelLoader.loader = prevLoader;
     globalThis.fetch = prevFetch;
@@ -362,10 +385,11 @@ test("live-sync append and replaceResults update PracticeScreen immediately with
   }
 });
 
-test("standalone mode isolates TextType.KEYTRACE results and restores them when switching back", async () => {
+test("standalone mode isolates TextType.KEYTRACE results and restores unlock state when switching back without altering SpeedGauge", async () => {
   const prevLoader = PhoneticModelLoader.loader;
   const prevFetch = globalThis.fetch;
-  PhoneticModelLoader.loader = FakePhoneticModel.loader;
+  PhoneticModelLoader.loader = async () =>
+    new FakePhoneticModel(["abc", "def", "afe"]);
   globalThis.fetch = async () =>
     ({
       ok: true,
@@ -381,6 +405,14 @@ test("standalone mode isolates TextType.KEYTRACE results and restores them when 
     length: 100,
     time: 30_000, // 200 CPM = 40.0 WPM
     errors: 0,
+    histogram: new Histogram([
+      {
+        codePoint: 0x0061,
+        hitCount: 20,
+        missCount: 0,
+        timeToType: speedToTime(200),
+      },
+    ]),
   });
   const keytrace80 = faker.nextResult({
     layout: Layout.EN_US,
@@ -388,16 +420,21 @@ test("standalone mode isolates TextType.KEYTRACE results and restores them when 
     length: 100,
     time: 15_000, // 400 CPM = 80.0 WPM
     errors: 0,
+    histogram: new Histogram([
+      {
+        codePoint: 0x0067, // 'g'
+        hitCount: 20,
+        missCount: 0,
+        timeToType: speedToTime(400),
+      },
+    ]),
   });
 
   let setMode!: (mode: "standalone" | "keytrace") => void;
 
   function ModeHarness() {
     const [settings, setSettings] = useState(() =>
-      new Settings()
-        .set(lessonProps.type, LessonType.CUSTOM)
-        .set(lessonProps.customText.content, "abcdefghij")
-        .set(lessonProps.keytraceMode, "standalone"),
+      new Settings().set(lessonProps.keytraceMode, "standalone"),
     );
     setMode = (mode) => {
       setSettings((prev) => prev.set(lessonProps.keytraceMode, mode));
@@ -421,17 +458,26 @@ test("standalone mode isolates TextType.KEYTRACE results and restores them when 
 
   const r = render(<ModeHarness />);
   try {
-    // In standalone mode, keytrace80 is ignored so last speed is native 40.0wpm (not 80.0wpm).
+    // In standalone mode, progressive unlocking keeps g..j locked (4 <svg> cross marks)
+    // and SpeedGauge shows native 40.0wpm (not KEYTRACE 80.0wpm).
     await r.findByText("40.0wpm");
+    const lockedCount = () =>
+      r.container.querySelectorAll(`#${names.keySet} svg`).length;
     const indicators = () =>
       r.container.querySelector(`#${names.indicators}`)!.textContent ?? "";
+    equal(lockedCount(), 4);
     equal(indicators().includes("80.0wpm"), false);
 
-    // Switching back to keytrace mode immediately restores keytrace80 (80.0wpm).
+    // Switching back to keytrace mode unlocks all keys (0 locked) asynchronously
+    // after LessonLoader reloads, while SpeedGauge still displays native 40.0wpm.
     await act(async () => {
       setMode("keytrace");
     });
-    await r.findByText("80.0wpm");
+    await waitFor(() => {
+      equal(lockedCount(), 0);
+    });
+    await r.findByText("40.0wpm");
+    equal(indicators().includes("80.0wpm"), false);
   } finally {
     PhoneticModelLoader.loader = prevLoader;
     globalThis.fetch = prevFetch;

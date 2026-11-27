@@ -4,7 +4,7 @@ import { resultFromJson, type ResultJson } from "@keybr/result-io";
 const STORAGE_KEY = "keybr.keytrace.lastSyncedTs";
 const VERSION_KEY = "keybr.keytrace.syncVersion";
 const SYNCED_KEYS_KEY = "keybr.keytrace.syncedKeys";
-const CURRENT_SYNC_VERSION = 3;
+const CURRENT_SYNC_VERSION = 4;
 
 export type KeyTraceSyncResponse = {
   readonly available?: boolean;

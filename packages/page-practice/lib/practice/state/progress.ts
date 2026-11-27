@@ -6,6 +6,7 @@ import {
   MutableStreakList,
   MutableSummaryStats,
   type Result,
+  TextType,
 } from "@keybr/result";
 import { type Settings } from "@keybr/settings";
 import { DailyGoalEvents } from "./event-source-daily-goal.ts";
@@ -43,9 +44,15 @@ export class Progress {
     const dailyGoal = new DailyGoalEvents(this.#dailyGoal);
     this.#events = new (class implements LessonEventSource {
       append(result: Result, listener: LessonEventListener): void {
+        const layout = settings.get(keyboardProps.layout);
+        const isNativeCurrentLayout =
+          result.layout.xid === layout.xid &&
+          result.textType !== TextType.KEYTRACE;
         letter.append(result, listener);
-        topSpeed.append(result, listener);
-        topScore.append(result, listener);
+        if (isNativeCurrentLayout) {
+          topSpeed.append(result, listener);
+          topScore.append(result, listener);
+        }
         dailyGoal.append(result, listener);
       }
     })();
@@ -91,15 +98,19 @@ export class Progress {
   append(result: Result, listener: LessonEventListener = () => {}) {
     this.#results.push(result);
     this.#version += 1;
-    // 键位统计只收当前布局的结果。
+    // 键位统计只收当前布局的结果（含 KeyTrace 同步记录，用于弱键识别与全解锁模式）。
     // 双拼里 C 键打的是韵母 ao，和英文打字母 c 是两套完全不同的肌肉记忆，
     // 混在一起会让「哪个键弱」的判断失真——英文练得多，双拼的弱键就被稀释掉。
-    // 其余统计（总时长、连续天数、每日目标）仍然收全部，它们与布局无关。
+    // 顶部衡量标准（SummaryStats：输入速度 / 准确度 / 分数）只收当前布局的网页练习结果，
+    // 避免日常 KeyTrace 日聚合数据或其他布局的练习覆盖当前界面的「上一次速度」。
+    // 连续天数与每日目标仍然收全部，它们与布局无关。
     const layout = this.#settings.get(keyboardProps.layout);
     if (result.layout.xid === layout.xid) {
       this.#keyStatsMap.append(result);
+      if (result.textType !== TextType.KEYTRACE) {
+        this.#summaryStats.append(result);
+      }
     }
-    this.#summaryStats.append(result);
     this.#streakList.append(result);
     this.#dailyGoal.append(result);
     this.#events.append(result, listener);

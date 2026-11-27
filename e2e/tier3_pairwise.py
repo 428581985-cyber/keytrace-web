@@ -16,7 +16,7 @@ from harness import (
     get_theme_button,
     get_toolbar_buttons,
     is_tour_open,
-    max_box_delta,
+    max_chrome_delta,
     measure_practice_boxes,
     measure_tour_spotlight_and_anchor,
     open_context,
@@ -151,7 +151,7 @@ def t3_03_f2_f3_compact_view_tour_restore_then_zh_en_toggle_shift_le_1px(
         ensure_practice_language(page, "en")
         page.wait_for_timeout(120)
         after = measure_practice_boxes(page)
-        delta = max_box_delta(before, after, ("main", "controls", "indicators", "textArea", "zhBtn", "enBtn"))
+        delta = max_chrome_delta(before, after)
         assert delta <= 1.0, f"Compact post-tour ZH->EN shift {delta:.2f}px > 1.0px"
 
 
@@ -174,7 +174,7 @@ def t3_04_f2_f6_settings_font_plus_zh_en_toggle_stability(
         ensure_practice_language(page, "zh")
         page.wait_for_timeout(120)
         after = measure_practice_boxes(page)
-        assert max_box_delta(before, after) <= 1.0
+        assert max_chrome_delta(before, after) <= 1.0
         ff = read_zh_lesson_tokens(page)["words"][0]["units"][0]["fontFamily"] or ""
         assert "KaiTi" in ff
 
@@ -318,8 +318,8 @@ def t3_10_f2_f7_zh_en_toggle_during_partial_typing_preserves_layout(
         mid = measure_practice_boxes(page)
         ensure_practice_language(page, "zh")
         after = measure_practice_boxes(page)
-        assert max_box_delta(before, mid) <= 1.0
-        assert max_box_delta(before, after) <= 1.0
+        assert max_chrome_delta(before, mid) <= 1.0
+        assert max_chrome_delta(before, after) <= 1.0
 
 
 TIER3_TESTS: list[tuple[str, Callable[..., None]]] = [
