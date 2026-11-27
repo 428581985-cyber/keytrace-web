@@ -634,10 +634,7 @@ test("ZhLines renders Microsoft Shuangpin (; = ing) words without splitting on s
   const prevMs = window.localStorage.getItem("keytrace.zh-sp-ms.showCode");
   window.localStorage.removeItem("keytrace.zh-sp-ms.showCode");
   try {
-    const ti = new TextInput(
-      "jnx; mztm.",
-      toTextInputSettings(new Settings()),
-    );
+    const ti = new TextInput("jnx; mztm.", toTextInputSettings(new Settings()));
     const r = render(
       <FakeIntlProvider>
         <ZhLines
@@ -718,13 +715,11 @@ test("ZhLines in Shuangpin keeps Hanzi and word boundaries intact under stopOnEr
     rMid.container.querySelectorAll("[data-word='1'] [data-space='1']").length,
     1,
   );
-  const firstUnit = rMid.container.querySelector<HTMLElement>("[data-unit='1']");
+  const firstUnit =
+    rMid.container.querySelector<HTMLElement>("[data-unit='1']");
   isNotNull(firstUnit);
   equal(firstUnit.dataset.garbage, "3");
-  equal(
-    firstUnit.querySelector("[data-garbage-badge='1']")?.textContent,
-    "3",
-  );
+  equal(firstUnit.querySelector("[data-garbage-badge='1']")?.textContent, "3");
   // [data-code='1'] remains canonical "da" without garbage chars mixed in.
   equal(firstUnit.querySelector("[data-code='1']")?.textContent, "da");
   rMid.unmount();
@@ -751,7 +746,10 @@ test("ZhLines in Shuangpin keeps Hanzi and word boundaries intact under stopOnEr
     ...rTen.container.querySelectorAll<HTMLElement>("[data-unit='1']"),
   ];
   equal(unitsTen[1].dataset.garbage, "10");
-  equal(unitsTen[1].querySelector("[data-garbage-badge='1']")?.textContent, "10");
+  equal(
+    unitsTen[1].querySelector("[data-garbage-badge='1']")?.textContent,
+    "10",
+  );
   equal(
     [...rTen.container.querySelectorAll("[data-hanzi='1']")]
       .map((el) => el.textContent ?? "")
@@ -776,7 +774,10 @@ test("ZhLines in Shuangpin keeps Hanzi and word boundaries intact under stopOnEr
     ...rNine.container.querySelectorAll<HTMLElement>("[data-unit='1']"),
   ];
   equal(unitsNine[1].dataset.garbage, "9");
-  equal(unitsNine[1].querySelector("[data-garbage-badge='1']")?.textContent, "9");
+  equal(
+    unitsNine[1].querySelector("[data-garbage-badge='1']")?.textContent,
+    "9",
+  );
   rNine.unmount();
 
   // 3. Microsoft Shuangpin (; = ing) with garbage before ';'
@@ -848,7 +849,10 @@ test("ZhLines attributes trailing garbage to SpaceToken and punctuation in Shuan
   equal(punctUnits[1].dataset.garbage, undefined);
   isNull(punctUnits[1].querySelector("[data-garbage-badge='1']"));
   equal(punctUnits[2].dataset.garbage, "2");
-  equal(punctUnits[2].querySelector("[data-garbage-badge='1']")?.textContent, "2");
+  equal(
+    punctUnits[2].querySelector("[data-garbage-badge='1']")?.textContent,
+    "2",
+  );
   equal(punctUnits[2].querySelector("[data-hanzi='1']")?.textContent, "，");
   const punctHanziEl =
     punctUnits[2].querySelector<HTMLElement>("[data-hanzi='1']");
@@ -898,7 +902,8 @@ test("ZhLines attributes trailing garbage to SpaceToken and punctuation in Shuan
     // "方" and "案" stay clean!
     equal(units[0].dataset.garbage, undefined);
     equal(units[1].dataset.garbage, undefined);
-    const spaceEl = rWs.container.querySelector<HTMLElement>("[data-space='1']");
+    const spaceEl =
+      rWs.container.querySelector<HTMLElement>("[data-space='1']");
     isNotNull(spaceEl);
     equal(spaceEl.dataset.garbage, "3");
     equal(spaceEl.querySelector("[data-garbage-badge='1']")?.textContent, "3");
@@ -910,7 +915,9 @@ test("ZhLines attributes trailing garbage to SpaceToken and punctuation in Shuan
       rWs.container.querySelector<HTMLElement>("[data-caret-shape]");
     isNotNull(cursorEl);
     equal(cursorEl.dataset.cursorError, "1");
-    const seg = cursorEl.querySelector<HTMLElement>("[data-cursor-segment='0']");
+    const seg = cursorEl.querySelector<HTMLElement>(
+      "[data-cursor-segment='0']",
+    );
     isNotNull(seg);
     isTrue(
       seg.style.background === "#d4503a" ||
@@ -1041,7 +1048,8 @@ test("ZhLines renders EOF pure garbage without hallucinating Hanzi and integrate
     </FakeIntlProvider>,
   );
   equal(
-    rBeforeSkip.container.querySelector("[data-garbage-badge='1']")?.textContent,
+    rBeforeSkip.container.querySelector("[data-garbage-badge='1']")
+      ?.textContent,
     "2",
   );
   rBeforeSkip.unmount();
@@ -1116,7 +1124,10 @@ test("ZhLines shows consecutive error badge (2..10, hidden on 1) for both stopOn
       const un = rn.container.querySelector<HTMLElement>("[data-unit='1']");
       isNotNull(un);
       equal(un.dataset.errorCount, String(n));
-      equal(un.querySelector("[data-garbage-badge='1']")?.textContent, String(n));
+      equal(
+        un.querySelector("[data-garbage-badge='1']")?.textContent,
+        String(n),
+      );
       rn.unmount();
     }
 
@@ -1176,10 +1187,13 @@ test("ZhLines shows consecutive error badge (2..10, hidden on 1) for both stopOn
     </FakeIntlProvider>,
   );
   isNull(rQp1.container.querySelector("[data-garbage-badge='1']"));
-  const qpCursor1 = rQp1.container.querySelector<HTMLElement>("[data-caret-shape]");
+  const qpCursor1 =
+    rQp1.container.querySelector<HTMLElement>("[data-caret-shape]");
   isNotNull(qpCursor1);
   equal(qpCursor1.dataset.cursorError, "1");
-  const seg2 = qpCursor1.querySelector<HTMLElement>("[data-cursor-segment='2']");
+  const seg2 = qpCursor1.querySelector<HTMLElement>(
+    "[data-cursor-segment='2']",
+  );
   isNotNull(seg2);
   isTrue(
     seg2.style.background === "#d4503a" ||
@@ -1274,7 +1288,8 @@ test("ZhLines shows consecutive error badge (2..10, hidden on 1) for both stopOn
       />
     </FakeIntlProvider>,
   );
-  const spaceEl1 = rSpace1.container.querySelector<HTMLElement>("[data-space='1']");
+  const spaceEl1 =
+    rSpace1.container.querySelector<HTMLElement>("[data-space='1']");
   isNotNull(spaceEl1);
   isNull(spaceEl1.querySelector("[data-garbage-badge='1']"));
   isTrue(
@@ -1305,7 +1320,8 @@ test("ZhLines shows consecutive error badge (2..10, hidden on 1) for both stopOn
       />
     </FakeIntlProvider>,
   );
-  const spaceEl3 = rSpace3.container.querySelector<HTMLElement>("[data-space='1']");
+  const spaceEl3 =
+    rSpace3.container.querySelector<HTMLElement>("[data-space='1']");
   isNotNull(spaceEl3);
   equal(spaceEl3.querySelector("[data-garbage-badge='1']")?.textContent, "3");
   equal(
@@ -1329,9 +1345,84 @@ test("ZhLines shows consecutive error badge (2..10, hidden on 1) for both stopOn
   );
   isNull(rSpaceDone.container.querySelector("[data-garbage-badge='1']"));
   equal(
-    rSpaceDone.container.querySelector<HTMLElement>("[data-caret-shape]")?.dataset
-      .cursorError,
+    rSpaceDone.container.querySelector<HTMLElement>("[data-caret-shape]")
+      ?.dataset.cursorError,
     undefined,
   );
   rSpaceDone.unmount();
+});
+
+test("ZhLines renders annotated custom Chinese text verbatim across Shuangpin & Quanpin including unspaced sentence word boundaries", () => {
+  // Shuangpin with explicit zhHanzi renders "单老师" (not in ZH_CODE_TO_WORD) + error badge verbatim.
+  const spCustom = new TextInput(
+    [
+      { text: "uj", zhHanzi: "单", zhUnit: 1, zhWord: 1 },
+      { text: "lc", zhHanzi: "老", zhUnit: 2, zhWord: 1 },
+      { text: "ui", zhHanzi: "师", zhUnit: 3, zhWord: 1 },
+    ],
+    {
+      stopOnError: false,
+      forgiveErrors: false,
+      spaceSkipsWords: false,
+      zhShuangpin: true,
+    },
+  );
+  spCustom.appendChar(100, "x".codePointAt(0)!, 100);
+  spCustom.appendChar(200, "y".codePointAt(0)!, 100);
+  const rSp = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{ ...textDisplaySettings, language: Language.ZH_SP }}
+        lines={spCustom.lines}
+        focus={true}
+        showToggle={false}
+      />
+    </FakeIntlProvider>,
+  );
+  const spHanzi = [...rSp.container.querySelectorAll("[data-hanzi='1']")]
+    .map((el) => el.textContent ?? "")
+    .join("");
+  equal(spHanzi, "单老师");
+  equal(
+    rSp.container.querySelector("[data-unit='1'] [data-garbage-badge='1']")
+      ?.textContent,
+    "2",
+  );
+  rSp.unmount();
+
+  // Quanpin continuous sentence with explicit zhUnit/zhWord preserves exact 西安 (xi+an)
+  // and emits multiple flex-wrap [data-word='1'] groups with 0 synthetic spaces.
+  const qpCustom = new TextInput(
+    [
+      { text: "xi", zhHanzi: "西", zhUnit: 1, zhWord: 1 },
+      { text: "an", zhHanzi: "安", zhUnit: 2, zhWord: 1 },
+      { text: ",", zhHanzi: "，" },
+      { text: "hen", zhHanzi: "很", zhUnit: 3, zhWord: 2 },
+      { text: "mei", zhHanzi: "美", zhUnit: 4, zhWord: 3 },
+    ],
+    toTextInputSettings(new Settings()),
+  );
+  const rQp = render(
+    <FakeIntlProvider>
+      <ZhLines
+        settings={{ ...textDisplaySettings, language: Language.ZH_QP }}
+        lines={qpCustom.lines}
+        focus={true}
+        showToggle={false}
+        cursor={false}
+      />
+    </FakeIntlProvider>,
+  );
+  const qpHanzi = [...rQp.container.querySelectorAll("[data-hanzi='1']")]
+    .map((el) => el.textContent ?? "")
+    .join("");
+  equal(qpHanzi, "西安，很美");
+  const qpCodes = [...rQp.container.querySelectorAll("[data-code='1']")].map(
+    (el) => el.textContent ?? "",
+  );
+  equal(qpCodes.join("|"), "xi|an|,|hen|mei");
+  // No spaces inserted between continuous words, and 3 word groups wrap cleanly (punctuation glued to word 1).
+  equal(rQp.container.querySelectorAll("[data-space='1']").length, 0);
+  equal(rQp.container.querySelectorAll("[data-word='1']").length, 3);
+  rQp.unmount();
 });

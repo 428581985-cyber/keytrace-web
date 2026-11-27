@@ -9,7 +9,12 @@ import {
   type Settings,
   stringProp,
 } from "@keybr/settings";
+import { textInputProps } from "@keybr/textinput";
 import { LessonType } from "./lessontype.ts";
+
+export const DEFAULT_ZH_CUSTOM_TEXT =
+  "银行 行长 重庆 重新 人工智能 机器学习\n" +
+  "长风破浪会有时，直挂云帆济沧海。";
 
 export type KeytraceMode = "auto" | "keytrace" | "standalone";
 export type PracticeMode = "keytrace" | "standalone";
@@ -33,10 +38,7 @@ const keytraceModeProp: AnyProp<KeytraceMode> = {
   toJson(value: KeytraceMode): unknown {
     return isKeytraceMode(value) ? value : "auto";
   },
-  fromJson(
-    value: unknown,
-    defaultValue: KeytraceMode = "auto",
-  ): KeytraceMode {
+  fromJson(value: unknown, defaultValue: KeytraceMode = "auto"): KeytraceMode {
     return isKeytraceMode(value) ? value : defaultValue;
   },
 };
@@ -75,9 +77,15 @@ export const lessonProps = {
       "The quick brown fox jumps over the lazy dog.",
       { maxLength: 10_000 },
     ),
+    zhContent: stringProp(
+      "lesson.customText.zhContent",
+      DEFAULT_ZH_CUSTOM_TEXT,
+      { maxLength: 10_000 },
+    ),
     lettersOnly: booleanProp("lesson.customText.lettersOnly", true),
     lowercase: booleanProp("lesson.customText.lowercase", true),
     randomize: booleanProp("lesson.customText.randomize", false),
+    zhPolyphoneTolerance: textInputProps.zhPolyphoneTolerance,
   } as const,
   numbers: {
     benford: booleanProp("lesson.numbers.benford", true),

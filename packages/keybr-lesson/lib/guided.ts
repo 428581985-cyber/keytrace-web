@@ -37,6 +37,29 @@ const FOCUS_BOOST = 1.5;
 /** 中文抽词冷却窗口：近期抽过的词短期内不重复，避免低频键（如 v/p/f）词池复读 */
 const ZH_COOLDOWN_WINDOW = 16;
 
+/**
+ * Keybr's bundled EN dictionary appends ~1,564 obscure alphabetical entries
+ * (indices 8436..9999) to cover rare letters like z/q/x/j. Detect and strip
+ * that trailing alphabetical run while preserving short test wordlists.
+ */
+export function stripAlphabeticalTail(
+  words: readonly string[],
+  minRunLength = 100,
+): readonly string[] {
+  if (words.length < minRunLength) {
+    return words;
+  }
+  let runStart = words.length - 1;
+  while (runStart > 0 && words[runStart - 1] <= words[runStart]) {
+    runStart -= 1;
+  }
+  return words.length - runStart >= minRunLength
+    ? words.slice(0, runStart)
+    : words;
+}
+
+const COMMON_NATURAL_WORD_LIMIT = 5000;
+
 const ZH_SP_LOCKED_FOCUS_KEY = "keybr.zh.lockedFocusKey";
 const ZH_SP_DRILL_OVERRIDE_KEY = "keybr.zh.drillFocusKey";
 
@@ -261,22 +284,24 @@ export class GuidedLesson extends Lesson {
     super(settings, keyboard, model);
     this.#letters = getLayoutLetters(keyboard.layout, this.model.letters);
     this.#unlockAllKeys = options?.unlockAllKeys ?? false;
-    // 上游这里是 > 2，因为英文太短的词练不到几个键。
-    // 但中文双拼一个音节正好两键，按上游规则词表会被滤空，练习区就成了白板。
-    // 这里放宽到 >= 2。
-    const filtered = filterWordList(wordList, this.codePoints).filter(
-      (word) => word.length >= 2,
-    );
-    // 中文双拼四字成语固定 8 字母；中文全拼变长，改查词表元数据 isQuanpinIdiom。
+    // 上游英文词表 words-en.json 末尾 8436..9999 塞了 1564 个字母序冷僻补齐词；
+    // 非中文课剔除该冷僻尾并取前 5000 常用词，词不够 15 个时再由原生音素模型补足假词。
+    // 中文双拼一个音节正好两键，过滤长度保留 >= 2；非中文沿用上游 > 2。
     const { language } = this.model;
     const isZh = isZhLanguage(language);
+    const naturalPool = isZh
+      ? wordList
+      : stripAlphabeticalTail(wordList).slice(0, COMMON_NATURAL_WORD_LIMIT);
+    const minWordLength = isZh ? 2 : 3;
+    const filtered = filterWordList(naturalPool, this.codePoints).filter(
+      (word) => word.length >= minWordLength,
+    );
+    // 中文双拼四字成语固定 8 字母；中文全拼变长，改查词表元数据 isQuanpinIdiom。
     const isIdiom = isZhQuanpin(language)
       ? (word: string) => isQuanpinIdiom(word)
       : (word: string) => word.length === 8;
     const idioms = isZh ? filtered.filter(isIdiom) : [];
-    const commons = isZh
-      ? filtered.filter((word) => !isIdiom(word))
-      : filtered;
+    const commons = isZh ? filtered.filter((word) => !isIdiom(word)) : filtered;
     this.dictionary = new Dictionary(commons);
     this.idioms = new Dictionary(idioms);
   }

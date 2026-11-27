@@ -137,11 +137,7 @@ function classifyNasalGroup(initial: string, final: string): NasalGroup | null {
 function parseSyllable(raw: string, start: number): ParsedSyllable {
   let initial = "";
   let final = raw;
-  if (
-    raw.startsWith("zh") ||
-    raw.startsWith("ch") ||
-    raw.startsWith("sh")
-  ) {
+  if (raw.startsWith("zh") || raw.startsWith("ch") || raw.startsWith("sh")) {
     initial = raw.slice(0, 2);
     final = raw.slice(2);
   } else if (raw.length > 0 && SINGLE_INITIALS.has(raw[0])) {
@@ -165,20 +161,55 @@ function parseSyllable(raw: string, start: number): ParsedSyllable {
 function findWordSpan(
   chars: readonly Char[],
   anchorPos: number,
-): { readonly word: string; readonly start: number; readonly end: number } {
+): {
+  readonly word: string;
+  readonly start: number;
+  readonly end: number;
+  readonly derivedSyllables?: readonly string[];
+} {
+  const anchorWord = chars[anchorPos]?.zhWord;
+  const sameWordOrLetter = (ch: Char): boolean =>
+    isLowerAsciiLetter(ch.codePoint) &&
+    (anchorWord == null || ch.zhWord == null || ch.zhWord === anchorWord);
+
   let start = anchorPos;
-  while (start > 0 && isLowerAsciiLetter(chars[start - 1].codePoint)) {
+  while (start > 0 && sameWordOrLetter(chars[start - 1])) {
     start -= 1;
   }
   let end = anchorPos + 1;
-  while (end < chars.length && isLowerAsciiLetter(chars[end].codePoint)) {
+  while (end < chars.length && sameWordOrLetter(chars[end])) {
     end += 1;
   }
   let word = "";
+  let allHaveUnit = end > start;
+  const derivedSyllables: string[] = [];
+  let currentUnitId: number | null = null;
+  let currentSyllable = "";
+
   for (let i = start; i < end; i++) {
-    word += String.fromCodePoint(chars[i].codePoint);
+    const ch = chars[i];
+    const letter = String.fromCodePoint(ch.codePoint);
+    word += letter;
+    if (ch.zhUnit == null) {
+      allHaveUnit = false;
+    } else if (allHaveUnit) {
+      if (currentUnitId === ch.zhUnit) {
+        currentSyllable += letter;
+      } else {
+        if (currentSyllable !== "") {
+          derivedSyllables.push(currentSyllable);
+        }
+        currentUnitId = ch.zhUnit;
+        currentSyllable = letter;
+      }
+    }
   }
-  return { word, start, end };
+  if (allHaveUnit && currentSyllable !== "") {
+    derivedSyllables.push(currentSyllable);
+  }
+  return allHaveUnit && derivedSyllables.length > 0
+    ? { word, start, end, derivedSyllables }
+    : { word, start, end };
 }
 
 function getWordSyllables(
@@ -307,7 +338,7 @@ function matchesCharAt(
     const syllables = getWordSyllables(
       span.word,
       span.start,
-      syllablesOverride,
+      syllablesOverride ?? span.derivedSyllables,
     );
     const syl = syllables.find((item) => pos >= item.start && pos < item.end);
     if (syl != null && isSameLengthSubstitute(syl, pos, actual, fuzzy)) {
@@ -336,7 +367,11 @@ export function nextQuanpinFuzzyStateOnExactMatch(
   }
 
   const span = findWordSpan(chars, pos);
-  const syllables = getWordSyllables(span.word, span.start, syllablesOverride);
+  const syllables = getWordSyllables(
+    span.word,
+    span.start,
+    syllablesOverride ?? span.derivedSyllables,
+  );
   const sylIndex = syllables.findIndex(
     (item) => pos >= item.start && pos < item.end,
   );
@@ -426,7 +461,7 @@ export function evalQuanpinFuzzy(
     const prevSyllables = getWordSyllables(
       prevSpan.word,
       prevSpan.start,
-      syllablesOverride,
+      syllablesOverride ?? prevSpan.derivedSyllables,
     );
     const prevSyl = prevSyllables.find((item) => item.end === pos);
     if (
@@ -447,7 +482,11 @@ export function evalQuanpinFuzzy(
   }
 
   const span = findWordSpan(chars, pos);
-  const syllables = getWordSyllables(span.word, span.start, syllablesOverride);
+  const syllables = getWordSyllables(
+    span.word,
+    span.start,
+    syllablesOverride ?? span.derivedSyllables,
+  );
   const syl = syllables.find((item) => pos >= item.start && pos < item.end);
   if (syl == null) {
     return NONE;

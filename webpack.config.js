@@ -125,12 +125,12 @@ export default [
           use: "null-loader",
         },
         {
-          test: /\/knex\/lib\/dialects\//,
-          exclude: /\/mysql|sqlite3\//,
+          test: /[\\/]knex[\\/]lib[\\/]dialects[\\/]/,
+          exclude: /[\\/](?:mysql|sqlite3)[\\/]/,
           use: "null-loader",
         },
         {
-          test: /\/knex\/lib\/migrations\//,
+          test: /[\\/]knex[\\/]lib[\\/]migrations[\\/]/,
           use: "null-loader",
         },
       ],
@@ -188,7 +188,7 @@ export default [
       splitChunks: {
         cacheGroups: {
           vendor: {
-            test: isVendor(["tslib", "@mdi"]),
+            test: isVendor(["tslib", "@mdi", "pinyin-pro"]),
             chunks: "all",
             name: "shared-vendor",
           },

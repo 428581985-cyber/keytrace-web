@@ -2,7 +2,14 @@ import { type CodePoint, toCodePoints } from "@keybr/unicode";
 
 export type StyledText = string | StyledTextSpan | readonly StyledText[];
 
-export type StyledTextSpan = { readonly text: string; readonly cls: string };
+export type StyledTextSpan = {
+  readonly text: string;
+  readonly cls?: string | null;
+  readonly zhHanzi?: string;
+  readonly zhUnit?: number;
+  readonly zhWord?: number;
+  readonly zhAlts?: readonly string[];
+};
 
 export const enum Attr {
   Normal = 0,
@@ -17,6 +24,10 @@ export type Char = {
   readonly attrs: number;
   readonly cls?: string | null;
   readonly errorCount?: number;
+  readonly zhHanzi?: string;
+  readonly zhUnit?: number;
+  readonly zhWord?: number;
+  readonly zhAlts?: readonly string[];
 };
 
 export type Line = {
@@ -52,7 +63,7 @@ export function splitStyledText(
   const list: Array<Char> = [];
   if (Array.isArray(text)) {
     for (const item of text) {
-      list.push(...splitStyledText(item));
+      list.push(...splitStyledText(item, attrs));
     }
   } else if (typeof text === "string") {
     list.push(
@@ -63,11 +74,18 @@ export function splitStyledText(
       })),
     );
   } else if (isStyledTextSpan(text)) {
+    const meta = {
+      ...(text.zhHanzi !== undefined ? { zhHanzi: text.zhHanzi } : null),
+      ...(text.zhUnit !== undefined ? { zhUnit: text.zhUnit } : null),
+      ...(text.zhWord !== undefined ? { zhWord: text.zhWord } : null),
+      ...(text.zhAlts !== undefined ? { zhAlts: text.zhAlts } : null),
+    };
     list.push(
       ...[...toCodePoints(text.text)].map((codePoint) => ({
         codePoint,
-        cls: text.cls,
+        cls: text.cls ?? null,
         attrs,
+        ...meta,
       })),
     );
   } else {
@@ -78,6 +96,24 @@ export function splitStyledText(
 
 export function isStyledTextSpan(v: unknown): v is StyledTextSpan {
   return v != null && typeof v === "object" && "text" in v;
+}
+
+function stringArraysEqual(
+  a: readonly string[] | undefined,
+  b: readonly string[] | undefined,
+): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a == null || b == null || a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function charsAreEqual(a: Char, b: Char): boolean {
@@ -92,6 +128,18 @@ export function charsAreEqual(a: Char, b: Char): boolean {
       return false;
     }
     if ((a.errorCount ?? 0) !== (b.errorCount ?? 0)) {
+      return false;
+    }
+    if (a.zhHanzi !== b.zhHanzi) {
+      return false;
+    }
+    if (a.zhUnit !== b.zhUnit) {
+      return false;
+    }
+    if (a.zhWord !== b.zhWord) {
+      return false;
+    }
+    if (!stringArraysEqual(a.zhAlts, b.zhAlts)) {
       return false;
     }
   }

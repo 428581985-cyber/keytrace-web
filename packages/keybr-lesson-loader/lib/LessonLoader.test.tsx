@@ -8,9 +8,11 @@ import {
   loadKeyboard,
 } from "@keybr/keyboard";
 import {
+  CustomTextLesson,
   type GuidedLesson,
   type Lesson,
   lessonProps,
+  LessonType,
 } from "@keybr/lesson";
 import { type PageData, PageDataContext } from "@keybr/pages-shared";
 import { FakePhoneticModel, type PhoneticModel } from "@keybr/phonetic-model";
@@ -21,7 +23,11 @@ import {
   ResultFaker,
   TextType,
 } from "@keybr/result";
-import { FakeSettingsContext, Settings, SettingsContext } from "@keybr/settings";
+import {
+  FakeSettingsContext,
+  Settings,
+  SettingsContext,
+} from "@keybr/settings";
 import { act, render } from "@testing-library/react";
 import { type ReactNode, useEffect, useState } from "react";
 import { equal, includes, isNotNull, isNull } from "rich-assert";
@@ -89,9 +95,7 @@ test("retains mounted child across EN <-> ZH_SP_MS switches and blocks mismatche
     const [current] = useState(settings);
     void current;
     return (
-      <SettingsContext.Provider
-        value={{ settings, updateSettings: () => {} }}
-      >
+      <SettingsContext.Provider value={{ settings, updateSettings: () => {} }}>
         <KeyboardProvider>
           <LessonLoader fallback={<span data-testid="fallback">loading</span>}>
             {(lesson) => <Child lesson={lesson} />}
@@ -189,9 +193,7 @@ test("rapid toggle EN -> ZH_SP_MS (pending) -> EN restores EN without stale ZH o
 
   function Harness({ settings }: { readonly settings: Settings }): ReactNode {
     return (
-      <SettingsContext.Provider
-        value={{ settings, updateSettings: () => {} }}
-      >
+      <SettingsContext.Provider value={{ settings, updateSettings: () => {} }}>
         <KeyboardProvider>
           <LessonLoader>
             {(lesson) => (
@@ -295,9 +297,7 @@ test("resolves GuidedLesson unlockAllKeys from PageDataContext, ResultContext, a
         content
       );
     return keytraceAvailable !== undefined ? (
-      <PageDataContext.Provider
-        value={{ keytraceAvailable } as PageData}
-      >
+      <PageDataContext.Provider value={{ keytraceAvailable } as PageData}>
         {withResults}
       </PageDataContext.Provider>
     ) : (
@@ -380,17 +380,76 @@ test("resolves GuidedLesson unlockAllKeys from PageDataContext, ResultContext, a
 
     // 6. Auto mode with keytraceAvailable: true and empty results -> unlockAllKeys = true.
     r.rerender(
-      <Harness
-        settings={autoSettings}
-        keytraceAvailable={true}
-        results={[]}
-      />,
+      <Harness settings={autoSettings} keytraceAvailable={true} results={[]} />,
     );
     await act(async () => {
       await Promise.resolve();
     });
     equal(emitted.at(-1)!.unlockAllKeys, true);
 
+    r.unmount();
+  } finally {
+    PhoneticModelLoader.loader = prevLoader;
+  }
+});
+
+test("loads CustomTextLesson with null zhEngine for EN and lazy ZhPinyinEngine for ZH", async () => {
+  const prevLoader = PhoneticModelLoader.loader;
+  PhoneticModelLoader.loader = async (language) =>
+    new (class extends FakePhoneticModel {
+      override readonly language = language;
+    })();
+
+  const emitted: Lesson[] = [];
+
+  function Inspector({ lesson }: { readonly lesson: Lesson }) {
+    emitted.push(lesson);
+    return (
+      <span data-testid="custom-kind">
+        {lesson instanceof CustomTextLesson
+          ? lesson.keyboard.layout.id
+          : "other"}
+      </span>
+    );
+  }
+
+  function Harness({ settings }: { readonly settings: Settings }) {
+    return (
+      <SettingsContext.Provider value={{ settings, updateSettings: () => {} }}>
+        <KeyboardProvider>
+          <LessonLoader>
+            {(lesson) => <Inspector lesson={lesson} />}
+          </LessonLoader>
+        </KeyboardProvider>
+      </SettingsContext.Provider>
+    );
+  }
+
+  const enSettings = new Settings()
+    .set(keyboardProps.language, Language.EN)
+    .set(keyboardProps.layout, Layout.EN_US)
+    .set(lessonProps.type, LessonType.CUSTOM)
+    .set(lessonProps.customText.content, "hello world");
+
+  const zhSettings = new Settings()
+    .set(keyboardProps.language, Language.ZH_QP)
+    .set(keyboardProps.layout, Layout.ZH_QP)
+    .set(lessonProps.type, LessonType.CUSTOM)
+    .set(lessonProps.customText.zhContent, "银行行长");
+
+  try {
+    const r = render(<Harness settings={enSettings} />);
+    await r.findByText("en-us");
+    const enLesson = emitted.at(-1) as CustomTextLesson;
+    equal(enLesson.zhEngine, null);
+    equal(enLesson.zhAnalysis, null);
+
+    r.rerender(<Harness settings={zhSettings} />);
+    await r.findByText("zh-qp");
+    const zhLesson = emitted.at(-1) as CustomTextLesson;
+    isNotNull(zhLesson.zhEngine);
+    isNotNull(zhLesson.zhAnalysis);
+    equal(zhLesson.zhAnalysis!.totalHanzi, 4);
     r.unmount();
   } finally {
     PhoneticModelLoader.loader = prevLoader;

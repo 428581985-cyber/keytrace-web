@@ -2,6 +2,7 @@ import { loadContent } from "@keybr/content-books";
 import { loadWordList } from "@keybr/content-words";
 import { catchError } from "@keybr/debug";
 import {
+  isZhLanguage,
   isZhShuangpinSchemeId,
   KeyboardOptions,
   type Language,
@@ -11,10 +12,12 @@ import {
   BooksLesson,
   CodeLesson,
   CustomTextLesson,
+  getCachedZhPinyinEngine,
   GuidedLesson,
   type Lesson,
   lessonProps,
   LessonType,
+  loadZhPinyinEngine,
   NumbersLesson,
   resolvePracticeMode,
   WordListLesson,
@@ -25,7 +28,13 @@ import { PhoneticModelLoader } from "@keybr/phonetic-model-loader";
 import { hasKeyTraceResults, ResultContext } from "@keybr/result";
 import { useSettings } from "@keybr/settings";
 import { getShuangpinWordList } from "@keybr/textinput";
-import { type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 const wordListCache = new Map<Language, ReturnType<typeof loadWordList>>();
 const contentCache = new Map<
@@ -174,8 +183,14 @@ function useLoader(
           break;
         }
         case LessonType.CUSTOM: {
+          const { language } = KeyboardOptions.from(settings);
+          const zhEngine = isZhLanguage(language)
+            ? (getCachedZhPinyinEngine() ?? (await loadZhPinyinEngine()))
+            : null;
           if (!didCancel) {
-            setResult(new CustomTextLesson(settings, keyboard, model));
+            setResult(
+              new CustomTextLesson(settings, keyboard, model, zhEngine),
+            );
           }
           break;
         }

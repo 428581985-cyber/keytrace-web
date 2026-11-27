@@ -75,3 +75,27 @@ export const exampleTexts: readonly ExampleText[] = [
   loremIpsum,
   aShortStory,
 ];
+
+const zhPolyphoneWords: ExampleText = {
+  title: "高频词表（含多音字）",
+  content:
+    "银行 行长 重庆 重新 会计 会议 乐曲 快乐 重要 权重 长城 长大 睡着了 觉得 调整 空调 单(shan)老师",
+};
+
+const zhTechWords: ExampleText = {
+  title: "科技与开发词表",
+  content:
+    "人工智能 机器学习 深度学习 神经网络 分布式 架构 算法 编译器 数据库 接口 并发 缓存 异步 部署",
+};
+
+const zhPoetryProse: ExampleText = {
+  title: "经典短文与诗词",
+  content:
+    "长风破浪会有时，直挂云帆济沧海。天生我材必有用，千金散尽还复来。海内存知己，天涯若比邻。",
+};
+
+export const zhExampleTexts: readonly ExampleText[] = [
+  zhPolyphoneWords,
+  zhTechWords,
+  zhPoetryProse,
+];

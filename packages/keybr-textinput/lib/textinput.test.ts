@@ -728,10 +728,7 @@ test("zh quanpin fuzzy: skipped key does not forge 0ms step & stats stay valid",
   // Canonical length is 15, committed chars align 1:1 with canonical text.
   equal(textInput.pos, 15);
   equal(textInput.chars.length, 15);
-  equal(
-    showChars(textInput),
-    "z|h|o|n|g|g|u|o| |f|a|n|g|a|n",
-  );
+  equal(showChars(textInput), "z|h|o|n|g|g|u|o| |f|a|n|g|a|n");
   // Real physical keystrokes recorded: 13 steps (no forged 0ms steps for 'h' or skipped 'g').
   equal(textInput.steps.length, 13);
   equal(
@@ -849,10 +846,7 @@ test("zh mode: spaceSkipsWords and clearWord treat Chinese comma/period/question
   equal(sp.appendChar(300, Space, 100), Feedback.Recovered);
   equal(sp.pos, 5);
   equal(showChars(sp), "d|a|!g|!e|!,|[y]|k|g|o| |u|i|w|u|.|g|l|x|i");
-  equal(
-    showSteps(sp),
-    "d,100,100|a,200,100|!g,300,0|!e,300,0|!,,300,0",
-  );
+  equal(showSteps(sp), "d,100,100|a,200,100|!g,300,0|!e,300,0|!,,300,0");
 
   // Space at start of word right after ',' with no typo is ignored (does NOT skip "ykgo").
   equal(sp.appendChar(400, Space, 100), Feedback.Succeeded);
@@ -862,10 +856,7 @@ test("zh mode: spaceSkipsWords and clearWord treat Chinese comma/period/question
   equal(sp.appendChar(500, X, 100), Feedback.Failed);
   equal(sp.appendChar(600, Space, 100), Feedback.Recovered);
   equal(sp.pos, 10);
-  equal(
-    showChars(sp),
-    "d|a|!g|!e|!,|!y|!k|!g|!o| |[u]|i|w|u|.|g|l|x|i",
-  );
+  equal(showChars(sp), "d|a|!g|!e|!,|!y|!k|!g|!o| |[u]|i|w|u|.|g|l|x|i");
 
   // Type "ui", then clearWord() stops at ' ' (pos 10), then clearWord() again stays at pos 10.
   equal(sp.appendChar(700, "u".codePointAt(0)!, 100), Feedback.Succeeded);
@@ -913,10 +904,7 @@ test("zh mode: spaceSkipsWords and clearWord treat Chinese comma/period/question
   equal(eofPunct.appendChar(100, "d".codePointAt(0)!, 100), Feedback.Succeeded);
   equal(eofPunct.appendChar(200, Space, 100), Feedback.Recovered);
   isTrue(eofPunct.completed);
-  equal(
-    showSteps(eofPunct),
-    "d,100,100|!a,200,0|!g,200,0|!e,200,0|!.,200,0",
-  );
+  equal(showSteps(eofPunct), "d,100,100|!a,200,0|!g,200,0|!e,200,0|!.,200,0");
 
   // Microsoft Shuangpin (zh-sp-ms): ';' is a syllable letter, NOT a boundary!
   const ms = new TextInput("jnx;,mztm.", {
@@ -981,7 +969,10 @@ test("zh quanpin: spaceSkipsWords, stopOnError=false, and forgiveErrors combinat
   }
   // Garbage then Space clears garbage and skips only "an," to 'm' of "meitian".
   equal(qp.appendChar(200, X, 100), Feedback.Failed);
-  equal(showChars(qp), "f|a|n|g|*x|[a]|n|,|m|e|i|t|i|a|n| |j|i|a|n|c|h|i|.|s|h|u|r|u");
+  equal(
+    showChars(qp),
+    "f|a|n|g|*x|[a]|n|,|m|e|i|t|i|a|n| |j|i|a|n|c|h|i|.|s|h|u|r|u",
+  );
   equal(qp.appendChar(300, Space, 100), Feedback.Recovered);
   equal(qp.pos, 7); // 'm'
   // clearWord() right after ',' stays at pos 7.
@@ -1078,9 +1069,18 @@ test("zh forgiveErrors=true: Quanpin (-n/-ng)+g- boundaries, fuzzy lookahead, an
       Feedback.Succeeded,
     );
   }
-  equal(noDoubleSkip.appendChar(200, "a".codePointAt(0)!, 100), Feedback.Failed);
-  equal(noDoubleSkip.appendChar(300, "n".codePointAt(0)!, 100), Feedback.Failed);
-  equal(noDoubleSkip.appendChar(400, "a".codePointAt(0)!, 100), Feedback.Failed);
+  equal(
+    noDoubleSkip.appendChar(200, "a".codePointAt(0)!, 100),
+    Feedback.Failed,
+  );
+  equal(
+    noDoubleSkip.appendChar(300, "n".codePointAt(0)!, 100),
+    Feedback.Failed,
+  );
+  equal(
+    noDoubleSkip.appendChar(400, "a".codePointAt(0)!, 100),
+    Feedback.Failed,
+  );
   isFalse(noDoubleSkip.completed);
   equal(noDoubleSkip.pos, 3);
   // Typing 'g' matches pos=3 ('g') -> pos=4 (second 'g'), NOT skipping both 'g's to completion!
@@ -1129,7 +1129,10 @@ test("zh forgiveErrors=true: Quanpin (-n/-ng)+g- boundaries, fuzzy lookahead, an
   }
   // Skip 'c', type " zh" (Space, 'z', consumeExtra 'h') -> recovers to pos 19 ("a liang b zhong c z")!
   equal(qpLookahead.appendChar(900, Space, 100), Feedback.Succeeded);
-  equal(qpLookahead.appendChar(1000, "z".codePointAt(0)!, 100), Feedback.Failed);
+  equal(
+    qpLookahead.appendChar(1000, "z".codePointAt(0)!, 100),
+    Feedback.Failed,
+  );
   equal(
     qpLookahead.appendChar(1100, "h".codePointAt(0)!, 100),
     Feedback.Recovered,
@@ -1488,3 +1491,156 @@ function showChars({ chars }: TextInput) {
     })
     .join("|");
 }
+
+test("zh mode: zhPolyphoneTolerance accepts alternate readings across Shuangpin & Quanpin and rolls back cleanly", () => {
+  // 1. Shuangpin: 行(xk, alt hh)
+  const spText = [
+    { text: "xk", zhHanzi: "行", zhUnit: 1, zhWord: 1, zhAlts: ["hh"] },
+  ];
+  const spStrict = new TextInput(spText, {
+    stopOnError: true,
+    forgiveErrors: false,
+    spaceSkipsWords: false,
+    zhShuangpin: true,
+    zhPolyphoneTolerance: false,
+  });
+  equal(spStrict.appendChar(100, "h".codePointAt(0)!, 100), Feedback.Failed);
+
+  const spTol = new TextInput(spText, {
+    stopOnError: true,
+    forgiveErrors: false,
+    spaceSkipsWords: false,
+    zhShuangpin: true,
+    zhPolyphoneTolerance: true,
+  });
+  equal(spTol.appendChar(100, "h".codePointAt(0)!, 100), Feedback.Succeeded);
+  equal(spTol.appendChar(200, "h".codePointAt(0)!, 100), Feedback.Succeeded);
+  isTrue(spTol.completed);
+  equal(showSteps(spTol), "h,100,100|h,200,100");
+  equal(showChars(spTol), "h|h");
+
+  // 2. Quanpin same-length shared prefix (血 xue->xie), variable length (乐 le->yue, 着 zhe->zhao),
+  //    and strict-prefix extension (得 de->dei followed by dao).
+  const qpText = [
+    { text: "xue", zhHanzi: "血", zhUnit: 1, zhWord: 1, zhAlts: ["xie"] },
+    " ",
+    { text: "le", zhHanzi: "乐", zhUnit: 2, zhWord: 2, zhAlts: ["yue"] },
+    " ",
+    {
+      text: "zhe",
+      zhHanzi: "着",
+      zhUnit: 3,
+      zhWord: 3,
+      zhAlts: ["zhao", "zhuo"],
+    },
+    " ",
+    { text: "de", zhHanzi: "得", zhUnit: 4, zhWord: 4, zhAlts: ["dei"] },
+    { text: "dao", zhHanzi: "到", zhUnit: 5, zhWord: 4 },
+  ];
+  const qpTol = new TextInput(qpText, {
+    stopOnError: true,
+    forgiveErrors: false,
+    spaceSkipsWords: false,
+    zhQuanpin: true,
+    zhPolyphoneTolerance: true,
+  });
+  let ts = 0;
+  for (const ch of "xie yue zhao deidao") {
+    equal(
+      qpTol.appendChar((ts += 100), ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  isTrue(qpTol.completed);
+  equal(qpTol.steps.length, "xie yue zhao deidao".length);
+  equal(qpTol.lines.text, "xie yue zhao deidao");
+
+  // clearWord() after prefix extension restores canonical "dedao" (and re-enables "dei" on retry!).
+  equal(qpTol.clearWord(), Feedback.Succeeded);
+  equal(qpTol.pos, "xie yue zhao ".length);
+  equal(qpTol.lines.text, "xie yue zhao dedao");
+  equal(
+    qpTol.appendChar((ts += 100), "d".codePointAt(0)!, 100),
+    Feedback.Recovered,
+  );
+  for (const ch of "eidao") {
+    equal(
+      qpTol.appendChar((ts += 100), ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  isTrue(qpTol.completed);
+
+  // reset() restores all original canonical readings.
+  qpTol.reset();
+  equal(qpTol.lines.text, "xue le zhe dedao");
+});
+
+test("zh quanpin fuzzy respects explicit zhUnit syllable boundaries (fang+an vs fan+gan)", () => {
+  const fuzzy = {
+    enEng: false,
+    anAng: true,
+    inIng: true,
+    ianIang: false,
+    uanUang: false,
+    zhZ: false,
+    chC: false,
+    shS: false,
+    lN: true,
+    fH: false,
+    rL: false,
+    veUe: false,
+  };
+  // 方案 ([fang, an]) + 蓝岸 ([lan, an]) + 的 ([de]):
+  // - in [fang, an], 'g' is trailing nasal of "fang", so typing "fanan" skips 'g'.
+  // - in [lan, an], 'l'->'n' (lN) and trailing extra 'g' at space after "an" -> "nanang ".
+  // Notice "lanan" is NOT in ZH_QP_LEXICON, so without zhUnit derivedSyllables it would fail!
+  const ti = new TextInput(
+    [
+      { text: "fang", zhHanzi: "方", zhUnit: 1, zhWord: 1 },
+      { text: "an", zhHanzi: "案", zhUnit: 2, zhWord: 1 },
+      " ",
+      { text: "lan", zhHanzi: "蓝", zhUnit: 3, zhWord: 2 },
+      { text: "an", zhHanzi: "岸", zhUnit: 4, zhWord: 2 },
+      { text: "de", zhHanzi: "的", zhUnit: 5, zhWord: 3 },
+    ],
+    {
+      stopOnError: true,
+      forgiveErrors: false,
+      spaceSkipsWords: false,
+      zhQuanpin: true,
+      fuzzy,
+    },
+  );
+  let ts = 0;
+  for (const ch of "fanan nanangde") {
+    equal(
+      ti.appendChar((ts += 100), ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  isTrue(ti.completed);
+
+  // 反感 ([fan, gan]): 'g' is initial of syllable 2, NOT trailing -ng of syllable 1,
+  // so typing "fanan" MUST reject 'a' at pos 3 (no skip of initial 'g')!
+  const fangan = new TextInput(
+    [
+      { text: "fan", zhHanzi: "反", zhUnit: 1, zhWord: 1 },
+      { text: "gan", zhHanzi: "感", zhUnit: 2, zhWord: 1 },
+    ],
+    {
+      stopOnError: true,
+      forgiveErrors: false,
+      spaceSkipsWords: false,
+      zhQuanpin: true,
+      fuzzy,
+    },
+  );
+  for (const ch of "fan") {
+    equal(
+      fangan.appendChar((ts += 100), ch.codePointAt(0)!, 100),
+      Feedback.Succeeded,
+    );
+  }
+  equal(fangan.appendChar((ts += 100), A, 100), Feedback.Failed);
+});

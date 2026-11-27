@@ -40,10 +40,17 @@ export type Step = {
 
 export type StepListener = (step: Step) => void;
 
+type UnitMutation = {
+  readonly unitStart: number;
+  readonly newLen: number;
+  readonly prevChars: readonly Char[];
+};
+
 type InputSnapshot = {
   readonly pos: number;
   readonly stepsLen: number;
   readonly fuzzyState: QuanpinFuzzyState;
+  readonly mutation?: UnitMutation;
 };
 
 type GarbageEntry = Step & {
@@ -86,10 +93,11 @@ export class TextInput {
   readonly zhShuangpin: boolean;
   readonly zhQuanpin: boolean;
   readonly zhScheme?: ZhInputScheme;
+  readonly zhPolyphoneTolerance: boolean;
   readonly fuzzy?: FuzzyPinyinSettings;
   readonly onStep: StepListener;
-  readonly #text: string;
-  readonly #chars: readonly Char[];
+  #text = "";
+  #chars: Char[] = [];
   #committedChars: Char[] = [];
   #steps: Step[] = [];
   #garbage: GarbageEntry[] = [];
@@ -109,6 +117,7 @@ export class TextInput {
       zhShuangpin = false,
       zhQuanpin = false,
       zhScheme,
+      zhPolyphoneTolerance = false,
       fuzzy,
     }: TextInputSettings,
     onStep: StepListener = () => {},
@@ -120,14 +129,15 @@ export class TextInput {
     this.zhShuangpin = zhShuangpin;
     this.zhQuanpin = zhQuanpin;
     this.zhScheme = zhScheme;
+    this.zhPolyphoneTolerance = zhPolyphoneTolerance;
     this.fuzzy = fuzzy;
     this.onStep = onStep;
-    this.#text = flattenStyledText(text);
-    this.#chars = splitStyledText(text);
     this.reset();
   }
 
   reset(): void {
+    this.#text = flattenStyledText(this.text);
+    this.#chars = splitStyledText(this.text);
     this.#committedChars = [];
     this.#steps = [];
     this.#garbage = [];
@@ -211,14 +221,23 @@ export class TextInput {
     this.#garbage = [];
     this.#ignoredSpace = null;
     this.#errorCountAtPos = 0;
+    let mutated = false;
     while (this.pos > 0 && !this.#isBoundaryAfter(this.pos - 1)) {
       const snapshot = this.#snapshots.pop();
       if (snapshot == null) {
         break;
       }
+      if (snapshot.mutation != null) {
+        const { unitStart, newLen, prevChars } = snapshot.mutation;
+        this.#chars.splice(unitStart, newLen, ...prevChars);
+        mutated = true;
+      }
       this.#committedChars.length = snapshot.pos;
       this.#steps.length = snapshot.stepsLen;
       this.#fuzzyState = snapshot.fuzzyState;
+    }
+    if (mutated) {
+      this.#rebuildText();
     }
     this.#typo = true;
     return this.#return(Feedback.Succeeded);
@@ -315,6 +334,32 @@ export class TextInput {
           return this.#return(Feedback.Succeeded);
         }
       }
+      const mutation = this.#trySwitchPolyphoneUnit(this.pos, codePoint);
+      if (mutation != null) {
+        const typo = this.#typo;
+        const matchedChar = this.at(this.pos);
+        this.#saveSnapshot(mutation);
+        const attrs = typo ? Attr.Miss : Attr.Hit;
+        this.#committedChars.push({ ...matchedChar, attrs });
+        const step: Step = {
+          timeStamp,
+          codePoint: matchedChar.codePoint,
+          timeToType,
+          typo,
+        };
+        this.#steps.push(step);
+        this.#fuzzyState = {};
+        this.onStep(step);
+        this.#garbage = [];
+        this.#ignoredSpace = null;
+        this.#typo = false;
+        this.#errorCountAtPos = 0;
+        if (typo) {
+          return this.#return(Feedback.Recovered);
+        } else {
+          return this.#return(Feedback.Succeeded);
+        }
+      }
     }
 
     this.#typo = true;
@@ -371,12 +416,163 @@ export class TextInput {
     this.#output = { chars, lines, remaining };
   }
 
-  #saveSnapshot(): void {
-    this.#snapshots.push({
-      pos: this.#committedChars.length,
-      stepsLen: this.#steps.length,
-      fuzzyState: this.#fuzzyState,
-    });
+  #rebuildText(): void {
+    this.#text = this.#chars
+      .map(({ codePoint }) => String.fromCodePoint(codePoint))
+      .join("");
+  }
+
+  #findZhUnitSpan(index: number): {
+    readonly unitStart: number;
+    readonly unitEnd: number;
+  } {
+    const unitId = this.#chars[index].zhUnit;
+    let unitStart = index;
+    while (unitStart > 0 && this.#chars[unitStart - 1].zhUnit === unitId) {
+      unitStart -= 1;
+    }
+    let unitEnd = index + 1;
+    while (
+      unitEnd < this.#chars.length &&
+      this.#chars[unitEnd].zhUnit === unitId
+    ) {
+      unitEnd += 1;
+    }
+    return { unitStart, unitEnd };
+  }
+
+  #trySwitchPolyphoneUnit(
+    pos: number,
+    codePoint: CodePoint,
+  ): UnitMutation | null {
+    if (!this.zhPolyphoneTolerance || !this.#isZhMode()) {
+      return null;
+    }
+    const isCodeKey =
+      (codePoint >= 0x0061 && codePoint <= 0x007a) || codePoint === 0x003b;
+    if (!isCodeKey) {
+      return null;
+    }
+    const actualStr = String.fromCodePoint(codePoint);
+
+    // Case 1: Cursor sits within a polyphonic unit; switch to an alt matching
+    // already-committed unit prefix + actual key (e.g. xing->hang, xue->xie, zhe->zhao).
+    const cur = this.#chars[pos];
+    if (cur?.zhUnit != null && cur.zhAlts != null && cur.zhAlts.length > 0) {
+      const { unitStart, unitEnd } = this.#findZhUnitSpan(pos);
+      const curCode = this.#chars
+        .slice(unitStart, unitEnd)
+        .map((c) => String.fromCodePoint(c.codePoint))
+        .join("");
+      const typedPrefix = curCode.slice(0, pos - unitStart);
+      const alt = cur.zhAlts.find((candidate) =>
+        candidate.startsWith(typedPrefix + actualStr),
+      );
+      if (alt != null && alt.length > pos - unitStart) {
+        const nextAlts = [
+          curCode,
+          ...cur.zhAlts.filter((candidate) => candidate !== alt),
+        ];
+        const prevChars = this.#chars.slice(unitStart, unitEnd);
+        const template = cur;
+        const newUnitChars: Char[] = Array.from(alt, (ch) => ({
+          codePoint: ch.codePointAt(0)!,
+          attrs: Attr.Normal,
+          cls: template.cls ?? null,
+          ...(template.zhHanzi !== undefined
+            ? { zhHanzi: template.zhHanzi }
+            : null),
+          zhUnit: template.zhUnit,
+          ...(template.zhWord !== undefined
+            ? { zhWord: template.zhWord }
+            : null),
+          zhAlts: nextAlts,
+        }));
+        this.#chars.splice(unitStart, unitEnd - unitStart, ...newUnitChars);
+        for (let i = unitStart; i < pos; i++) {
+          if (this.#committedChars[i] != null) {
+            this.#committedChars[i] = {
+              ...this.#committedChars[i],
+              zhAlts: nextAlts,
+            };
+          }
+        }
+        this.#rebuildText();
+        return { unitStart, newLen: newUnitChars.length, prevChars };
+      }
+    }
+
+    // Case 2: Preceding unit ended at a strict-prefix reading (e.g. de->dei, cha->chai)
+    // and the user typed the extra vowel before advancing past the boundary.
+    if (pos > 0 && this.#chars[pos]?.zhUnit !== this.#chars[pos - 1]?.zhUnit) {
+      const prev = this.#chars[pos - 1];
+      if (
+        prev?.zhUnit != null &&
+        prev.zhAlts != null &&
+        prev.zhAlts.length > 0
+      ) {
+        const { unitStart, unitEnd } = this.#findZhUnitSpan(pos - 1);
+        if (unitEnd === pos) {
+          const prevCode = this.#chars
+            .slice(unitStart, pos)
+            .map((c) => String.fromCodePoint(c.codePoint))
+            .join("");
+          const alt = prev.zhAlts.find(
+            (candidate) =>
+              candidate.length > prevCode.length &&
+              candidate.startsWith(prevCode + actualStr),
+          );
+          if (alt != null) {
+            const nextAlts = [
+              prevCode,
+              ...prev.zhAlts.filter((candidate) => candidate !== alt),
+            ];
+            const prevChars = this.#chars.slice(unitStart, pos);
+            const newUnitChars: Char[] = Array.from(alt, (ch) => ({
+              codePoint: ch.codePointAt(0)!,
+              attrs: Attr.Normal,
+              cls: prev.cls ?? null,
+              ...(prev.zhHanzi !== undefined
+                ? { zhHanzi: prev.zhHanzi }
+                : null),
+              zhUnit: prev.zhUnit,
+              ...(prev.zhWord !== undefined ? { zhWord: prev.zhWord } : null),
+              zhAlts: nextAlts,
+            }));
+            this.#chars.splice(unitStart, pos - unitStart, ...newUnitChars);
+            for (let i = unitStart; i < pos; i++) {
+              if (this.#committedChars[i] != null) {
+                this.#committedChars[i] = {
+                  ...this.#committedChars[i],
+                  zhAlts: nextAlts,
+                };
+              }
+            }
+            this.#rebuildText();
+            return { unitStart, newLen: newUnitChars.length, prevChars };
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  #saveSnapshot(mutation?: UnitMutation): void {
+    this.#snapshots.push(
+      mutation != null
+        ? {
+            pos: this.#committedChars.length,
+            stepsLen: this.#steps.length,
+            fuzzyState: this.#fuzzyState,
+            mutation,
+          }
+        : {
+            pos: this.#committedChars.length,
+            stepsLen: this.#steps.length,
+            fuzzyState: this.#fuzzyState,
+          },
+    );
   }
 
   #addStep(
@@ -661,10 +857,7 @@ export class TextInput {
     firstTimeStamp: number,
     entries: readonly GarbageEntry[],
   ): boolean {
-    if (
-      this.pos + 1 >= this.length ||
-      entries.length < recoverBufferLength
-    ) {
+    if (this.pos + 1 >= this.length || entries.length < recoverBufferLength) {
       return false;
     }
 

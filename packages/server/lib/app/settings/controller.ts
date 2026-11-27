@@ -21,7 +21,7 @@ export class Controller {
   @http.PUT("/_/sync/settings")
   async putSettings(
     ctx: Context<RouterState & AuthState>,
-    @body.json(null, { maxLength: 65536 }) value: unknown,
+    @body.json(null, { maxLength: 131072 }) value: unknown,
   ) {
     const user = ctx.state.requireUser();
     await this.database.set(user.id!, new Settings(value as any));

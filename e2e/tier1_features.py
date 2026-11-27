@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Callable, Iterator
 
-from playwright.sync_api import Browser, expect
+from playwright.sync_api import Browser, Page, expect
 
 from harness import (
     COLOR_HIT_RGB,
@@ -1969,6 +1969,246 @@ def t1_f13_04_zh_error_badge_stop_on_error_false(
     _assert_zh_consecutive_error_badge_flow(browser, base_url, stop_on_error=False)
 
 
+# ===========================================================================
+# F14: EN Common Vocabulary & EN/ZH Custom Wordlist + Polyphones — 3 tests
+# ===========================================================================
+
+
+def t1_f14_01_en_guided_excludes_rare_alphabetical_tail_on_z_focus(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    now = int(time.time() * 1000)
+    hist = {ord(ch): (25, 0, 180) for ch in "abcdefghijklmnopqrstuvwxy"}
+    hist[ord("z")] = (15, 2, 950)
+
+    rare_tail_words = {
+        "zonked",
+        "fuzzbox",
+        "gazebo",
+        "kamikaze",
+        "ziplock",
+        "zirconium",
+        "zither",
+    }
+
+    with _ensure_empty_keytrace_server(base_url) as target_url:
+        with open_context(
+            browser,
+            target_url,
+            settings={"keyboard.language": "en", "keyboard.layout": "en-us"},
+        ) as (_, page, _, _):
+            page.goto(f"{target_url}/", wait_until="domcontentloaded")
+            seed_indexeddb_results(
+                page,
+                [
+                    make_result_json(
+                        "en-us",
+                        ts=now - 10_000,
+                        length=100,
+                        time_ms=25_000,
+                        errors=2,
+                        mode="keytrace",
+                        histogram=hist,
+                    )
+                ],
+            )
+            page.reload(wait_until="domcontentloaded")
+            ensure_practice_language(page, "en")
+
+            ks = read_practice_key_set(page)
+            assert len(ks["unlocked"]) == 26, f"Expected all 26 keys unlocked in KeyTrace mode: {ks}"
+            assert ks["focusedChar"] == "z", f"Expected slowest key 'z' focused: {ks}"
+
+            observed_words: list[str] = []
+            for idx in range(12):
+                if idx > 0:
+                    skip_lesson(page)
+                txt = read_en_lesson_text(page)
+                observed_words.extend(w.lower() for w in txt.split() if w.strip())
+
+            z_words = [w for w in observed_words if "z" in w]
+            assert len(z_words) > 0, f"Expected words targeting weak key 'z' across 12 lessons: {observed_words[:30]}"
+            rare_hits = sorted(set(observed_words) & rare_tail_words)
+            assert not rare_hits, f"Unexpected rare alphabetical tail words in EN guided lessons: {rare_hits}"
+
+
+def _open_custom_text_tab(page: Page) -> None:
+    main = page.locator("main")
+    main.get_by_text(re.compile(r"^(自定义文本|Custom text)$")).first.click()
+    main.locator("fieldset:nth-of-type(1) textarea").first.wait_for(state="visible", timeout=10000)
+
+
+def t1_f14_02_custom_text_zh_polyphone_review_inline_pin_and_tolerance(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    with open_context(
+        browser,
+        base_url,
+        settings={"keyboard.language": "zh-sp", "keyboard.layout": "zh-sp"},
+    ) as (_, page, _, _):
+        page.goto(f"{base_url}/", wait_until="domcontentloaded")
+        ensure_practice_language(page, "zh")
+
+        # Layer 1 & 2: auto-disambiguation + clickable polyphone pill cycles & rewrites inline annotation.
+        open_settings(page)
+        _open_custom_text_tab(page)
+        fs1 = page.locator("main fieldset:nth-of-type(1)").first
+        ta = fs1.locator("textarea").first
+        ta.fill("银行行长")
+
+        review = fs1.locator('[data-polyphone-review="1"]')
+        review.wait_for(state="visible", timeout=10000)
+        first_hang = fs1.locator('[data-polyphone-pill="1"][data-hanzi="行"]').first
+        expect(first_hang).to_have_attribute("data-reading", "hang")
+        first_hang.click()
+
+        expect(ta).to_have_value("银行(heng)行长")
+        updated_hang = fs1.locator('[data-polyphone-pill="1"][data-hanzi="行"]').first
+        expect(updated_hang).to_have_attribute("data-reading", "heng")
+        expect(updated_hang).to_have_attribute("data-pinned", "1")
+
+        save_settings(page)
+        tok_pinned = read_zh_lesson_tokens(page)
+        w0 = tok_pinned["words"][0]
+        assert "(" not in w0["fullHanzi"] and "heng" not in w0["fullHanzi"], (
+            f"Practice display must strip inline (pinyin) annotations: {w0['fullHanzi']}"
+        )
+        assert w0["fullHanzi"].startswith("银行行长"), f"Unexpected ZH custom text rendered: {w0}"
+        assert w0["units"][0]["hanzi"] == "银" and w0["units"][0]["code"] == "yb", w0["units"][0]
+        assert w0["units"][1]["hanzi"] == "行" and w0["units"][1]["code"] == "hg", (
+            f"Expected pinned 'heng' -> Xiaohe 'hg': {w0['units'][1]}"
+        )
+
+        # Layer 3: zhPolyphoneTolerance OFF rejects alternate reading, ON dynamically switches unit.
+        open_settings(page)
+        fs1 = page.locator("main fieldset:nth-of-type(1)").first
+        fs1.locator("textarea").first.fill("长大")
+        tolerance_label = fs1.get_by_text(re.compile(r"多音字宽容判定|Allow any valid polyphone reading")).first
+        tolerance_checkbox = tolerance_label.locator("xpath=ancestor::label[1]//input[@type='checkbox']")
+        if tolerance_checkbox.count() > 0 and tolerance_checkbox.is_checked():
+            tolerance_label.click()
+        save_settings(page)
+
+        focus_zh_input(page)
+        tok_strict = read_zh_lesson_tokens(page)
+        u_chang = tok_strict["words"][0]["units"][0]
+        assert u_chang["hanzi"] == "长" and u_chang["code"] == "vh", f"Expected 'zhang' -> 'vh': {u_chang}"
+        press_char(page, "i")
+        tok_err = read_zh_lesson_tokens(page)
+        assert tok_err["words"][0]["units"][0]["errorCount"] == 1 and tok_err["cursorError"], (
+            f"Tolerance OFF must reject alternate 'chang' first key 'i': {tok_err}"
+        )
+
+        open_settings(page)
+        fs1 = page.locator("main fieldset:nth-of-type(1)").first
+        tolerance_label = fs1.get_by_text(re.compile(r"多音字宽容判定|Allow any valid polyphone reading")).first
+        tolerance_label.click()
+        save_settings(page)
+
+        focus_zh_input(page)
+        tok_tol_before = read_zh_lesson_tokens(page)
+        assert tok_tol_before["words"][0]["units"][0]["code"] == "vh"
+        press_char(page, "i")
+        tok_tol_mid = read_zh_lesson_tokens(page)
+        u_switched = tok_tol_mid["words"][0]["units"][0]
+        assert u_switched["errorCount"] == 0 and u_switched["code"] == "ih", (
+            f"Tolerance ON must accept 'i' and switch '长' to 'ih' ('chang'): {u_switched}"
+        )
+        type_key_stream(page, "hda")
+        tok_tol_after = read_zh_lesson_tokens(page)
+        assert not tok_tol_after["cursorError"] and not tok_tol_after["hasMissAnywhere"], (
+            f"Completing '长大' via alternate reading 'ihda' must finish cleanly: {tok_tol_after}"
+        )
+
+        stored = get_settings_storage(page) or {}
+        assert stored.get("lesson.type") == "custom"
+        assert stored.get("lesson.customText.zhContent") == "长大"
+        assert stored.get("lesson.customText.zhPolyphoneTolerance") is True
+
+
+def t1_f14_03_custom_text_en_zh_isolation_and_unlocked_indicator(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    with open_context(
+        browser,
+        base_url,
+        settings={"keyboard.language": "en", "keyboard.layout": "en-us"},
+    ) as (_, page, _, _):
+        page.goto(f"{base_url}/", wait_until="domcontentloaded")
+        ensure_practice_language(page, "en")
+
+        open_settings(page)
+        main = page.locator("main")
+        # Streamlined 2-tab lesson settings: only Guided lessons + Custom text exist.
+        assert main.get_by_text(re.compile(r"^(引导课程|Guided lessons)$")).count() == 1, (
+            f"Expected 1 Guided lessons tab, main text={main.inner_text()!r}"
+        )
+        assert main.get_by_text(re.compile(r"^(自定义文本|Custom text)$")).count() == 1, (
+            f"Expected 1 Custom text tab, main text={main.inner_text()!r}"
+        )
+        for removed in [r"^(单词表|Word list)$", r"^(书籍|Books)$", r"^(代码|Code)$", r"^(数字|Numbers)$"]:
+            assert main.get_by_text(re.compile(removed)).count() == 0, f"Unexpected removed tab matching {removed}"
+
+        _open_custom_text_tab(page)
+        fs1 = page.locator("main fieldset:nth-of-type(1)").first
+        assert fs1.get_by_text(re.compile(r"所有字词[:：]|All words[:：]")).count() >= 1, (
+            f"Missing All words stat in EN Custom text: {fs1.inner_text()!r}"
+        )
+        assert fs1.get_by_text(re.compile(r"转换为小写|Transform to lowercase")).count() == 1, (
+            f"Missing Transform to lowercase in EN Custom text: {fs1.inner_text()!r}"
+        )
+        assert fs1.locator('[data-polyphone-review="1"]').count() == 0, "Unexpected ZH polyphone review in EN mode"
+        assert fs1.get_by_text(re.compile(r"多音字宽容判定|Allow any valid polyphone reading")).count() == 0, (
+            "Unexpected ZH polyphone tolerance toggle in EN mode"
+        )
+
+        en_custom = "alpha beta gamma"
+        fs1.locator("textarea").first.fill(en_custom)
+        save_settings(page)
+
+        en_text = read_en_lesson_text(page)
+        assert "alpha" in en_text and "beta" in en_text and "gamma" in en_text, en_text
+        expect(page.locator("main section").first).to_contain_text(
+            re.compile(r"All keys are unlocked\.|所有键位已解锁。")
+        )
+
+        # Switching to ZH keeps EN text isolated and shows separate ZH editor & polyphone UI.
+        ensure_practice_language(page, "zh")
+        open_settings(page)
+        fs1 = page.locator("main fieldset:nth-of-type(1)").first
+        zh_ta = fs1.locator("textarea").first
+        assert zh_ta.input_value() != en_custom, "ZH custom text editor must not show EN custom text"
+        assert fs1.get_by_text(re.compile(r"汉字数[:：]|Hanzi count[:：]")).count() >= 1, (
+            f"Missing Hanzi count stat in ZH Custom text: {fs1.inner_text()!r}"
+        )
+        assert fs1.get_by_text(re.compile(r"转换为小写|Transform to lowercase")).count() == 0, (
+            "Unexpected EN lowercase option in ZH Custom text"
+        )
+        assert fs1.get_by_text(re.compile(r"多音字宽容判定|Allow any valid polyphone reading")).count() == 1, (
+            f"Missing ZH polyphone tolerance option: {fs1.inner_text()!r}"
+        )
+
+        zh_custom = "重庆银行"
+        zh_ta.fill(zh_custom)
+        fs1.locator('[data-polyphone-review="1"]').wait_for(state="visible", timeout=10000)
+        save_settings(page)
+
+        tok_zh = read_zh_lesson_tokens(page)
+        assert tok_zh["words"][0]["fullHanzi"].startswith(zh_custom), tok_zh["words"][0]
+        expect(page.locator("main section").first).to_contain_text(
+            re.compile(r"All keys are unlocked\.|所有键位已解锁。")
+        )
+
+        # Switching back to EN preserves EN custom words and independent storage.
+        ensure_practice_language(page, "en")
+        en_text_again = read_en_lesson_text(page)
+        assert "alpha" in en_text_again and "beta" in en_text_again, en_text_again
+
+        stored = get_settings_storage(page) or {}
+        assert stored.get("lesson.customText.content") == en_custom
+        assert stored.get("lesson.customText.zhContent") == zh_custom
+
+
 TIER1_TESTS: list[tuple[str, Callable[..., None]]] = [
     ("t1_f1_01_profile_high_error_fast_key_not_green", t1_f1_01_profile_high_error_fast_key_not_green),
     ("t1_f1_02_profile_low_sample_fast_key_not_green", t1_f1_02_profile_low_sample_fast_key_not_green),
@@ -2024,4 +2264,16 @@ TIER1_TESTS: list[tuple[str, Callable[..., None]]] = [
     ("t1_f13_02_en_error_badge_stop_on_error_false", t1_f13_02_en_error_badge_stop_on_error_false),
     ("t1_f13_03_zh_error_badge_stop_on_error_true", t1_f13_03_zh_error_badge_stop_on_error_true),
     ("t1_f13_04_zh_error_badge_stop_on_error_false", t1_f13_04_zh_error_badge_stop_on_error_false),
+    (
+        "t1_f14_01_en_guided_excludes_rare_alphabetical_tail_on_z_focus",
+        t1_f14_01_en_guided_excludes_rare_alphabetical_tail_on_z_focus,
+    ),
+    (
+        "t1_f14_02_custom_text_zh_polyphone_review_inline_pin_and_tolerance",
+        t1_f14_02_custom_text_zh_polyphone_review_inline_pin_and_tolerance,
+    ),
+    (
+        "t1_f14_03_custom_text_en_zh_isolation_and_unlocked_indicator",
+        t1_f14_03_custom_text_en_zh_isolation_and_unlocked_indicator,
+    ),
 ]

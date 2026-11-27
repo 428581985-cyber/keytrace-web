@@ -154,6 +154,7 @@ export default [
           "debug",
           "knex",
           "objection",
+          "pinyin-pro",
           "react",
           "react-dom",
           "react-intl",

@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, test } from "node:test";
 import { type Language, Layout, loadKeyboard } from "@keybr/keyboard";
-import { FakePhoneticModel, Letter } from "@keybr/phonetic-model";
+import { FakePhoneticModel, Filter, Letter } from "@keybr/phonetic-model";
 import { LCG } from "@keybr/rand";
 import {
   type KeyStats,
@@ -11,7 +13,7 @@ import {
 import { Settings } from "@keybr/settings";
 import { deepEqual, equal } from "rich-assert";
 import { fakeKeyStatsMap, printLessonKeys } from "./fakes.ts";
-import { GuidedLesson } from "./guided.ts";
+import { GuidedLesson, stripAlphabeticalTail } from "./guided.ts";
 import { LessonKey } from "./key.ts";
 import { lessonProps } from "./settings.ts";
 import { Target } from "./target.ts";
@@ -697,7 +699,9 @@ describe("zh-sp punctuation separator", () => {
   it("uses either punctuation or space between words, never both", () => {
     const keyboard = loadKeyboard(Layout.ZH_SP);
     const model = new FakePhoneticModel(["dage", "ykgo", "uiwu", "glxi"]);
-    Object.defineProperty(model, "language", { value: keyboard.layout.language });
+    Object.defineProperty(model, "language", {
+      value: keyboard.layout.language,
+    });
 
     const words = ["dage", "ykgo", "uiwu", "glxi", "haha", "wowo"];
 
@@ -786,7 +790,10 @@ describe("zh-sp sticky weak-key focus and word inclusion", () => {
       }),
       { persistFocus: false },
     );
-    equal(kPreview.findFocusedKey()?.letter.codePoint, model.letters[2].codePoint);
+    equal(
+      kPreview.findFocusedKey()?.letter.codePoint,
+      model.letters[2].codePoint,
+    );
 
     // With lock intact, returning to b = 0.6 (< 1) still keeps lock on b.
     const k2After = lesson.update(
@@ -795,7 +802,10 @@ describe("zh-sp sticky weak-key focus and word inclusion", () => {
         [model.letters[2].codePoint]: [0.2, 0.9],
       }),
     );
-    equal(k2After.findFocusedKey()?.letter.codePoint, model.letters[1].codePoint);
+    equal(
+      k2After.findFocusedKey()?.letter.codePoint,
+      model.letters[1].codePoint,
+    );
 
     // Now b truly hits confidence >= 1.0 -> unlock and switch to next weakest (c).
     const k3 = lesson.update(
@@ -942,16 +952,16 @@ describe("zh-qp guided lesson", () => {
     const drawn = generated.split(/[ ,.]+/).filter(Boolean);
     equal(drawn.length > 0, true);
     for (const word of drawn) {
-      equal(
-        word === "yixinyiyi" || word === "jingshenwenming",
-        true,
-      );
+      equal(word === "yixinyiyi" || word === "jingshenwenming", true);
     }
   });
 
   it("isolates zh-qp and zh-sp lockedFocusKey and drillFocusKey in localStorage", () => {
     withMockLocalStorage((store) => {
-      const settings = new Settings().set(lessonProps.guided.recoverKeys, false);
+      const settings = new Settings().set(
+        lessonProps.guided.recoverKeys,
+        false,
+      );
 
       const spKeyboard = loadKeyboard(Layout.ZH_SP);
       const spModel = makeFullAlphabetZhModel(spKeyboard.layout.language);
@@ -1086,9 +1096,15 @@ describe("zh-qp guided lesson", () => {
       { length: 20 },
       (_, i) => `lvword${String.fromCodePoint(0x61 + i)}`,
     );
-    const largeLesson = new GuidedLesson(settings, keyboard, model, largeVPool, {
-      unlockAllKeys: true,
-    });
+    const largeLesson = new GuidedLesson(
+      settings,
+      keyboard,
+      model,
+      largeVPool,
+      {
+        unlockAllKeys: true,
+      },
+    );
     const largeKeys = largeLesson.update(stats);
     const frag1 = largeLesson
       .generate(largeKeys, LCG(99))
@@ -1106,7 +1122,14 @@ describe("zh-qp guided lesson", () => {
   it("uses either punctuation or space between words in zh-qp, never both", () => {
     const keyboard = loadKeyboard(Layout.ZH_QP);
     const model = makeFullAlphabetZhModel(keyboard.layout.language);
-    const words = ["zhongguo", "fangan", "shijian", "wenhua", "yanjiu", "lvyou"];
+    const words = [
+      "zhongguo",
+      "fangan",
+      "shijian",
+      "wenhua",
+      "yanjiu",
+      "lvyou",
+    ];
 
     const sHalf = new Settings().set(lessonProps.punctuators, 0.5);
     const lHalf = new GuidedLesson(sHalf, keyboard, model, words, {
@@ -1126,7 +1149,10 @@ describe("zh-sp-ms semicolon key integration", () => {
       const keyboard = loadKeyboard(Layout.ZH_SP_MS);
       const model = makeFullAlphabetZhModel(keyboard.layout.language);
       const words = ["jnx;", "mztm", "tiug", "dax;"];
-      const settings = new Settings().set(lessonProps.guided.recoverKeys, false);
+      const settings = new Settings().set(
+        lessonProps.guided.recoverKeys,
+        false,
+      );
       const lesson = new GuidedLesson(settings, keyboard, model, words, {
         unlockAllKeys: true,
       });
@@ -1150,7 +1176,10 @@ describe("zh-sp-ms semicolon key integration", () => {
       const generated = lesson.generate(keys, LCG(7));
       const drawn = generated.split(/[ ,.]+/).filter(Boolean);
       equal(drawn.length > 0, true);
-      equal(drawn.every((w) => w.includes(";")), true);
+      equal(
+        drawn.every((w) => w.includes(";")),
+        true,
+      );
     });
   });
 });
@@ -1196,7 +1225,10 @@ describe("standalone progressive Chinese curriculum vs KeyTrace unlockAllKeys", 
     equal(drawn0.length > 0, true);
     const allowed0 = new Set([..."iujdgs"]);
     for (const word of drawn0) {
-      equal([...word].every((ch) => allowed0.has(ch)), true);
+      equal(
+        [...word].every((ch) => allowed0.has(ch)),
+        true,
+      );
     }
 
     // Once all 6 keys reach zhTargetSpeed (bestConfidence >= 1), key #7 ('v') unlocks and becomes focused.
@@ -1266,7 +1298,10 @@ describe("standalone progressive Chinese curriculum vs KeyTrace unlockAllKeys", 
     const keyboard = loadKeyboard(Layout.ZH_QP);
     const model = makeFullAlphabetZhModel(keyboard.layout.language);
     const settings = new Settings();
-    const lesson = new GuidedLesson(settings, keyboard, model, ["jingji", "dajia"]);
+    const lesson = new GuidedLesson(settings, keyboard, model, [
+      "jingji",
+      "dajia",
+    ]);
     const target = new Target(settings, keyboard.layout);
     const fastTime = speedToTime(target.targetSpeed) / 1.2;
 
@@ -1335,9 +1370,15 @@ describe("standalone progressive Chinese curriculum vs KeyTrace unlockAllKeys", 
       ...twoIdioms,
     ]);
     const keysFew = lessonFew.update(makeKeyStatsMap(lessonFew.letters, []));
-    const drawnFew = lessonFew.generate(keysFew, LCG(7)).split(" ").filter(Boolean);
+    const drawnFew = lessonFew
+      .generate(keysFew, LCG(7))
+      .split(" ")
+      .filter(Boolean);
     equal(drawnFew.length > 0, true);
-    equal(drawnFew.every((w) => w.length === 4), true);
+    equal(
+      drawnFew.every((w) => w.length === 4),
+      true,
+    );
 
     const sixIdioms = [
       "gssijiuu",
@@ -1359,7 +1400,10 @@ describe("standalone progressive Chinese curriculum vs KeyTrace unlockAllKeys", 
       .split(" ")
       .filter(Boolean);
     equal(drawnEnough.length > 0, true);
-    equal(drawnEnough.every((w) => w.length === 8), true);
+    equal(
+      drawnEnough.every((w) => w.length === 8),
+      true,
+    );
   });
 
   it("unlocks all EN keys cleanly in KeyTrace mode and supports drillKey override", () => {
@@ -1387,14 +1431,103 @@ describe("standalone progressive Chinese curriculum vs KeyTrace unlockAllKeys", 
         keys1.findIncludedKeys().every((k) => !k.isForced),
         true,
       );
-      equal(keys1.findFocusedKey()?.letter.codePoint, lesson.letters[8].codePoint);
+      equal(
+        keys1.findFocusedKey()?.letter.codePoint,
+        lesson.letters[8].codePoint,
+      );
 
       // Drill override on EN key works in KeyTrace mode.
       const drillChar = String.fromCodePoint(lesson.letters[2].codePoint);
       store.set("keybr.en-us.drillFocusKey", drillChar);
       const keys2 = lesson.update(stats);
-      equal(keys2.findFocusedKey()?.letter.codePoint, lesson.letters[2].codePoint);
+      equal(
+        keys2.findFocusedKey()?.letter.codePoint,
+        lesson.letters[2].codePoint,
+      );
       equal(store.get("keybr.en-us.drillFocusKey"), undefined);
     });
+  });
+
+  it("strips rare alphabetical tail in EN natural dictionary and falls back to pseudo words when few letters are unlocked", () => {
+    const enWords: string[] = JSON.parse(
+      readFileSync(
+        resolve(
+          import.meta.dirname,
+          "../../keybr-content-words/lib/data/words-en.json",
+        ),
+        "utf8",
+      ),
+    );
+
+    const shortSorted = Array.from({ length: 20 }, (_, i) => `word${i}`);
+    equal(stripAlphabeticalTail(shortSorted).length, 20);
+    equal(stripAlphabeticalTail(enWords).length, 8436);
+
+    const keyboard = loadKeyboard(Layout.EN_US);
+    const fullAlphabet = "etaoinshrdlcumwfgypbvkjxqz".split("");
+    class AlphabetFakeModel extends FakePhoneticModel {
+      override readonly letters: readonly Letter[];
+
+      constructor(words: readonly string[], letters: readonly Letter[]) {
+        super(words);
+        this.letters = letters;
+      }
+    }
+    const model = new AlphabetFakeModel(
+      ["zaz", "zeze", "zozo"],
+      fullAlphabet.map(
+        (ch, idx) => new Letter(ch.codePointAt(0)!, 1 - idx * 0.01),
+      ),
+    );
+    const lesson = new GuidedLesson(new Settings(), keyboard, model, enWords, {
+      unlockAllKeys: true,
+    });
+    const dictSet = new Set(lesson.dictionary);
+    for (const rare of [
+      "zonked",
+      "fuzzbox",
+      "gazebo",
+      "kamikaze",
+      "ziplock",
+      "zirconium",
+      "zither",
+    ]) {
+      equal(dictSet.has(rare), false);
+    }
+    for (const common of [
+      "crazy",
+      "size",
+      "zero",
+      "pizza",
+      "quickly",
+      "question",
+    ]) {
+      equal(dictSet.has(common), true);
+    }
+
+    // With only a rare 6-letter subset where <15 common words match, pseudo words top up the pool.
+    const narrowLetters = ["e", "t", "a", "o", "z", "x"].map(
+      (c, idx) => new Letter(c.codePointAt(0)!, 1 - idx * 0.1),
+    );
+    const narrowFilter = new Filter(narrowLetters, narrowLetters[4]);
+    equal(lesson.dictionary.find(narrowFilter).length < 15, true);
+    const smallModel = new AlphabetFakeModel(
+      ["zaz", "zeze", "zozo"],
+      narrowLetters,
+    );
+    const smallLesson = new GuidedLesson(
+      new Settings(),
+      keyboard,
+      smallModel,
+      enWords,
+    );
+    const smallKeys = smallLesson.update(
+      makeKeyStatsMap(smallLesson.letters, []),
+    );
+    const text = smallLesson.generate(smallKeys, LCG(42));
+    equal(
+      text.includes("zaz") || text.includes("zeze") || text.includes("zozo"),
+      true,
+    );
   });
 });

@@ -3,11 +3,7 @@ import {
   isZhLayout,
   keyboardProps,
 } from "@keybr/keyboard";
-import {
-  GuidedLesson,
-  type Lesson,
-  resolvePracticeMode,
-} from "@keybr/lesson";
+import { GuidedLesson, type Lesson, resolvePracticeMode } from "@keybr/lesson";
 import { CurrentKeyRow, KeySetRow } from "@keybr/lesson-ui";
 import { PageDataContext } from "@keybr/pages-shared";
 import { LCG } from "@keybr/rand";
@@ -46,10 +42,7 @@ export function LessonPreview({
     keytraceAvailable: pageData?.keytraceAvailable,
     hasKeyTraceData: hasKeyTraceResults(results),
   });
-  const isKeytraceMode =
-    lesson instanceof GuidedLesson
-      ? lesson.unlockAllKeys
-      : practiceMode === "keytrace";
+  const isKeytraceMode = lesson instanceof GuidedLesson && lesson.unlockAllKeys;
   const { lessonKeys, textInput } = useMemo(() => {
     const effectiveResults =
       practiceMode === "standalone"

@@ -637,7 +637,172 @@ function toGroupsQuanpin(chars: readonly Char[]): Group[] {
   return groups;
 }
 
+function toGroupsAnnotated(chars: readonly Char[]): Group[] {
+  const groups: Group[] = [];
+  let currentWordId: number | null = null;
+  let currentWordUnits: Unit[] = [];
+  let currentUnitId: number | null = null;
+  let unitChars: Char[] = [];
+  let unitHanzi = "";
+  let unitGarbageCount = 0;
+  let pendingGarbage: Char[] = [];
+
+  const flushUnit = () => {
+    if (unitChars.length === 0) {
+      currentUnitId = null;
+      unitHanzi = "";
+      unitGarbageCount = 0;
+      return;
+    }
+    const cursorErrorCount = getCursorErrorCount(unitChars);
+    currentWordUnits.push({
+      code: unitChars.map((c) => String.fromCodePoint(c.codePoint)).join(""),
+      chars: unitChars,
+      hanzi: unitHanzi,
+      hasGarbage: unitGarbageCount > 0,
+      garbageCount: unitGarbageCount,
+      errorCount: resolveErrorCount(unitGarbageCount, cursorErrorCount),
+      cursor: unitChars.some((c) => has(c.attrs, Attr.Cursor)),
+    });
+    currentUnitId = null;
+    unitChars = [];
+    unitHanzi = "";
+    unitGarbageCount = 0;
+  };
+
+  const flushWord = () => {
+    flushUnit();
+    if (currentWordUnits.length > 0) {
+      groups.push({ kind: "word", units: currentWordUnits });
+      currentWordUnits = [];
+    }
+    currentWordId = null;
+  };
+
+  for (const char of chars) {
+    if (has(char.attrs, Attr.Garbage)) {
+      pendingGarbage.push(char);
+      continue;
+    }
+    if (char.codePoint === 0x20) {
+      flushWord();
+      const garbageCount = pendingGarbage.length;
+      pendingGarbage = [];
+      const isCursor = has(char.attrs, Attr.Cursor);
+      const space: SpaceToken = {
+        cursor: isCursor,
+        attrs: char.attrs,
+        hasGarbage: garbageCount > 0,
+        garbageCount,
+        errorCount: resolveErrorCount(
+          garbageCount,
+          isCursor ? (char.errorCount ?? 0) : 0,
+        ),
+      };
+      const prev = groups[groups.length - 1];
+      if (prev != null && prev.kind === "word" && prev.trailingSpace == null) {
+        groups[groups.length - 1] = { ...prev, trailingSpace: space };
+      } else {
+        groups.push({ kind: "space", ...space });
+      }
+      continue;
+    }
+    if (isPunctuation(char.codePoint)) {
+      flushUnit();
+      const garbageCount = pendingGarbage.length;
+      pendingGarbage = [];
+      const code = String.fromCodePoint(char.codePoint);
+      const isCursor = has(char.attrs, Attr.Cursor);
+      const punctUnit: Unit = {
+        code,
+        chars: [char],
+        hanzi: char.zhHanzi ?? mapPunctuation(code) ?? code,
+        hasGarbage: garbageCount > 0,
+        garbageCount,
+        errorCount: resolveErrorCount(
+          garbageCount,
+          isCursor ? (char.errorCount ?? 0) : 0,
+        ),
+        cursor: isCursor,
+      };
+      if (currentWordUnits.length > 0) {
+        currentWordUnits.push(punctUnit);
+      } else {
+        const prev = groups[groups.length - 1];
+        if (
+          prev != null &&
+          prev.kind === "word" &&
+          prev.trailingSpace == null
+        ) {
+          groups[groups.length - 1] = {
+            kind: "word",
+            units: [...prev.units, punctUnit],
+          };
+        } else {
+          groups.push({ kind: "word", units: [punctUnit] });
+        }
+      }
+      continue;
+    }
+
+    if (
+      currentUnitId != null &&
+      (char.zhUnit == null || char.zhUnit !== currentUnitId)
+    ) {
+      flushUnit();
+    }
+    if (
+      currentWordId != null &&
+      (char.zhWord == null || char.zhWord !== currentWordId)
+    ) {
+      flushWord();
+    }
+    if (unitChars.length === 0) {
+      currentUnitId = char.zhUnit ?? null;
+      currentWordId = char.zhWord ?? null;
+      unitHanzi = char.zhHanzi ?? "";
+    } else if (unitHanzi === "" && char.zhHanzi != null) {
+      unitHanzi = char.zhHanzi;
+    }
+    if (pendingGarbage.length > 0) {
+      unitGarbageCount += pendingGarbage.length;
+      pendingGarbage = [];
+    }
+    unitChars.push(char);
+  }
+
+  flushWord();
+
+  if (pendingGarbage.length > 0) {
+    groups.push({
+      kind: "word",
+      units: [
+        {
+          code: pendingGarbage
+            .map((c) => String.fromCodePoint(c.codePoint))
+            .join(""),
+          chars: pendingGarbage,
+          hanzi: "",
+          hasGarbage: true,
+          garbageCount: pendingGarbage.length,
+          errorCount: resolveErrorCount(
+            pendingGarbage.length,
+            getCursorErrorCount(pendingGarbage),
+          ),
+          isPureGarbage: true,
+          cursor: pendingGarbage.some((c) => has(c.attrs, Attr.Cursor)),
+        },
+      ],
+    });
+  }
+
+  return groups;
+}
+
 function toGroups(chars: readonly Char[], scheme: ZhInputScheme): Group[] {
+  if (chars.some((char) => char.zhUnit != null)) {
+    return toGroupsAnnotated(chars);
+  }
   return scheme === "zh-qp" ? toGroupsQuanpin(chars) : toGroupsShuangpin(chars);
 }
 
@@ -761,8 +926,8 @@ function findCursorMeta(groupsByLine: readonly Group[][]): CursorMeta | null {
         if (group.cursor) {
           const hasError = Boolean(
             group.hasGarbage ||
-              (group.errorCount ?? 0) > 0 ||
-              has(group.attrs, Attr.Miss),
+            (group.errorCount ?? 0) > 0 ||
+            has(group.attrs, Attr.Miss),
           );
           return {
             segments: [hasError ? COLOR.miss : COLOR.current],
@@ -795,8 +960,8 @@ function findCursorMeta(groupsByLine: readonly Group[][]): CursorMeta | null {
             segments.length > 0 ? segments : [COLOR.current];
           const hasError = Boolean(
             hasActiveError ||
-              unit.isPureGarbage ||
-              resolvedSegments[activeIndex] === COLOR.miss,
+            unit.isPureGarbage ||
+            resolvedSegments[activeIndex] === COLOR.miss,
           );
           return {
             segments: resolvedSegments,
@@ -808,8 +973,8 @@ function findCursorMeta(groupsByLine: readonly Group[][]): CursorMeta | null {
       if (group.trailingSpace?.cursor) {
         const hasError = Boolean(
           group.trailingSpace.hasGarbage ||
-            (group.trailingSpace.errorCount ?? 0) > 0 ||
-            has(group.trailingSpace.attrs, Attr.Miss),
+          (group.trailingSpace.errorCount ?? 0) > 0 ||
+          has(group.trailingSpace.attrs, Attr.Miss),
         );
         return {
           segments: [hasError ? COLOR.miss : COLOR.current],
@@ -902,7 +1067,8 @@ function getCursorLayerStyle(
   segmentCount: number,
   hasError: boolean,
 ): CSSProperties {
-  const defaultCursorColor = "var(--textinput-cursor__background-color, #a8a29a)";
+  const defaultCursorColor =
+    "var(--textinput-cursor__background-color, #a8a29a)";
   const activeColor = hasError ? COLOR.miss : defaultCursorColor;
   switch (caretShapeStyle) {
     case CaretShapeStyle.Block:
@@ -1148,9 +1314,13 @@ export function ZhLines({
                     />
                   );
                 }
-                const chars = isQuanpin
-                  ? group.units.map((u) => u.hanzi ?? "")
-                  : resolveWordCharsShuangpin(group.units, resolvedScheme);
+                const hasExplicitHanzi = group.units.some(
+                  (u) => u.hanzi != null && u.hanzi !== "",
+                );
+                const chars =
+                  isQuanpin || hasExplicitHanzi
+                    ? group.units.map((u) => u.hanzi ?? "")
+                    : resolveWordCharsShuangpin(group.units, resolvedScheme);
                 return (
                   <span key={groupIndex} data-word="1" style={styles.word}>
                     {group.units.map((unit, i) => (

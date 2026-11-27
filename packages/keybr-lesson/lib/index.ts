@@ -13,3 +13,4 @@ export * from "./settings.ts";
 export * from "./target.ts";
 export * from "./wordlist.ts";
 export * from "./zh-curriculum.ts";
+export * from "./zh-pinyin.ts";

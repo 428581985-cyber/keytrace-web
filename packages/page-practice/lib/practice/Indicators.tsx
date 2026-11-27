@@ -1,10 +1,5 @@
 import { Tasks } from "@keybr/lang";
-import {
-  GuidedLesson,
-  type LessonKey,
-  lessonProps,
-  resolvePracticeMode,
-} from "@keybr/lesson";
+import { GuidedLesson, type LessonKey, lessonProps } from "@keybr/lesson";
 import {
   CurrentKeyRow,
   DailyGoalRow,
@@ -14,7 +9,6 @@ import {
   StreakListRow,
 } from "@keybr/lesson-ui";
 import { PageDataContext, Pages } from "@keybr/pages-shared";
-import { hasKeyTraceResults, ResultContext } from "@keybr/result";
 import { useSettings } from "@keybr/settings";
 import { Popup, Portal, type ZoomableProps } from "@keybr/widget";
 import { memo, type ReactNode, useContext, useEffect, useState } from "react";
@@ -38,18 +32,10 @@ export const Indicators = memo(function Indicators({
 } & ZoomableProps): ReactNode {
   const { settings } = useSettings();
   const pageData = useContext(PageDataContext);
-  const resultContext = useContext(ResultContext);
   const keytraceAvailable = Boolean(pageData?.keytraceAvailable);
   const keytraceMode = settings.get(lessonProps.keytraceMode);
   const showKeytracePill = keytraceAvailable && keytraceMode !== "standalone";
-  const isKeytraceMode =
-    lesson instanceof GuidedLesson
-      ? lesson.unlockAllKeys
-      : resolvePracticeMode({
-          settings,
-          keytraceAvailable,
-          hasKeyTraceData: hasKeyTraceResults(resultContext?.results ?? []),
-        }) === "keytrace";
+  const isKeytraceMode = lesson instanceof GuidedLesson && lesson.unlockAllKeys;
 
   type State = Readonly<
     | { type: "hidden" }

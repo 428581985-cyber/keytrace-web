@@ -70,6 +70,11 @@ export type TextInputSettings = {
    * Active Chinese input scheme layout id.
    */
   readonly zhScheme?: ZhInputScheme;
+  /**
+   * When enabled in Chinese custom text mode, accept any valid heteronym
+   * reading for polyphonic characters at runtime.
+   */
+  readonly zhPolyphoneTolerance?: boolean;
 };
 
 export const textInputSettings = {
@@ -82,6 +87,10 @@ export const textInputProps = {
   stopOnError: booleanProp("textInput.stopOnError", true),
   forgiveErrors: booleanProp("textInput.forgiveErrors", true),
   spaceSkipsWords: booleanProp("textInput.spaceSkipsWords", false),
+  zhPolyphoneTolerance: booleanProp(
+    "lesson.customText.zhPolyphoneTolerance",
+    false,
+  ),
   fuzzy: {
     enEng: booleanProp("textInput.fuzzy.enEng", false),
     anAng: booleanProp("textInput.fuzzy.anAng", false),
@@ -107,6 +116,7 @@ export function toTextInputSettings(settings: Settings): TextInputSettings {
     zhShuangpin: isZhShuangpin(language),
     zhQuanpin: isZhQuanpin(language),
     zhScheme: getZhSchemeFromLayout(layout) ?? undefined,
+    zhPolyphoneTolerance: settings.get(textInputProps.zhPolyphoneTolerance),
     fuzzy: {
       enEng: settings.get(textInputProps.fuzzy.enEng),
       anAng: settings.get(textInputProps.fuzzy.anAng),
