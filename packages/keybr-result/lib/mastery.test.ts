@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import { Letter } from "@keybr/phonetic-model";
 import { equal, isNull, isTrue } from "rich-assert";
-import { type KeyStats } from "./keystats.ts";
+import { KEY_STATS_HALF_LIFE_MS, type KeyStats } from "./keystats.ts";
 import {
   computeKeyMastery,
   computeSampleMastery,
   summarizeKeySamples,
 } from "./mastery.ts";
 import { speedToTime } from "./result.ts";
+import { TextType } from "./texttype.ts";
 
 function closeTo(actual: number, expected: number, eps = 1e-6) {
   isTrue(
@@ -182,10 +183,7 @@ test("summarizeKeySamples computes errorRate from missCount / hitCount", () => {
 
 test("computeSampleMastery penalizes misses and single-hit samples", () => {
   isNull(
-    computeSampleMastery(
-      { timeToType: 0, hitCount: 5, missCount: 5 },
-      175,
-    ),
+    computeSampleMastery({ timeToType: 0, hitCount: 5, missCount: 5 }, 175),
   );
   const singleHit = computeSampleMastery(
     { timeToType: speedToTime(300), hitCount: 1, missCount: 0 },
@@ -204,4 +202,45 @@ test("computeSampleMastery penalizes misses and single-hit samples", () => {
     175,
   )!;
   equal(clean, 1);
+});
+
+test("summarizeKeySamples decays 14-day-old errors and caps high-volume KeyTrace hits", () => {
+  const baseTs = 1_700_000_000_000;
+  const twoWeeksMs = 2 * KEY_STATS_HALF_LIFE_MS;
+
+  // 14-day-old 20% error KeyTrace aggregate (1000 hits / 200 misses) vs clean web practice today (40 hits / 0 misses).
+  const stats = makeKeyStats({
+    timeToType: speedToTime(220),
+    bestTimeToType: speedToTime(220),
+    samples: [
+      {
+        index: 0,
+        timeStamp: baseTs,
+        hitCount: 1000,
+        missCount: 200,
+        timeToType: 500,
+        filteredTimeToType: 500,
+        textType: TextType.KEYTRACE,
+      },
+      {
+        index: 1,
+        timeStamp: baseTs + twoWeeksMs,
+        hitCount: 40,
+        missCount: 0,
+        timeToType: 250,
+        filteredTimeToType: 250,
+      },
+    ],
+  });
+
+  const summary = summarizeKeySamples(stats);
+  equal(summary.totalHits, 1040);
+  equal(summary.totalMisses, 200);
+  // KeyTrace capped at 40 * 0.35 = 14 effective hits, decayed 0.25x at 14d = 3.5 weighted hits & 0.7 weighted misses.
+  // Total weighted = 40 + 3.5 = 43.5 hits -> errorRate ~ 0.7 / 43.5 ~ 0.016 (< 2% accuracy tolerance!).
+  isTrue(
+    summary.errorRate < 0.02,
+    `Expected decayed+capped errorRate < 0.02, got ${summary.errorRate}`,
+  );
+  equal(computeKeyMastery(stats, 175), 1);
 });

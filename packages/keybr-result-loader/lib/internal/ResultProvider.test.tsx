@@ -54,7 +54,7 @@ test("ResultProvider skips KeyTrace sync when unavailable or standalone and sync
     return new Response(
       JSON.stringify({
         available: true,
-        syncVersion: 4,
+        syncVersion: 5,
         records: [resultToJson(makeKeyTraceResult(1700000020000))],
         latestTs: 1700000020000,
         daysScanned: 1,

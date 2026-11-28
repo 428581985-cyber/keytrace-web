@@ -1,10 +1,10 @@
-import { Result } from "@keybr/result";
+import { Result, TextType } from "@keybr/result";
 import { resultFromJson, type ResultJson } from "@keybr/result-io";
 
 const STORAGE_KEY = "keybr.keytrace.lastSyncedTs";
 const VERSION_KEY = "keybr.keytrace.syncVersion";
 const SYNCED_KEYS_KEY = "keybr.keytrace.syncedKeys";
-const CURRENT_SYNC_VERSION = 4;
+const CURRENT_SYNC_VERSION = 5;
 
 export type KeyTraceSyncResponse = {
   readonly available?: boolean;
@@ -78,6 +78,7 @@ export async function syncKeyTraceResults(
 
     const kept = existingResults.filter(
       (result) =>
+        result.textType !== TextType.KEYTRACE &&
         !removeSet.has(dedupKey(result)) &&
         !removeSet.has(legacyFloorKey(result)),
     );
@@ -112,8 +113,12 @@ export async function syncKeyTraceResults(
   }
 
   const lastSyncedTs = readLastSyncedTs();
+  const canReplaceSameDay = replaceResults != null && lastSyncedTs > 0;
+  const querySince = canReplaceSameDay
+    ? Math.max(0, startOfLocalDay(lastSyncedTs) - 1)
+    : lastSyncedTs;
   const response = await fetch(
-    `/_/sync/keytrace?since=${encodeURIComponent(String(lastSyncedTs))}`,
+    `/_/sync/keytrace?since=${encodeURIComponent(String(querySince))}`,
   );
   if (!response.ok) {
     throw new Error(`KeyTrace sync failed with status ${response.status}`);
@@ -134,18 +139,92 @@ export async function syncKeyTraceResults(
     return { added: 0, daysScanned: 0 };
   }
 
-  const existingKeys = new Set(existingResults.map(dedupKey));
-  const fresh: Result[] = [];
-  const syncedKeys = new Set(readSyncedKeys());
+  if (canReplaceSameDay && latestTs > 0 && latestTs <= lastSyncedTs) {
+    return { added: 0, daysScanned };
+  }
+
+  const parsedIncoming: Result[] = [];
   for (const record of records) {
     const result = resultFromJson(record);
     if (result != null && Result.isValid(result)) {
-      const key = dedupKey(result);
-      if (!existingKeys.has(key)) {
-        existingKeys.add(key);
-        fresh.push(result);
-        syncedKeys.add(key);
+      parsedIncoming.push(result);
+    }
+  }
+
+  if (canReplaceSameDay) {
+    const existingKeys = new Set(existingResults.map(dedupKey));
+    const newIncoming = parsedIncoming.filter(
+      (result) => !existingKeys.has(dedupKey(result)),
+    );
+    if (newIncoming.length === 0) {
+      if (latestTs > lastSyncedTs) {
+        writeLastSyncedTs(latestTs);
       }
+      return { added: 0, daysScanned };
+    }
+
+    const updatedDayLayouts = new Set(newIncoming.map(dayLayoutKey));
+    const hasSameDayKeyTrace = existingResults.some(
+      (result) =>
+        result.textType === TextType.KEYTRACE &&
+        updatedDayLayouts.has(dayLayoutKey(result)),
+    );
+
+    if (hasSameDayKeyTrace) {
+      const removedSameDayKeys = new Set<string>();
+      const kept = existingResults.filter((result) => {
+        const shouldReplace =
+          result.textType === TextType.KEYTRACE &&
+          updatedDayLayouts.has(dayLayoutKey(result));
+        if (shouldReplace) {
+          removedSameDayKeys.add(dedupKey(result));
+          return false;
+        }
+        return true;
+      });
+      const keptKeys = new Set(kept.map(dedupKey));
+      const fresh: Result[] = [];
+      for (const result of parsedIncoming) {
+        if (!updatedDayLayouts.has(dayLayoutKey(result))) {
+          continue;
+        }
+        const key = dedupKey(result);
+        if (!keptKeys.has(key)) {
+          keptKeys.add(key);
+          fresh.push(result);
+        }
+      }
+      const merged = [...kept, ...fresh].sort(
+        (a, b) => a.timeStamp - b.timeStamp,
+      );
+      replaceResults(merged);
+
+      const nextSyncedKeys = new Set(
+        readSyncedKeys().filter((key) => !removedSameDayKeys.has(key)),
+      );
+      for (const result of fresh) {
+        nextSyncedKeys.add(dedupKey(result));
+      }
+      writeSyncedKeys([...nextSyncedKeys]);
+      if (latestTs > lastSyncedTs) {
+        writeLastSyncedTs(latestTs);
+      }
+      if (readSyncVersion() !== CURRENT_SYNC_VERSION) {
+        writeSyncVersion(CURRENT_SYNC_VERSION);
+      }
+      return { added: fresh.length, daysScanned };
+    }
+  }
+
+  const existingKeys = new Set(existingResults.map(dedupKey));
+  const fresh: Result[] = [];
+  const syncedKeys = new Set(readSyncedKeys());
+  for (const result of parsedIncoming) {
+    const key = dedupKey(result);
+    if (!existingKeys.has(key)) {
+      existingKeys.add(key);
+      fresh.push(result);
+      syncedKeys.add(key);
     }
   }
 
@@ -164,6 +243,19 @@ export async function syncKeyTraceResults(
   }
 
   return { added: fresh.length, daysScanned };
+}
+
+function startOfLocalDay(ts: number): number {
+  const d = new Date(ts);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+function dayLayoutKey(result: Result): string {
+  const d = new Date(result.timeStamp);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${result.layout.id}:${y}-${m}-${day}`;
 }
 
 function dedupKey(result: Result): string {

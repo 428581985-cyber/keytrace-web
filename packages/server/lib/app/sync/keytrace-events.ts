@@ -16,13 +16,16 @@ const ALNUM_RE = /[a-zA-Z0-9]/;
 const INTERNAL_APOS_TOKEN_RE = /[a-z]+(?:'[a-z]+)+/gi;
 const ENGLISH_CONTRACTION_SUFFIX_RE = /^(?:s|t|m|d|re|ve|ll)$/i;
 
-const SYNC_VERSION = 4;
+const SYNC_VERSION = 5;
 const KD_BUFFER_LIMIT = 60;
 const MAX_STEP_GAP_MS = 3000;
+const MAX_FLUENT_IKI_MS = 1200;
+const MAX_BOUNDARY_IKI_MS = 600;
 const MAX_CORRECTION_MS = 6000;
 const MAX_TYPO_BS_RUN = 3;
 const MIN_TIME_TO_TYPE = 40;
 const MAX_TIME_TO_TYPE = 12000;
+const KEYTRACE_WEAK_HALF_LIFE_DAYS = 7;
 
 const MODIFIER_VK_SET = new Set([
   16, // Shift
@@ -380,6 +383,7 @@ export async function readKeyTraceSyncData(options?: {
   const imeTimeline: ImeTimelineEntry[] = [];
   let currentSessionKey: string | null = null;
   let kdBuffer: KdEvent[] = [];
+  let pressedVks = new Set<number>();
 
   for (const { date, files } of dayGroups) {
     const dayEvents: RawEvent[] = [];
@@ -395,6 +399,7 @@ export async function readKeyTraceSyncData(options?: {
 
     collectImeMetaEvents(dayEvents, imeTimeline);
     dayEvents.sort(compareEvents);
+    const hasKeyUpEvents = dayEvents.some((ev) => ev.ev === "ku");
 
     for (const event of dayEvents) {
       if (event.ev === "meta") {
@@ -405,28 +410,10 @@ export async function readKeyTraceSyncData(options?: {
       if (sessionKey != null && sessionKey !== currentSessionKey) {
         currentSessionKey = sessionKey;
         kdBuffer = [];
+        pressedVks = new Set<number>();
       }
 
-      if (event.ev === "kd") {
-        const sc = event.sc;
-        const vk = event.vk;
-        const mods =
-          typeof event.mods === "number" && Number.isFinite(event.mods)
-            ? event.mods
-            : 0;
-        if (
-          typeof sc === "number" &&
-          sc > 0 &&
-          typeof vk === "number" &&
-          Number.isFinite(vk) &&
-          (mods & 0b1110) === 0 &&
-          !MODIFIER_VK_SET.has(vk)
-        ) {
-          kdBuffer.push({ vk, mono: event.mono });
-          if (kdBuffer.length > KD_BUFFER_LIMIT) {
-            kdBuffer.shift();
-          }
-        }
+      if (handleBufferKeyEvent(event, kdBuffer, pressedVks, hasKeyUpEvents)) {
         continue;
       }
 
@@ -434,51 +421,36 @@ export async function readKeyTraceSyncData(options?: {
         continue;
       }
 
-      const keys =
-        typeof event.keys === "number" && Number.isFinite(event.keys)
-          ? Math.floor(event.keys)
-          : 0;
-      if (keys <= 0) {
+      const prepared = prepareCommitEvent(event, kdBuffer, imeTimeline);
+      if (prepared == null) {
+        continue;
+      }
+      if (IGNORED_DISPLAY_EXES.has(prepared.exeRaw.toLowerCase())) {
         continue;
       }
 
-      const take = Math.min(keys, kdBuffer.length);
-      const slice =
-        take > 0 ? kdBuffer.splice(kdBuffer.length - take, take) : [];
-
-      if (slice.length === 0 || typeof event.text !== "string") {
-        continue;
+      if (commitKeys != null && prepared.legacyLayout != null) {
+        commitKeys.add(
+          `${prepared.legacyLayout}:${Math.round(event.ts / 1000)}`,
+        );
+        commitKeys.add(
+          `${prepared.legacyLayout}:${Math.floor(event.ts / 1000)}`,
+        );
       }
 
-      const cleanText = event.text.replace(PUA_RE, "");
-      const printableCount = countPrintable(cleanText);
-      if (printableCount === 0 || printableCount > keys) {
-        continue;
-      }
-
-      const legacyLayout = detectLegacyLayoutId(cleanText);
-      if (commitKeys != null && legacyLayout != null) {
-        commitKeys.add(`${legacyLayout}:${Math.round(event.ts / 1000)}`);
-        commitKeys.add(`${legacyLayout}:${Math.floor(event.ts / 1000)}`);
-      }
-
-      const zhLayoutId = resolveZhLayoutFromIme(
-        findActiveIme(imeTimeline, event.ts, event.mono),
-      );
-      const layoutId = detectLayoutId(cleanText, zhLayoutId);
-      if (layoutId == null) {
+      if (prepared.layoutId == null) {
         continue;
       }
       if (commitKeys != null) {
-        commitKeys.add(`${layoutId}:${Math.round(event.ts / 1000)}`);
-        commitKeys.add(`${layoutId}:${Math.floor(event.ts / 1000)}`);
+        commitKeys.add(`${prepared.layoutId}:${Math.round(event.ts / 1000)}`);
+        commitKeys.add(`${prepared.layoutId}:${Math.floor(event.ts / 1000)}`);
       }
 
       if (event.ts <= sinceTs) {
-        const lastKd = slice[slice.length - 1];
+        const lastKd = prepared.slice[prepared.slice.length - 1];
         if (lastKd != null) {
           carryBySessionBucket.set(
-            `${currentSessionKey ?? ""}\0${date}:${layoutId}`,
+            `${currentSessionKey ?? ""}\0${date}:${prepared.layoutId}`,
             {
               lastMono: lastKd.mono,
               endedWithBs: lastKd.vk === 8,
@@ -491,9 +463,9 @@ export async function readKeyTraceSyncData(options?: {
       accumulateCommit(
         buckets,
         date,
-        layoutId,
+        prepared.layoutId,
         event.ts,
-        slice,
+        prepared.slice,
         undefined,
         currentSessionKey,
         carryBySessionBucket,
@@ -747,6 +719,102 @@ function detectLayoutId(
   return null;
 }
 
+type PreparedCommit = {
+  readonly keys: number;
+  readonly slice: KdEvent[];
+  readonly cleanText: string;
+  readonly exeRaw: string;
+  readonly layoutId: KeyTraceLayoutId | null;
+  readonly legacyLayout: "zh-sp" | "en-us" | null;
+};
+
+function handleBufferKeyEvent(
+  event: RawEvent,
+  kdBuffer: KdEvent[],
+  pressedVks: Set<number>,
+  hasKeyUpEvents: boolean,
+): boolean {
+  if (event.ev === "ku") {
+    if (typeof event.vk === "number" && Number.isFinite(event.vk)) {
+      pressedVks.delete(event.vk);
+    }
+    return true;
+  }
+  if (event.ev !== "kd") {
+    return false;
+  }
+  const sc = event.sc;
+  const vk = event.vk;
+  const mods =
+    typeof event.mods === "number" && Number.isFinite(event.mods)
+      ? event.mods
+      : 0;
+  if (
+    typeof sc === "number" &&
+    sc > 0 &&
+    typeof vk === "number" &&
+    Number.isFinite(vk) &&
+    (mods & 0b1110) === 0 &&
+    !MODIFIER_VK_SET.has(vk)
+  ) {
+    if (hasKeyUpEvents) {
+      if (vk !== 8 && pressedVks.has(vk)) {
+        return true;
+      }
+      pressedVks.add(vk);
+    }
+    kdBuffer.push({ vk, mono: event.mono });
+    if (kdBuffer.length > KD_BUFFER_LIMIT) {
+      kdBuffer.shift();
+    }
+  }
+  return true;
+}
+
+function prepareCommitEvent(
+  event: RawEvent,
+  kdBuffer: KdEvent[],
+  imeTimeline: readonly ImeTimelineEntry[],
+): PreparedCommit | null {
+  const keys =
+    typeof event.keys === "number" && Number.isFinite(event.keys)
+      ? Math.floor(event.keys)
+      : 0;
+  if (keys <= 0 || typeof event.text !== "string") {
+    return null;
+  }
+
+  const cleanText = event.text.replace(PUA_RE, "");
+  const printableCount = countPrintable(cleanText);
+  if (printableCount === 0) {
+    return null;
+  }
+
+  const take = Math.min(keys, kdBuffer.length);
+  const slice = take > 0 ? kdBuffer.splice(kdBuffer.length - take, take) : [];
+  if (slice.length === 0 || printableCount > keys) {
+    return null;
+  }
+
+  const exeRaw =
+    typeof event.exe === "string" && event.exe.trim() !== ""
+      ? event.exe.trim()
+      : "unknown";
+  const zhLayoutId = resolveZhLayoutFromIme(
+    findActiveIme(imeTimeline, event.ts, event.mono),
+  );
+  const layoutId = detectLayoutId(cleanText, zhLayoutId);
+  const legacyLayout = detectLegacyLayoutId(cleanText);
+  return {
+    keys,
+    slice,
+    cleanText,
+    exeRaw,
+    layoutId,
+    legacyLayout,
+  };
+}
+
 function toEligibleCodePoint(
   vk: number,
   layoutId: KeyTraceLayoutId,
@@ -800,6 +868,7 @@ function accumulateCommit(
   let corrAnchorMono: number | null = null;
   let lastPoppedCp: number | null = null;
   let afterResetBs = prevCarry?.endedWithBs ?? false;
+  let afterBoundary = prevCarry != null;
 
   const abortPendingCorrection = (): void => {
     if (corrActive) {
@@ -839,6 +908,7 @@ function accumulateCommit(
         abortPendingCorrection();
         wordAnchorMono = null;
         afterResetBs = true;
+        afterBoundary = true;
         lastMono = kd.mono;
         continue;
       }
@@ -853,6 +923,9 @@ function accumulateCommit(
       const cp = toEligibleCodePoint(kd.vk, layoutId);
       if (cp != null) {
         stack.push({ cp, mono: kd.mono, iki: null, isCorrected: false });
+        afterBoundary = false;
+      } else {
+        afterBoundary = true;
       }
       continue;
     }
@@ -865,6 +938,7 @@ function accumulateCommit(
         }
         abortPendingCorrection();
         afterResetBs = true;
+        afterBoundary = true;
       } else if (stack.length > 0) {
         const popped = stack.pop()!;
         corrAnchorMono =
@@ -880,6 +954,7 @@ function accumulateCommit(
         }
         abortPendingCorrection();
         afterResetBs = true;
+        afterBoundary = true;
       }
       lastMono = kd.mono;
       continue;
@@ -892,6 +967,7 @@ function accumulateCommit(
       bsRun = 0;
       abortPendingCorrection();
       afterResetBs = false;
+      afterBoundary = true;
       lastMono = kd.mono;
       continue;
     }
@@ -909,12 +985,17 @@ function accumulateCommit(
       lastPoppedCp = null;
       bsRun = 0;
       afterResetBs = false;
+      afterBoundary = false;
     } else {
+      const maxIki = afterBoundary ? MAX_BOUNDARY_IKI_MS : MAX_FLUENT_IKI_MS;
       const iki =
-        !afterResetBs && stepGap != null && stepGap > 0 ? stepGap : null;
+        !afterResetBs && stepGap != null && stepGap > 0 && stepGap <= maxIki
+          ? stepGap
+          : null;
       stack.push({ cp, mono: kd.mono, iki, isCorrected: false });
       bsRun = 0;
       afterResetBs = false;
+      afterBoundary = false;
     }
     lastMono = kd.mono;
   }
@@ -942,6 +1023,16 @@ function getOrCreateKeyStat(
   return stat;
 }
 
+type WeightedIkiSample = {
+  readonly value: number;
+  readonly weight: number;
+};
+
+function parseDayMs(day: string): number {
+  const parsed = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function computeMedianIki(samples: readonly number[]): number {
   if (samples.length === 0) {
     return 0;
@@ -952,6 +1043,48 @@ function computeMedianIki(samples: readonly number[]): number {
     sorted.length % 2 === 1
       ? sorted[mid]
       : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  return Math.min(
+    MAX_TIME_TO_TYPE,
+    Math.max(MIN_TIME_TO_TYPE, Math.round(raw)),
+  );
+}
+
+function computeWeightedMedianIki(
+  entries: readonly WeightedIkiSample[],
+): number {
+  if (entries.length === 0) {
+    return 0;
+  }
+  const sorted = [...entries].sort((a, b) => a.value - b.value);
+  let totalWeight = 0;
+  for (const e of sorted) {
+    totalWeight += e.weight;
+  }
+  if (totalWeight <= 0) {
+    return 0;
+  }
+  const firstW = sorted[0].weight;
+  if (sorted.every((e) => Math.abs(e.weight - firstW) <= 1e-9)) {
+    const mid = Math.floor(sorted.length / 2);
+    const raw =
+      sorted.length % 2 === 1
+        ? sorted[mid].value
+        : Math.round((sorted[mid - 1].value + sorted[mid].value) / 2);
+    return Math.min(
+      MAX_TIME_TO_TYPE,
+      Math.max(MIN_TIME_TO_TYPE, Math.round(raw)),
+    );
+  }
+  const target = totalWeight / 2;
+  let acc = 0;
+  let raw = sorted[sorted.length - 1].value;
+  for (const e of sorted) {
+    acc += e.weight;
+    if (acc >= target) {
+      raw = e.value;
+      break;
+    }
+  }
   return Math.min(
     MAX_TIME_TO_TYPE,
     Math.max(MIN_TIME_TO_TYPE, Math.round(raw)),
@@ -1063,22 +1196,46 @@ function mergeBucketsToSummary(
 function buildWeakKeys(
   buckets: Iterable<DayBucket>,
   layoutId: KeyTraceLayoutId,
+  referenceDay: string,
 ): KeyTraceWeakKey[] {
-  const merged = new Map<number, KeyAccumulator>();
+  const refMs = parseDayMs(referenceDay);
+  const merged = new Map<
+    number,
+    {
+      hitCount: number;
+      missCount: number;
+      weightedHits: number;
+      weightedMisses: number;
+      sampleCount: number;
+      readonly ikiSamples: WeightedIkiSample[];
+    }
+  >();
   for (const b of buckets) {
     if (b.layoutId !== layoutId) {
       continue;
     }
+    const deltaDays = Math.max(0, (refMs - parseDayMs(b.day)) / 86_400_000);
+    const dayWeight = Math.pow(2, -deltaDays / KEYTRACE_WEAK_HALF_LIFE_DAYS);
     for (const [cp, stat] of b.keys) {
       let target = merged.get(cp);
       if (target == null) {
-        target = { hitCount: 0, missCount: 0, ikiSamples: [] };
+        target = {
+          hitCount: 0,
+          missCount: 0,
+          weightedHits: 0,
+          weightedMisses: 0,
+          sampleCount: 0,
+          ikiSamples: [],
+        };
         merged.set(cp, target);
       }
       target.hitCount += stat.hitCount;
       target.missCount += stat.missCount;
+      target.weightedHits += stat.hitCount * dayWeight;
+      target.weightedMisses += stat.missCount * dayWeight;
+      target.sampleCount += stat.ikiSamples.length;
       for (const s of stat.ikiSamples) {
-        target.ikiSamples.push(s);
+        target.ikiSamples.push({ value: s, weight: dayWeight });
       }
     }
   }
@@ -1087,18 +1244,22 @@ function buildWeakKeys(
     if (stat.hitCount <= 0) {
       continue;
     }
-    const medianIkiMs = computeMedianIki(stat.ikiSamples);
+    const medianIkiMs = computeWeightedMedianIki(stat.ikiSamples);
     const wpm =
       medianIkiMs > 0 ? Math.round((12000 / medianIkiMs) * 10) / 10 : 0;
+    const errorRate =
+      stat.weightedHits > 0
+        ? Math.min(1, stat.weightedMisses / stat.weightedHits)
+        : 0;
     out.push({
       letter: String.fromCodePoint(cp).toUpperCase(),
       codePoint: cp,
       hits: stat.hitCount,
       misses: stat.missCount,
-      errorRate: stat.missCount / stat.hitCount,
+      errorRate,
       medianIkiMs,
       wpm,
-      samples: stat.ikiSamples.length,
+      samples: stat.sampleCount,
     });
   }
   out.sort((a, b) => {
@@ -1197,6 +1358,7 @@ export async function readKeyTraceDashboard(options?: {
 
   let currentSessionKey: string | null = null;
   let kdBuffer: KdEvent[] = [];
+  let pressedVks = new Set<number>();
   let lastEventTs: number | null = null;
   const imeTimeline: ImeTimelineEntry[] = [];
 
@@ -1213,6 +1375,7 @@ export async function readKeyTraceDashboard(options?: {
     }
     collectImeMetaEvents(dayEvents, imeTimeline);
     dayEvents.sort(compareEvents);
+    const hasKeyUpEvents = dayEvents.some((ev) => ev.ev === "ku");
 
     for (const event of dayEvents) {
       if (
@@ -1231,28 +1394,10 @@ export async function readKeyTraceDashboard(options?: {
       if (sessionKey != null && sessionKey !== currentSessionKey) {
         currentSessionKey = sessionKey;
         kdBuffer = [];
+        pressedVks = new Set<number>();
       }
 
-      if (event.ev === "kd") {
-        const sc = event.sc;
-        const vk = event.vk;
-        const mods =
-          typeof event.mods === "number" && Number.isFinite(event.mods)
-            ? event.mods
-            : 0;
-        if (
-          typeof sc === "number" &&
-          sc > 0 &&
-          typeof vk === "number" &&
-          Number.isFinite(vk) &&
-          (mods & 0b1110) === 0 &&
-          !MODIFIER_VK_SET.has(vk)
-        ) {
-          kdBuffer.push({ vk, mono: event.mono });
-          if (kdBuffer.length > KD_BUFFER_LIMIT) {
-            kdBuffer.shift();
-          }
-        }
+      if (handleBufferKeyEvent(event, kdBuffer, pressedVks, hasKeyUpEvents)) {
         continue;
       }
 
@@ -1260,39 +1405,11 @@ export async function readKeyTraceDashboard(options?: {
         continue;
       }
 
-      const keys =
-        typeof event.keys === "number" && Number.isFinite(event.keys)
-          ? Math.floor(event.keys)
-          : 0;
-      if (keys <= 0) {
+      const prepared = prepareCommitEvent(event, kdBuffer, imeTimeline);
+      if (prepared == null || prepared.layoutId == null) {
         continue;
       }
-
-      const take = Math.min(keys, kdBuffer.length);
-      const slice =
-        take > 0 ? kdBuffer.splice(kdBuffer.length - take, take) : [];
-      if (slice.length === 0 || typeof event.text !== "string") {
-        continue;
-      }
-
-      const cleanText = event.text.replace(PUA_RE, "");
-      const printableCount = countPrintable(cleanText);
-      if (printableCount === 0 || printableCount > keys) {
-        continue;
-      }
-
-      const zhLayoutId = resolveZhLayoutFromIme(
-        findActiveIme(imeTimeline, event.ts, event.mono),
-      );
-      const layoutId = detectLayoutId(cleanText, zhLayoutId);
-      if (layoutId == null) {
-        continue;
-      }
-
-      const exeRaw =
-        typeof event.exe === "string" && event.exe.trim() !== ""
-          ? event.exe.trim()
-          : "unknown";
+      const { slice, cleanText, exeRaw, layoutId } = prepared;
       if (IGNORED_DISPLAY_EXES.has(exeRaw.toLowerCase())) {
         continue;
       }
@@ -1392,7 +1509,14 @@ export async function readKeyTraceDashboard(options?: {
   );
 
   const dayKeys = [...new Set(allBuckets.map((b) => b.day))].sort();
-  const daily: KeyTraceDailyEntry[] = dayKeys.slice(-daysLimit).map((day) => {
+  const recentDayKeys = dayKeys.slice(-daysLimit);
+  const recentDaySet = new Set(recentDayKeys);
+  const recentBuckets = allBuckets.filter((b) => recentDaySet.has(b.day));
+  const latestDay =
+    recentDayKeys.length > 0
+      ? recentDayKeys[recentDayKeys.length - 1]
+      : todayDate;
+  const daily: KeyTraceDailyEntry[] = recentDayKeys.map((day) => {
     const sum = mergeBucketsToSummary(
       allBuckets.filter((b) => b.day === day),
       commitsByDay.get(day) ?? 0,
@@ -1453,12 +1577,12 @@ export async function readKeyTraceDashboard(options?: {
     daily,
     apps,
     weakKeys: {
-      "zh-sp": buildWeakKeys(allBuckets, "zh-sp"),
-      "zh-sp-zrm": buildWeakKeys(allBuckets, "zh-sp-zrm"),
-      "zh-sp-ms": buildWeakKeys(allBuckets, "zh-sp-ms"),
-      "zh-sp-sg": buildWeakKeys(allBuckets, "zh-sp-sg"),
-      "zh-qp": buildWeakKeys(allBuckets, "zh-qp"),
-      "en-us": buildWeakKeys(allBuckets, "en-us"),
+      "zh-sp": buildWeakKeys(recentBuckets, "zh-sp", latestDay),
+      "zh-sp-zrm": buildWeakKeys(recentBuckets, "zh-sp-zrm", latestDay),
+      "zh-sp-ms": buildWeakKeys(recentBuckets, "zh-sp-ms", latestDay),
+      "zh-sp-sg": buildWeakKeys(recentBuckets, "zh-sp-sg", latestDay),
+      "zh-qp": buildWeakKeys(recentBuckets, "zh-qp", latestDay),
+      "en-us": buildWeakKeys(recentBuckets, "en-us", latestDay),
     },
     recentCorrections: recentCorrections.slice(-20).reverse(),
     recentCommits: recentCommits.slice(-15).reverse(),

@@ -281,7 +281,7 @@ def open_context(
             init_items[k] = str(v)
     if keytrace_sync_ts is not None:
         init_items["keybr.keytrace.lastSyncedTs"] = str(keytrace_sync_ts)
-        init_items["keybr.keytrace.syncVersion"] = "4"
+        init_items["keybr.keytrace.syncVersion"] = "5"
 
     if init_items:
         # Run only once on initial document load (guard with sessionStorage flag) so later in-page localStorage edits persist across reloads.

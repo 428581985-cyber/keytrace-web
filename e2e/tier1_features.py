@@ -2286,6 +2286,137 @@ def t1_f14_04_zh_unfocused_blur_hides_caret_and_clears_on_focus(
         _assert_zh_focused_sharp_state(page)
 
 
+def t1_f14_05_time_decay_mastery_recovery_and_v5_keytrace_calibration(
+    browser: Browser, base_url: str, keytrace_dir: str | None = None
+) -> None:
+    today_str = time.strftime("%Y-%m-%d", time.localtime())
+    now_ms = int(time.time() * 1000) - 30_000
+    created_file = None
+    if keytrace_dir is not None:
+        # Build KeyTrace events with an 800ms post-Space pause before 'q' (+150ms fluent keys after):
+        # v5 parser must exclude the >600ms post-Space thinking pause and return syncVersion=5.
+        session_start = now_ms - 1000
+        events: list[dict[str, object]] = [
+            {
+                "v": 1,
+                "ev": "meta",
+                "ts": session_start,
+                "mono": 100.0,
+                "sid": 1,
+                "sessionStartTs": session_start,
+                "exe": "notepad.exe",
+                "text": "ime=shuangpin/xiaohe",
+            }
+        ]
+        seq = [
+            (72, 1000),  # h
+            (65, 1150),  # a
+            (79, 1300),  # o
+            (32, 1450),  # Space boundary
+            (81, 2250),  # q (+800ms post-Space pause -> dropped!)
+            (73, 2400),  # i (+150ms fluent)
+            (78, 2550),  # n (+150ms fluent)
+            (71, 2700),  # g (+150ms fluent)
+            (81, 2850),  # q (+150ms fluent)
+            (73, 3000),  # i (+150ms fluent)
+            (84, 3150),  # t (+150ms fluent)
+            (73, 3300),  # i (+150ms fluent)
+        ]
+        for idx, (vk, mono) in enumerate(seq):
+            events.append(
+                {
+                    "v": 1,
+                    "ev": "kd",
+                    "ts": now_ms + idx * 150,
+                    "mono": mono,
+                    "sid": 1,
+                    "sessionStartTs": session_start,
+                    "exe": "notepad.exe",
+                    "sc": 30,
+                    "vk": vk,
+                    "mods": 0,
+                }
+            )
+        events.append(
+            {
+                "v": 1,
+                "ev": "commit",
+                "ts": now_ms + 4000,
+                "mono": 3400.0,
+                "sid": 1,
+                "sessionStartTs": session_start,
+                "exe": "notepad.exe",
+                "text": "好心情其提",
+                "keys": len(seq),
+            }
+        )
+        created_file = write_keytrace_jsonl(Path(keytrace_dir), today_str, events)
+
+    try:
+        if created_file is not None:
+            status_sync, sync_json = http_get_json(f"{base_url}/_/sync/keytrace?since=0&migrate=1")
+            assert status_sync == 200 and sync_json.get("syncVersion") == 5, sync_json
+            zh_recs = [r for r in sync_json.get("records", []) if r.get("l") == "zh-sp"]
+            assert len(zh_recs) >= 1, sync_json
+            q_stat = zh_recs[-1]["h"].get(str(ord("q")))
+            assert q_stat is not None and q_stat["t"] == 150, f"Expected post-space 800ms dropped, got {q_stat}"
+
+        # Seed 21-day-old high-error slow KeyTrace zh-sp history + recent clean web practice -> tile 'T' recovers green!
+        old_ts = now_ms - 21 * 86_400_000
+        old_kt = make_result_json(
+            "zh-sp",
+            ts=old_ts,
+            length=200,
+            time_ms=100_000,
+            errors=40,
+            histogram={
+                ord("i"): (60, 0, 200),
+                ord("u"): (60, 0, 200),
+                ord("t"): (200, 40, 700),
+            },
+            mode="keytrace",
+        )
+        clean_sessions = [
+            make_result_json(
+                "zh-sp",
+                ts=now_ms - (6 - i) * 60_000,
+                length=60,
+                time_ms=10_000,
+                errors=0,
+                histogram={
+                    ord("i"): (20, 0, 180),
+                    ord("u"): (20, 0, 180),
+                    ord("t"): (25, 0, 150),
+                },
+                mode="generated",
+            )
+            for i in range(6)
+        ]
+
+        with open_context(
+            browser,
+            base_url,
+            settings={
+                "keyboard.language": "zh-sp",
+                "keyboard.layout": "zh-sp",
+                "lesson.zhTargetSpeed": 175,
+                "lesson.keytraceMode": "standalone",
+            },
+        ) as (_, page, _, _):
+            page.goto(f"{base_url}/profile", wait_until="domcontentloaded")
+            seed_indexeddb_results(page, [old_kt, *clean_sessions])
+            page.reload(wait_until="domcontentloaded")
+
+            tiles = read_mastery_tiles(page)
+            legend = read_mastery_legend(page)
+            assert rgb_close(tiles["T"]["bg"], legend["done"]), (
+                f"Expected T mastery to recover green after 21d decay + clean sessions: tiles[T]={tiles['T']}, legend={legend}"
+            )
+    finally:
+        if created_file is not None and created_file.exists():
+            created_file.unlink(missing_ok=True)
+
+
 TIER1_TESTS: list[tuple[str, Callable[..., None]]] = [
     ("t1_f1_01_profile_high_error_fast_key_not_green", t1_f1_01_profile_high_error_fast_key_not_green),
     ("t1_f1_02_profile_low_sample_fast_key_not_green", t1_f1_02_profile_low_sample_fast_key_not_green),
@@ -2356,5 +2487,9 @@ TIER1_TESTS: list[tuple[str, Callable[..., None]]] = [
     (
         "t1_f14_04_zh_unfocused_blur_hides_caret_and_clears_on_focus",
         t1_f14_04_zh_unfocused_blur_hides_caret_and_clears_on_focus,
+    ),
+    (
+        "t1_f14_05_time_decay_mastery_recovery_and_v5_keytrace_calibration",
+        t1_f14_05_time_decay_mastery_recovery_and_v5_keytrace_calibration,
     ),
 ]

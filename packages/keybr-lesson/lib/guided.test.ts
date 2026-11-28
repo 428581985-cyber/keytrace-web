@@ -5,13 +5,17 @@ import { type Language, Layout, loadKeyboard } from "@keybr/keyboard";
 import { FakePhoneticModel, Filter, Letter } from "@keybr/phonetic-model";
 import { LCG } from "@keybr/rand";
 import {
+  KEY_STATS_HALF_LIFE_MS,
   type KeyStats,
   type KeyStatsMap,
   makeKeyStatsMap,
+  ResultFaker,
   speedToTime,
+  TextType,
 } from "@keybr/result";
 import { Settings } from "@keybr/settings";
-import { deepEqual, equal } from "rich-assert";
+import { Histogram } from "@keybr/textinput";
+import { deepEqual, equal, isTrue } from "rich-assert";
 import { fakeKeyStatsMap, printLessonKeys } from "./fakes.ts";
 import { GuidedLesson, stripAlphabeticalTail } from "./guided.ts";
 import { LessonKey } from "./key.ts";
@@ -1529,5 +1533,70 @@ describe("standalone progressive Chinese curriculum vs KeyTrace unlockAllKeys", 
       text.includes("zaz") || text.includes("zeze") || text.includes("zozo"),
       true,
     );
+  });
+
+  it("time-decays stale KeyTrace misses when computing GuidedLesson key confidence and ZH sampling weights", () => {
+    const keyboard = loadKeyboard(Layout.ZH_SP);
+    const letters = [
+      new Letter(0x0061, 0.9, "A"),
+      new Letter(0x0065, 0.9, "E"),
+      new Letter(0x0074, 0.4, "T"),
+    ];
+    class TinyZhModel extends FakePhoneticModel {
+      override readonly language = keyboard.layout.language;
+      override readonly letters = letters;
+    }
+    const wordList = ["aa", "ae", "ea", "te", "ta", "et"];
+    const model = new TinyZhModel(wordList);
+    const faker = new ResultFaker({ letters });
+    const baseTs = 1_700_000_000_000;
+
+    // 21 days ago: 't' was slow and had high KeyTrace misses.
+    const oldKt = faker.nextResult({
+      layout: Layout.ZH_SP,
+      textType: TextType.KEYTRACE,
+      timeStamp: baseTs,
+      histogram: new Histogram([
+        { codePoint: 0x0061, hitCount: 80, missCount: 0, timeToType: 180 },
+        { codePoint: 0x0065, hitCount: 80, missCount: 0, timeToType: 180 },
+        { codePoint: 0x0074, hitCount: 200, missCount: 40, timeToType: 700 },
+      ]),
+    });
+
+    const settings = new Settings().set(lessonProps.targetSpeed, 175);
+    const lesson = new GuidedLesson(settings, keyboard, model, wordList, {
+      unlockAllKeys: true,
+    });
+
+    // Without recent clean practice, 't' is focused and dominates word generation.
+    const staleStats = makeKeyStatsMap(letters, [oldKt]);
+    const staleKeys = lesson.update(staleStats, { persistFocus: false });
+    equal(staleKeys.findFocusedKey()?.letter.codePoint, 0x0074);
+
+    // After clean deliberate web practice 21 days later, 't' recovers confidence >= 1
+    // and focus moves away so 't' no longer dominates generation.
+    const cleanRecent = Array.from({ length: 4 }, (_, i) =>
+      faker.nextResult({
+        layout: Layout.ZH_SP,
+        textType: TextType.GENERATED,
+        timeStamp: baseTs + 3 * KEY_STATS_HALF_LIFE_MS + i * 60_000,
+        histogram: new Histogram([
+          { codePoint: 0x0061, hitCount: 30, missCount: 0, timeToType: 180 },
+          { codePoint: 0x0065, hitCount: 30, missCount: 0, timeToType: 180 },
+          { codePoint: 0x0074, hitCount: 40, missCount: 0, timeToType: 170 },
+        ]),
+      }),
+    );
+
+    const recoveredStats = makeKeyStatsMap(letters, [oldKt, ...cleanRecent]);
+    const recoveredKeys = lesson.update(recoveredStats, {
+      persistFocus: false,
+    });
+    const tConfidence = recoveredKeys.find(0x0074)?.confidence ?? 0;
+    isTrue(
+      tConfidence >= 1,
+      `Expected 21d decay + clean sessions to restore T confidence >= 1, got ${tConfidence}`,
+    );
+    equal(recoveredKeys.findFocusedKey(), null);
   });
 });

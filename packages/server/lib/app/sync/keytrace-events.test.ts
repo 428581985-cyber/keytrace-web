@@ -36,6 +36,7 @@ function kd(
     readonly sessionStartTs?: number;
     readonly sc?: number;
     readonly mods?: number;
+    readonly exe?: string;
   },
 ): Record<string, unknown> {
   return {
@@ -50,6 +51,7 @@ function kd(
     ...(opts?.sessionStartTs != null
       ? { sessionStartTs: opts.sessionStartTs }
       : {}),
+    ...(opts?.exe != null ? { exe: opts.exe } : {}),
   };
 }
 
@@ -61,6 +63,7 @@ function commit(
   opts?: {
     readonly sid?: string | number;
     readonly sessionStartTs?: number;
+    readonly exe?: string;
   },
 ): Record<string, unknown> {
   return {
@@ -74,6 +77,7 @@ function commit(
     ...(opts?.sessionStartTs != null
       ? { sessionStartTs: opts.sessionStartTs }
       : {}),
+    ...(opts?.exe != null ? { exe: opts.exe } : {}),
   };
 }
 
@@ -82,7 +86,7 @@ test("missing events directory returns empty result gracefully", async () => {
   const data = await readKeyTraceSyncData({ eventsDir: missingDir });
   deepEqual(data, {
     available: false,
-    syncVersion: 4,
+    syncVersion: 5,
     records: [],
     latestTs: 0,
     daysScanned: 0,
@@ -187,7 +191,7 @@ test("reads .jsonl and .jsonl.gz into valid zh-sp and en-us Result JSON", async 
     const data = await readKeyTraceSyncData({ eventsDir: dir });
 
     equal(data.available, true);
-    equal(data.syncVersion, 4);
+    equal(data.syncVersion, 5);
     equal(data.daysScanned, 2);
     equal(data.records.length, 2);
     equal(data.latestTs, 1700086405000);
@@ -352,7 +356,7 @@ test("GET /_/sync/keytrace endpoint responds without auth and supports since que
       daysScanned: number;
     }>();
     equal(body1.available, true);
-    equal(body1.syncVersion, 4);
+    equal(body1.syncVersion, 5);
     equal(body1.records.length, 1);
     equal(body1.latestTs, 5000);
     equal(body1.daysScanned, 1);
@@ -618,7 +622,7 @@ test("migrate=1 endpoint returns commitKeys covering legacy commits", async () =
       commitKeys: string[];
     }>();
     equal(body.available, true);
-    equal(body.syncVersion, 4);
+    equal(body.syncVersion, 5);
     equal(body.records.length, 1);
     equal(body.records[0].m, "keytrace");
     isTrue(body.commitKeys.includes("en-us:10"));
@@ -1519,7 +1523,7 @@ test("KEYTRACE_ENABLED=false disables FS scans and returns available: false from
     });
     deepEqual(syncDirect, {
       available: false,
-      syncVersion: 4,
+      syncVersion: 5,
       records: [],
       latestTs: 0,
       daysScanned: 0,
@@ -1550,7 +1554,7 @@ test("KEYTRACE_ENABLED=false disables FS scans and returns available: false from
       commitKeys: string[];
     }>();
     equal(syncBody.available, false);
-    equal(syncBody.syncVersion, 4);
+    equal(syncBody.syncVersion, 5);
     equal(syncBody.records.length, 0);
     equal(syncBody.daysScanned, 0);
     deepEqual(syncBody.commitKeys, []);
@@ -1606,7 +1610,7 @@ test("migrate=1 includes layout-specific commitKeys for zh-qp v2 -> v3 migration
       includeCommitKeys: true,
     });
     equal(data.available, true);
-    equal(data.syncVersion, 4);
+    equal(data.syncVersion, 5);
     equal(data.records.length, 1);
     equal(data.records[0].l, "zh-qp");
     equal(data.records[0].m, "keytrace");
@@ -1651,7 +1655,7 @@ test("aligns bucket.activeMs with surviving keystrokes and excludes non-eligible
     await writeFile(join(dir, "2026-11-27.jsonl"), jsonl(lines), "utf8");
 
     const sync = await readKeyTraceSyncData({ eventsDir: dir });
-    equal(sync.syncVersion, 4);
+    equal(sync.syncVersion, 5);
     equal(sync.records.length, 1);
     const rec = sync.records[0];
     equal(rec.n, 10);
@@ -1664,6 +1668,177 @@ test("aligns bucket.activeMs with surviving keystrokes and excludes non-eligible
     equal(dash.overall.activeMs, 1700);
     // 10 keys / 5 / (1700 / 60000) = 70.588 -> 70.6 WPM
     equal(dash.overall.avgWpm, 70.6);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("filters held-key auto-repeats when ku events exist while preserving deliberate double taps", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-repeat-ku-"));
+  try {
+    const ku = (vk: number, mono: number, ts: number) => ({
+      v: 1,
+      ts,
+      mono,
+      ev: "ku",
+      exe: "notepad.exe",
+      sc: 30,
+      vk,
+      mods: 0,
+    });
+    const lines = [
+      kd(72, 100, 1000), // h
+      ku(72, 140, 1040),
+      kd(69, 250, 1150), // e
+      ku(69, 290, 1190),
+      kd(76, 400, 1300), // l (tap 1)
+      kd(76, 450, 1350), // l (OS auto-repeat without ku -> filtered!)
+      kd(76, 490, 1390), // l (OS auto-repeat -> filtered!)
+      ku(76, 520, 1420),
+      kd(76, 620, 1520), // l (deliberate tap 2 after ku -> kept!)
+      ku(76, 660, 1560),
+      kd(79, 770, 1670), // o
+      ku(79, 810, 1710),
+      kd(32, 920, 1820), // Space
+      ku(32, 950, 1850),
+      kd(87, 1100, 2000), // w
+      ku(87, 1140, 2040),
+      kd(79, 1250, 2150), // o
+      ku(79, 1290, 2190),
+      kd(82, 1400, 2300), // r
+      ku(82, 1440, 2340),
+      kd(76, 1550, 2450), // l
+      ku(76, 1590, 2490),
+      kd(68, 1700, 2600), // d
+      ku(68, 1740, 2640),
+      commit("hello world", 13, 1760, 2700),
+    ];
+    await writeFile(join(dir, "2026-11-28.jsonl"), jsonl(lines), "utf8");
+
+    const sync = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(sync.records.length, 1);
+    const rec = sync.records[0];
+    equal(rec.n, 10); // "helloworld" -> double 'l' in "hello" (2) + 'l' in "world" (1) = 3, NOT 5!
+    equal(rec.h[108]?.h, 3);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("excludes >600ms post-boundary and >1200ms intra-word thinking pauses from single-key timeToType", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-pauses-"));
+  try {
+    const lines = [
+      kd(65, 100, 1000), // a (anchor)
+      kd(66, 250, 1150), // b (+150)
+      kd(67, 1750, 2650), // c (+1500ms intra-word thinking pause > 1200ms -> dropped)
+      kd(68, 1900, 2800), // d (+150)
+      kd(32, 2050, 2950), // Space boundary
+      kd(84, 3050, 3950), // t (+1000ms post-Space > 600ms -> dropped)
+      kd(69, 3200, 4100), // e (+150)
+      kd(32, 3350, 4250), // Space boundary
+      kd(81, 3750, 4650), // q (+400ms post-Space <= 600ms -> kept!)
+      kd(85, 3900, 4800), // u (+150)
+      kd(73, 4050, 4950), // i (+150)
+      kd(84, 4200, 5100), // t (+150)
+      commit("abcd te quit", 12, 4250, 5200),
+    ];
+    await writeFile(join(dir, "2026-11-28.jsonl"), jsonl(lines), "utf8");
+
+    const sync = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(sync.records.length, 1);
+    const rec = sync.records[0];
+    equal(rec.n, 10);
+    equal(rec.h[99]?.t, 0); // 'c' 1500ms intra-word pause dropped
+    equal(rec.h[113]?.t, 400); // 'q' 400ms post-Space kept
+    equal(rec.h[116]?.t, 150); // 't' keeps only 150ms fluent IKI, not polluted by 1000ms pause
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("excludes LockApp.exe from sync and preserves kdBuffer across glyph-only commits", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-lock-glyph-"));
+  try {
+    const lines = [
+      // LockApp keys + commit should be excluded from sync results without bleeding into notepad.
+      kd(65, 100, 1000, { exe: "LockApp.exe" }),
+      kd(66, 200, 1100, { exe: "LockApp.exe" }),
+      commit("ab", 2, 250, 1200, { exe: "LockApp.exe" }),
+
+      // User starts typing in Code.exe, then a glyph-only PUA commit arrives (must NOT consume kdBuffer).
+      kd(67, 500, 2000, { exe: "Code.exe" }), // c
+      kd(68, 650, 2150, { exe: "Code.exe" }), // d
+      kd(69, 800, 2300, { exe: "Code.exe" }), // e
+      commit("\uE001\uE002", 2, 820, 2320, { exe: "Code.exe" }),
+      kd(70, 950, 2450, { exe: "Code.exe" }), // f
+      kd(71, 1100, 2600, { exe: "Code.exe" }), // g
+      kd(72, 1250, 2750, { exe: "Code.exe" }), // h
+      kd(73, 1400, 2900, { exe: "Code.exe" }), // i
+      kd(74, 1550, 3050, { exe: "Code.exe" }), // j
+      kd(75, 1700, 3200, { exe: "Code.exe" }), // k
+      kd(76, 1850, 3350, { exe: "Code.exe" }), // l
+      commit("cdefghijkl", 10, 1900, 3400, { exe: "Code.exe" }),
+    ];
+    await writeFile(join(dir, "2026-11-28.jsonl"), jsonl(lines), "utf8");
+
+    const sync = await readKeyTraceSyncData({ eventsDir: dir });
+    equal(sync.records.length, 1);
+    const rec = sync.records[0];
+    equal(rec.n, 10);
+    equal(rec.h[97], undefined); // LockApp 'a' excluded
+    equal(rec.h[99]?.h, 1); // 'c' survived PUA-only commit
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("readKeyTraceDashboard restricts weakKeys to days window with 7-day half-life decay", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "keytrace-dash-decay-"));
+  try {
+    // Day 1 (outside days=7 window) AND Day 2 (21 days before Day 3, inside if days=30, outweighed if days=30)
+    const oldSlowErrors = [
+      kd(72, 100, 1000), // h
+      kd(88, 250, 1150), // x (typo)
+      kd(8, 400, 1300), // BS
+      kd(86, 550, 1450), // v (miss on v)
+      ...Array.from({ length: 8 }, (_, i) =>
+        kd(65 + i, 700 + i * 150, 1600 + i * 150),
+      ),
+      commit("hvabcdefgh", 12, 1950, 2900),
+    ];
+    await writeFile(
+      join(dir, "2026-11-01.jsonl"),
+      jsonl(oldSlowErrors),
+      "utf8",
+    );
+
+    const recentClean = [
+      kd(86, 100, 1700000001000), // v
+      kd(86, 250, 1700000001150), // v
+      kd(86, 400, 1700000001300), // v
+      kd(86, 550, 1700000001450), // v
+      ...Array.from({ length: 8 }, (_, i) =>
+        kd(65 + i, 700 + i * 150, 1700000001600 + i * 150),
+      ),
+      commit("vvvvabcdefgh", 12, 1950, 1700000003000),
+    ];
+    await writeFile(join(dir, "2026-11-28.jsonl"), jsonl(recentClean), "utf8");
+
+    // 1) Window days=1 excludes 2026-11-01 completely from weakKeys.
+    const dash1 = await readKeyTraceDashboard({ eventsDir: dir, days: 1 });
+    const v1 = dash1.weakKeys["en-us"].find((k) => k.letter === "V");
+    equal(v1?.misses, 0);
+    equal(v1?.errorRate, 0);
+
+    // 2) Window days=30 includes 2026-11-01, but 27-day decay strongly damps its errorRate.
+    const dash30 = await readKeyTraceDashboard({ eventsDir: dir, days: 30 });
+    const v30 = dash30.weakKeys["en-us"].find((k) => k.letter === "V");
+    equal(v30?.misses, 1);
+    isTrue(
+      (v30?.errorRate ?? 1) < 0.05,
+      `Expected 27d time decay to damp errorRate < 0.05, got ${v30?.errorRate}`,
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

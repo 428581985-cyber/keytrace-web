@@ -1,6 +1,10 @@
 import { clamp } from "@keybr/lang";
-import { type KeySample, type KeyStats } from "./keystats.ts";
+import { computeTimeDecay, type KeySample, type KeyStats } from "./keystats.ts";
 import { speedToTime } from "./result.ts";
+import { TextType } from "./texttype.ts";
+
+const KEYTRACE_ERROR_WEIGHT = 0.35;
+const KEYTRACE_MAX_EFFECTIVE_HITS = 40;
 
 export type KeySampleSummary = {
   readonly totalHits: number;
@@ -14,12 +18,33 @@ export function summarizeKeySamples(
 ): KeySampleSummary {
   let totalHits = 0;
   let totalMisses = 0;
+  let refTs = 0;
+  for (const sample of keyStats.samples) {
+    if (sample.timeStamp > refTs) {
+      refTs = sample.timeStamp;
+    }
+  }
+  let weightedHits = 0;
+  let weightedMisses = 0;
   for (const sample of keyStats.samples) {
     totalHits += sample.hitCount;
     totalMisses += sample.missCount;
+    if (sample.hitCount <= 0) {
+      continue;
+    }
+    const ageMs = Math.max(0, refTs - sample.timeStamp);
+    const timeWeight = computeTimeDecay(ageMs);
+    const sourceScale =
+      sample.textType === TextType.KEYTRACE
+        ? Math.min(1, KEYTRACE_MAX_EFFECTIVE_HITS / sample.hitCount) *
+          KEYTRACE_ERROR_WEIGHT
+        : 1;
+    const w = timeWeight * sourceScale;
+    weightedHits += sample.hitCount * w;
+    weightedMisses += sample.missCount * w;
   }
   const errorRate =
-    totalHits > 0 ? clamp(totalMisses / totalHits, 0, 1) : 0;
+    weightedHits > 0 ? clamp(weightedMisses / weightedHits, 0, 1) : 0;
   return {
     totalHits,
     totalMisses,
@@ -37,8 +62,7 @@ export function computeSampleMastery(
     return null;
   }
   const speedRatio = clamp(speedToTime(targetSpeed) / timeToType, 0, 1);
-  const errorRate =
-    hitCount > 0 ? clamp(missCount / hitCount, 0, 1) : 0;
+  const errorRate = hitCount > 0 ? clamp(missCount / hitCount, 0, 1) : 0;
   const accuracyFactor = clamp(1 - Math.max(0, errorRate - 0.02) * 4, 0.2, 1);
   const sampleFactor =
     hitCount < 3 ? 0.5 + 0.5 * (Math.max(0, hitCount) / 3) : 1;

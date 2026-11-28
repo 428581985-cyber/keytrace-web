@@ -8,7 +8,7 @@ import {
 } from "@keybr/keyboard";
 import { Filter, Letter, type PhoneticModel } from "@keybr/phonetic-model";
 import { randomSample, type RNGStream } from "@keybr/rand";
-import { type KeyStatsMap } from "@keybr/result";
+import { type KeyStatsMap, summarizeKeySamples } from "@keybr/result";
 import { type Settings } from "@keybr/settings";
 import { isQuanpinIdiom } from "@keybr/textinput";
 import { Dictionary, filterWordList } from "./dictionary.ts";
@@ -462,13 +462,7 @@ export class GuidedLesson extends Lesson {
       const confidence = key.confidence;
       const slow = confidence != null && confidence < 1 ? 1 - confidence : 0;
 
-      let hit = 0;
-      let miss = 0;
-      for (const sample of key.samples) {
-        hit += sample.hitCount;
-        miss += sample.missCount;
-      }
-      const errorRate = hit + miss > 0 ? miss / (hit + miss) : 0;
+      const { errorRate } = summarizeKeySamples(key);
 
       let weight = 1 + SLOW_BOOST * slow + ERROR_BOOST * errorRate;
       if (focused != null && focused.letter.codePoint === codePoint) {
